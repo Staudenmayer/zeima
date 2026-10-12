@@ -26,6 +26,8 @@ use serde_json::Value;
 #[serde(rename_all = "camelCase", default)]
 pub struct Entry {
     pub id: String,
+    /// What kind of work (e.g. Meeting). `None` on old entries.
+    pub activity_id: Option<String>,
     pub project_id: Option<String>,
     pub start_at: i64,
     /// `None` while the timer runs.
@@ -186,13 +188,15 @@ pub struct SuggestRequest {
     pub query: String,
 }
 
-/// A quick-switch option. Choosing it starts the timer with these values.
+/// A quick-switch option. Choosing it starts the timer with these values;
+/// without `activity_id` the user picks the activity first.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Suggestion {
     pub label: String,
     /// Second line, e.g. an issue title.
     pub detail: Option<String>,
+    pub activity_id: Option<String>,
     pub project_id: Option<String>,
     pub tag_ids: Vec<String>,
     pub note: String,
@@ -203,6 +207,8 @@ pub struct Suggestion {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct NewEntry {
+    /// Optional for addons; entries the user creates always have one.
+    pub activity_id: Option<String>,
     pub project_id: Option<String>,
     pub start_at: i64,
     pub end_at: i64,

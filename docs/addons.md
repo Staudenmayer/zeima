@@ -159,7 +159,7 @@ Events about entries the addon created itself (with `host::create_entry`) are no
 
 Return the whole file as `content`; Time asks the user where to save it.
 
-**Quick switch.** `quickswitch_suggest` is called while the user types, with what they typed. Return up to 20 options. Choosing one starts the timer with its `projectId`, `tagIds` and `note`. Answer fast: suggestions that take longer than 0.8 s are dropped.
+**Quick switch.** `quickswitch_suggest` is called while the user types, with what they typed. Return up to 20 options. Choosing one starts the timer with its `activityId`, `projectId`, `tagIds` and `note`; without `activityId` the user picks the activity first. Answer fast: suggestions that take longer than 0.8 s are dropped.
 
 ## Host API
 

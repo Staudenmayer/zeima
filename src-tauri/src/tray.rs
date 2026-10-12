@@ -1,12 +1,14 @@
 //! Tray icon and menu. The icon shows the timer state (a green dot while
 //! tracking, an amber dot while paused) and the menu offers one-click
-//! switching between recent projects.
+//! switching between recently tracked activities.
 
+use std::collections::HashMap;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Manager, Wry};
-use time_core::model::{StartTimer, TimerState};
+
+use time_core::model::{RecentActivity, StartTimer, TimeEntry, TimerState};
 
 use crate::commands;
 use crate::events::DataKind;
@@ -37,6 +39,7 @@ struct View {
     status_line: String,
     /// Short elapsed time ("1:23") shown next to the icon where supported.
     title: Option<String>,
+    /// Menu id (`start:…`, see [`start_id`]) and label.
     recent: Vec<(String, String)>,
     window_visible: bool,
     lang: &'static str,
@@ -49,16 +52,16 @@ fn text(lang: &str, key: &str) -> &'static str {
         "not_tracking" => "Not tracking",
         "paused" if de => "Pausiert",
         "paused" => "Paused",
-        "no_project" if de => "Kein Projekt",
-        "no_project" => "No project",
+        "no_activity" if de => "Keine Tätigkeit",
+        "no_activity" => "No activity",
         "stop" if de => "Stoppen",
         "stop" => "Stop",
         "pause" if de => "Pausieren",
         "pause" => "Pause",
         "resume" if de => "Fortsetzen",
         "resume" => "Resume",
-        "start_no_project" if de => "Ohne Projekt starten",
-        "start_no_project" => "Start without project",
+        "start" if de => "Erfassung starten …",
+        "start" => "Start tracking …",
         "quickswitch" if de => "Schnellwechsel …",
         "quickswitch" => "Quick switch …",
         "show" if de => "Fenster anzeigen",
@@ -141,39 +144,74 @@ async fn load_view(app: &AppHandle) -> time_core::Result<View> {
     let state = app.state::<AppState>();
     let core = &state.core;
     let lang = state.settings().language();
-    let project_name = |id: Option<String>| async move {
-        match id {
-            Some(id) => core
-                .get_project(&id)
-                .await
-                .map(|p| p.name)
-                .unwrap_or_else(|_| text(lang, "no_project").into()),
-            None => text(lang, "no_project").into(),
-        }
-    };
-
-    let (status, status_line, title) = match core.timer_state().await? {
-        TimerState::Idle => (Status::Idle, text(lang, "not_tracking").to_string(), None),
-        TimerState::Running { entry } => {
-            let elapsed = format_elapsed(core.now_ms() - entry.start_at);
-            let name = project_name(entry.project_id).await;
-            (Status::Running, format!("{name} · {elapsed}"), Some(elapsed))
-        }
-        TimerState::Paused { resume_entry, .. } => {
-            let name = project_name(resume_entry.and_then(|e| e.project_id)).await;
-            (Status::Paused, format!("{} · {name}", text(lang, "paused")), None)
-        }
-    };
-    let recent = core
-        .recent_projects(RECENT_LIMIT)
+    let activities: HashMap<String, String> = core
+        .list_activities(true)
+        .await?
+        .into_iter()
+        .map(|a| (a.id, a.name))
+        .collect();
+    let projects: HashMap<String, String> = core
+        .list_projects(true)
         .await?
         .into_iter()
         .map(|p| {
             let label = match &p.alias {
                 Some(alias) => format!("{} ({alias})", p.name),
-                None => p.name.clone(),
+                None => p.name,
             };
             (p.id, label)
+        })
+        .collect();
+    let tags: HashMap<String, String> = core
+        .list_tags()
+        .await?
+        .into_iter()
+        .map(|t| (t.id, t.name))
+        .collect();
+    // "Development · Website (WEB) · #review"
+    let label = |activity_id: Option<&String>, project_id: Option<&String>, tag_ids: &[String]| {
+        let mut parts = vec![activity_id
+            .and_then(|id| activities.get(id))
+            .cloned()
+            .unwrap_or_else(|| text(lang, "no_activity").into())];
+        parts.extend(project_id.and_then(|id| projects.get(id)).cloned());
+        let tags: Vec<String> = tag_ids
+            .iter()
+            .filter_map(|id| tags.get(id))
+            .map(|t| format!("#{t}"))
+            .collect();
+        if !tags.is_empty() {
+            parts.push(tags.join(" "));
+        }
+        parts.join(" · ")
+    };
+    let entry_label = |e: &TimeEntry| label(e.activity_id.as_ref(), e.project_id.as_ref(), &e.tag_ids);
+
+    let (status, status_line, title) = match core.timer_state().await? {
+        TimerState::Idle => (Status::Idle, text(lang, "not_tracking").to_string(), None),
+        TimerState::Running { entry } => {
+            let elapsed = format_elapsed(core.now_ms() - entry.start_at);
+            (
+                Status::Running,
+                format!("{} · {elapsed}", entry_label(&entry)),
+                Some(elapsed),
+            )
+        }
+        TimerState::Paused { resume_entry, .. } => {
+            let line = match &resume_entry {
+                Some(e) => format!("{} · {}", text(lang, "paused"), entry_label(e)),
+                None => text(lang, "paused").to_string(),
+            };
+            (Status::Paused, line, None)
+        }
+    };
+    let recent = core
+        .recent_activities(RECENT_LIMIT)
+        .await?
+        .into_iter()
+        .map(|r| {
+            let label = label(Some(&r.activity_id), r.project_id.as_ref(), &r.tag_ids);
+            (start_id(&r), label)
         })
         .collect();
     Ok(View {
@@ -183,6 +221,34 @@ async fn load_view(app: &AppHandle) -> time_core::Result<View> {
         recent,
         window_visible: windows::main_visible(app),
         lang,
+    })
+}
+
+/// `start:<activity>|<project or empty>|<tag,tag>`; ids contain none of `|,`.
+fn start_id(r: &RecentActivity) -> String {
+    format!(
+        "start:{}|{}|{}",
+        r.activity_id,
+        r.project_id.as_deref().unwrap_or(""),
+        r.tag_ids.join(",")
+    )
+}
+
+fn parse_start_id(id: &str) -> Option<StartTimer> {
+    let mut parts = id.strip_prefix("start:")?.split('|');
+    let activity = parts.next().filter(|s| !s.is_empty())?;
+    let project = parts.next().filter(|s| !s.is_empty());
+    let tags = parts.next().unwrap_or("");
+    Some(StartTimer {
+        activity_id: Some(activity.to_string()),
+        project_id: project.map(str::to_string),
+        tag_ids: tags
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect(),
+        note: String::new(),
+        billable: None,
     })
 }
 
@@ -232,8 +298,8 @@ fn build_menu(app: &AppHandle, view: &View) -> tauri::Result<Menu<Wry>> {
         Status::Idle => {
             menu.append(&MenuItem::with_id(
                 app,
-                "start:",
-                text(lang, "start_no_project"),
+                "start",
+                text(lang, "start"),
                 true,
                 None::<&str>,
             )?)?;
@@ -283,7 +349,8 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
     let app = app.clone();
     match id.as_str() {
         "quit" => app.exit(0),
-        "quickswitch" => windows::show_quickswitch(&app),
+        // Starting needs an activity: the quick switch asks for it.
+        "quickswitch" | "start" => windows::show_quickswitch(&app),
         _ => {
             tauri::async_runtime::spawn(async move {
                 if let Err(err) = handle_async(&app, &id).await {
@@ -312,16 +379,10 @@ async fn handle_async(app: &AppHandle, id: &str) -> time_core::Result<()> {
             core.resume_timer().await?;
         }
         _ => {
-            let Some(project_id) = id.strip_prefix("start:") else {
+            let Some(start) = parse_start_id(id) else {
                 return Ok(());
             };
-            core.start_timer(StartTimer {
-                project_id: (!project_id.is_empty()).then(|| project_id.to_string()),
-                tag_ids: vec![],
-                note: String::new(),
-                billable: None,
-            })
-            .await?;
+            core.start_timer(start).await?;
         }
     }
     commands::changed(app, &[DataKind::Entry]).await;
@@ -368,6 +429,30 @@ mod tests {
         assert_eq!(format_elapsed(5 * 60_000 + 59_000), "0:05");
         assert_eq!(format_elapsed(12 * 3_600_000 + 30 * 60_000), "12:30");
         assert_eq!(format_elapsed(-1), "0:00");
+    }
+
+    #[test]
+    fn recent_menu_ids_round_trip() {
+        let full = RecentActivity {
+            activity_id: "a1".into(),
+            project_id: Some("p1".into()),
+            tag_ids: vec!["t1".into(), "t2".into()],
+        };
+        let start = parse_start_id(&start_id(&full)).unwrap();
+        assert_eq!(start.activity_id.as_deref(), Some("a1"));
+        assert_eq!(start.project_id.as_deref(), Some("p1"));
+        assert_eq!(start.tag_ids, ["t1", "t2"]);
+
+        let bare = RecentActivity {
+            activity_id: "a1".into(),
+            project_id: None,
+            tag_ids: vec![],
+        };
+        let start = parse_start_id(&start_id(&bare)).unwrap();
+        assert_eq!(start.project_id, None);
+        assert!(start.tag_ids.is_empty());
+        assert!(parse_start_id("start:||").is_none());
+        assert!(parse_start_id("stop").is_none());
     }
 
     #[test]

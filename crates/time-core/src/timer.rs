@@ -8,7 +8,9 @@ use sqlx::{Row, Sqlite};
 
 use crate::db::{Core, WriteTx};
 use crate::model::{EntryInput, EntrySource, Pause, PauseKind, Project, StartTimer, TimerState};
-use crate::repo::{fetch_entry, fetch_running, insert_entry, new_entry, update_entry_row};
+use crate::repo::{
+    check_entry_activity, fetch_entry, fetch_running, insert_entry, new_entry, update_entry_row,
+};
 use crate::{Error, Result};
 
 macro_rules! pause_columns {
@@ -153,9 +155,10 @@ impl Core {
     }
 
     /// Starts tracking. A running entry is stopped and an open pause is
-    /// closed at the same instant.
+    /// closed at the same instant. An activity is required.
     pub async fn start_timer(&self, start: StartTimer) -> Result<TimerState> {
         let mut tx = self.begin().await?;
+        check_entry_activity(&mut tx, start.activity_id.as_deref(), None).await?;
         stop_running(&mut tx).await?;
         close_pause(&mut tx).await?;
         start_entry(&mut tx, start).await?;
@@ -211,12 +214,14 @@ impl Core {
         };
         let start = match previous {
             Some(e) => StartTimer {
+                activity_id: e.activity_id,
                 project_id: e.project_id,
                 tag_ids: e.tag_ids,
                 note: e.note,
                 billable: Some(e.billable),
             },
             None => StartTimer {
+                activity_id: None,
                 project_id: None,
                 tag_ids: vec![],
                 note: String::new(),
@@ -308,6 +313,7 @@ async fn close_pause(tx: &mut WriteTx<'_>) -> Result<Option<Pause>> {
 
 async fn start_entry(tx: &mut WriteTx<'_>, start: StartTimer) -> Result<()> {
     let input = EntryInput {
+        activity_id: start.activity_id,
         project_id: start.project_id,
         start_at: tx.now(),
         end_at: None,
@@ -330,15 +336,30 @@ mod tests {
 
     use super::*;
     use crate::clock::ManualClock;
-    use crate::model::{BudgetPeriod, ProjectInput, ProjectStatus, TagInput};
+    use crate::model::{ActivityInput, BudgetPeriod, ProjectInput, ProjectStatus, RecentActivity, TagInput};
     use crate::summary::Range;
 
     const MIN: i64 = 60_000;
 
+    thread_local! {
+        // Each `#[tokio::test]` runs on its own thread.
+        static ACTIVITY: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    }
+
     async fn setup() -> (Core, Arc<ManualClock>) {
         let clock = Arc::new(ManualClock::new(1_700_000_000_000));
         let core = Core::open_in_memory(clock.clone()).await.unwrap();
+        let work = core.create_activity(activity("Work")).await.unwrap();
+        ACTIVITY.with(|a| *a.borrow_mut() = Some(work.id));
         (core, clock)
+    }
+
+    fn activity(name: &str) -> ActivityInput {
+        ActivityInput {
+            name: name.into(),
+            color: "#3b82f6".into(),
+            archived: false,
+        }
     }
 
     fn project(name: &str, alias: &str) -> ProjectInput {
@@ -359,6 +380,7 @@ mod tests {
 
     fn start(project_id: Option<&str>) -> StartTimer {
         StartTimer {
+            activity_id: ACTIVITY.with(|a| a.borrow().clone()),
             project_id: project_id.map(Into::into),
             tag_ids: vec![],
             note: String::new(),
@@ -445,6 +467,102 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(summary[0].total_ms, 20 * MIN, "pause time is not tracked");
+    }
+
+    #[tokio::test]
+    async fn starting_needs_a_live_activity() {
+        let (core, _) = setup().await;
+        let missing = core
+            .start_timer(StartTimer {
+                activity_id: None,
+                ..start(None)
+            })
+            .await;
+        assert!(matches!(missing, Err(Error::Validation { ref field, .. }) if field == "activityId"));
+
+        let old = core
+            .create_activity(ActivityInput {
+                archived: true,
+                ..activity("Old")
+            })
+            .await
+            .unwrap();
+        let archived = core
+            .start_timer(StartTimer {
+                activity_id: Some(old.id),
+                ..start(None)
+            })
+            .await;
+        assert!(matches!(archived, Err(Error::Validation { .. })));
+        assert_eq!(core.timer_state().await.unwrap(), TimerState::Idle);
+    }
+
+    #[tokio::test]
+    async fn activities_in_use_cannot_be_deleted() {
+        let (core, _) = setup().await;
+        let review = core.create_activity(activity("Review")).await.unwrap();
+        assert!(matches!(
+            core.create_activity(activity(" review ")).await,
+            Err(Error::Validation { .. })
+        ));
+        core.start_timer(StartTimer {
+            activity_id: Some(review.id.clone()),
+            ..start(None)
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            core.delete_activity(&review.id).await,
+            Err(Error::Conflict(_))
+        ));
+
+        let unused = core.create_activity(activity("Unused")).await.unwrap();
+        core.delete_activity(&unused.id).await.unwrap();
+        let names: Vec<_> = core
+            .list_activities(true)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|a| a.name)
+            .collect();
+        assert_eq!(names, ["Review", "Work"]);
+    }
+
+    #[tokio::test]
+    async fn recent_activities_are_distinct_combinations() {
+        let (core, clock) = setup().await;
+        let work = ACTIVITY.with(|a| a.borrow().clone()).unwrap();
+        let meeting = core.create_activity(activity("Meeting")).await.unwrap();
+        let a = core.create_project(project("A", "A")).await.unwrap();
+        for (activity_id, project) in [
+            (&work, Some(&a.id)),
+            (&meeting.id, None),
+            (&work, Some(&a.id)),
+            (&work, None),
+        ] {
+            core.start_timer(StartTimer {
+                activity_id: Some(activity_id.clone()),
+                ..start(project.map(String::as_str))
+            })
+            .await
+            .unwrap();
+            clock.advance(MIN);
+        }
+        let recent = core.recent_activities(10).await.unwrap();
+        let combo = |activity_id: &str, project_id: Option<&String>| RecentActivity {
+            activity_id: activity_id.into(),
+            project_id: project_id.cloned(),
+            tag_ids: vec![],
+        };
+        assert_eq!(
+            recent,
+            [
+                combo(&work, None),
+                combo(&work, Some(&a.id)),
+                combo(&meeting.id, None)
+            ]
+        );
+        assert_eq!(core.recent_activities(1).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

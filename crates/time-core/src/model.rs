@@ -132,6 +132,45 @@ pub struct TagInput {
     pub group_name: Option<String>,
 }
 
+/// What kind of work an entry is (e.g. Meeting, Development). Required on
+/// new entries; project and tags are optional.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct Activity {
+    pub id: String,
+    pub workspace_id: String,
+    pub name: String,
+    pub color: String,
+    /// Hidden from pickers; entries keep it.
+    pub archived: bool,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
+    pub created_at: i64,
+    #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityInput {
+    pub name: String,
+    pub color: String,
+    #[serde(default)]
+    pub archived: bool,
+}
+
+/// A recently tracked combination, offered for one-step restarts in the
+/// quick switch, the tray and the morning check-in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct RecentActivity {
+    pub activity_id: String,
+    pub project_id: Option<String>,
+    pub tag_ids: Vec<String>,
+}
+
 /// Kostenstelle: accounting unit time is allocated to.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -201,6 +240,9 @@ pub struct TimeEntry {
     pub id: String,
     pub workspace_id: String,
     pub user_id: String,
+    /// `None` only on entries recorded before activities existed (and
+    /// possibly on entries created by addons).
+    pub activity_id: Option<String>,
     pub project_id: Option<String>,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub start_at: i64,
@@ -233,6 +275,9 @@ impl TimeEntry {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct EntryInput {
+    /// Required for manual entries and edits.
+    #[serde(default)]
+    pub activity_id: Option<String>,
     pub project_id: Option<String>,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub start_at: i64,
@@ -246,6 +291,31 @@ pub struct EntryInput {
     /// `None` = resolve from the project, then the user's default.
     #[serde(default)]
     pub cost_center_id: Option<String>,
+}
+
+/// Changes applied to several entries at once (timesheet bulk actions).
+/// Unset fields keep each entry's value.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct EntryPatch {
+    pub activity_id: Option<String>,
+    /// Replace the project with `project_id` (`None` = no project).
+    pub set_project: bool,
+    pub project_id: Option<String>,
+    /// Added tags replace tags of the same group.
+    pub add_tag_ids: Vec<String>,
+    pub remove_tag_ids: Vec<String>,
+    pub billable: Option<bool>,
+}
+
+/// Outcome of a bulk action. Locked entries are skipped, not errors.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct BulkResult {
+    pub changed: u32,
+    pub skipped_locked: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -278,6 +348,9 @@ pub struct Pause {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub struct StartTimer {
+    /// Required.
+    #[serde(default)]
+    pub activity_id: Option<String>,
     pub project_id: Option<String>,
     pub tag_ids: Vec<String>,
     pub note: String,
@@ -530,6 +603,15 @@ impl TagInput {
     }
 }
 
+impl ActivityInput {
+    pub fn normalized(mut self) -> Result<Self> {
+        self.name = self.name.trim().to_string();
+        validate_name("name", &self.name)?;
+        validate_color(&self.color)?;
+        Ok(self)
+    }
+}
+
 pub const MAX_CODE_LEN: usize = 32;
 
 impl CostCenterInput {
@@ -580,6 +662,7 @@ impl EntryInput {
         }
         self.note = self.note.trim().to_string();
         validate_note(&self.note)?;
+        self.activity_id = trimmed_opt(&self.activity_id);
         self.tag_ids.sort();
         self.tag_ids.dedup();
         Ok(self)
@@ -641,6 +724,7 @@ mod tests {
     #[test]
     fn entry_input_checks_range_and_tz() {
         let e = EntryInput {
+            activity_id: None,
             project_id: None,
             start_at: 100,
             end_at: Some(50),

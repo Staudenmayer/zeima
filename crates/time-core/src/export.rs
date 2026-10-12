@@ -7,7 +7,7 @@ use chrono::{DateTime, Datelike, NaiveDate};
 use chrono_tz::Tz;
 
 use crate::locale::Formats;
-use crate::model::{CostCenter, Project, Tag};
+use crate::model::{Activity, CostCenter, Project, Tag};
 use crate::report::{Report, ReportGroup, ReportRow};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,14 +28,21 @@ pub struct Table {
 
 /// Names for ids found in reports.
 pub struct Lookup<'a> {
+    activities: HashMap<&'a str, &'a Activity>,
     projects: HashMap<&'a str, &'a Project>,
     tags: HashMap<&'a str, &'a Tag>,
     cost_centers: HashMap<&'a str, &'a CostCenter>,
 }
 
 impl<'a> Lookup<'a> {
-    pub fn new(projects: &'a [Project], tags: &'a [Tag], cost_centers: &'a [CostCenter]) -> Self {
+    pub fn new(
+        activities: &'a [Activity],
+        projects: &'a [Project],
+        tags: &'a [Tag],
+        cost_centers: &'a [CostCenter],
+    ) -> Self {
         Self {
+            activities: activities.iter().map(|a| (a.id.as_str(), a)).collect(),
             projects: projects.iter().map(|p| (p.id.as_str(), p)).collect(),
             tags: tags.iter().map(|t| (t.id.as_str(), t)).collect(),
             cost_centers: cost_centers.iter().map(|c| (c.id.as_str(), c)).collect(),
@@ -56,6 +63,7 @@ impl Texts {
 
     fn group(&self, g: ReportGroup) -> String {
         match g {
+            ReportGroup::Activity => self.t("Activity", "Tätigkeit"),
             ReportGroup::Project => self.t("Project", "Projekt"),
             ReportGroup::Tag => self.t("Tag", "Tag"),
             ReportGroup::CostCenter => self.t("Cost center", "Kostenstelle"),
@@ -89,6 +97,7 @@ fn cost_center_label(cc: &CostCenter) -> String {
 fn key_label(key: &Option<String>, by: ReportGroup, lookup: &Lookup, texts: &Texts) -> String {
     let Some(key) = key else {
         return match by {
+            ReportGroup::Activity => texts.t("No activity", "Keine Tätigkeit"),
             ReportGroup::Project => texts.t("No project", "Kein Projekt"),
             ReportGroup::Tag => texts.t("No tag", "Kein Tag"),
             ReportGroup::CostCenter => texts.t("No cost center", "Keine Kostenstelle"),
@@ -96,6 +105,10 @@ fn key_label(key: &Option<String>, by: ReportGroup, lookup: &Lookup, texts: &Tex
         };
     };
     match by {
+        ReportGroup::Activity => lookup
+            .activities
+            .get(key.as_str())
+            .map_or_else(|| key.clone(), |a| a.name.clone()),
         ReportGroup::Project => lookup
             .projects
             .get(key.as_str())
@@ -174,6 +187,7 @@ pub fn entries_table(report: &Report, lookup: &Lookup, tz: Tz, now: i64, f: &For
         texts.t("Start", "Beginn"),
         texts.t("End", "Ende"),
         texts.t("Hours", "Stunden"),
+        texts.t("Activity", "Tätigkeit"),
         texts.t("Project", "Projekt"),
         texts.t("Project code", "Projektnummer"),
         texts.t("Client", "Kunde"),
@@ -191,6 +205,7 @@ pub fn entries_table(report: &Report, lookup: &Lookup, tz: Tz, now: i64, f: &For
             let start = local(e.start_at);
             let end_ms = e.end_at.unwrap_or(now);
             let end = local(end_ms);
+            let activity = e.activity_id.as_deref().and_then(|id| lookup.activities.get(id));
             let project = e.project_id.as_deref().and_then(|id| lookup.projects.get(id));
             let cc = e
                 .cost_center_id
@@ -210,6 +225,7 @@ pub fn entries_table(report: &Report, lookup: &Lookup, tz: Tz, now: i64, f: &For
                     String::new()
                 }),
                 Cell::Hours(hours(end_ms - e.start_at)),
+                Cell::Text(activity.map(|a| a.name.clone()).unwrap_or_default()),
                 Cell::Text(project.map(|p| p.name.clone()).unwrap_or_default()),
                 Cell::Text(project.and_then(|p| p.alias.clone()).unwrap_or_default()),
                 Cell::Text(project.and_then(|p| p.client.clone()).unwrap_or_default()),

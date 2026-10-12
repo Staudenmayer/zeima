@@ -6,19 +6,21 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { errorMessage } from '@/lib/ipc'
 import { formatClock } from '@/lib/time'
+import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useTimerStore } from '@/stores/timer'
+import ActivityLabel from './ActivityLabel.vue'
 import ProjectDot from './ProjectDot.vue'
 import QuickSwitchPanel from './QuickSwitchPanel.vue'
 
 const timer = useTimerStore()
+const activities = useActivitiesStore()
 const projects = useProjectsStore()
 const switchOpen = ref(false)
 
-const project = computed(() => {
-  const id = timer.running?.projectId ?? timer.paused?.resumeEntry?.projectId ?? null
-  return id ? projects.byId.get(id) : null
-})
+const entry = computed(() => timer.running ?? timer.paused?.resumeEntry ?? null)
+const activity = computed(() => (entry.value?.activityId ? activities.byId.get(entry.value.activityId) : null))
+const project = computed(() => (entry.value?.projectId ? projects.byId.get(entry.value.projectId) : null))
 
 async function run(action: () => Promise<void>) {
   try {
@@ -39,13 +41,13 @@ async function run(action: () => Promise<void>) {
       @click="switchOpen = true"
     >
       <template v-if="timer.running">
-        <ProjectDot :project="project" class="max-w-48" />
-        <span v-if="timer.running.note" class="hidden max-w-40 truncate text-muted-foreground lg:inline">{{ timer.running.note }}</span>
+        <ActivityLabel :activity="activity" class="max-w-40" />
+        <ProjectDot v-if="project" :project="project" class="hidden max-w-40 text-muted-foreground md:inline-flex" />
         <span class="ml-1 font-mono tabular-nums">{{ formatClock(timer.elapsedMs) }}</span>
       </template>
       <template v-else-if="timer.paused">
         <span class="text-amber-600 dark:text-amber-400">{{ $t('timer.paused') }}</span>
-        <ProjectDot :project="project" class="max-w-48" />
+        <ActivityLabel :activity="activity" class="max-w-40" />
       </template>
       <template v-else>
         <Zap class="size-3.5 text-muted-foreground" />

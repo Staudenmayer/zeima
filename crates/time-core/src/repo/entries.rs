@@ -1,13 +1,16 @@
+use std::collections::HashMap;
+
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, Sqlite, SqliteConnection};
 
+use super::activities::fetch_activity;
 use super::{
-    ensure_trackable, fetch_project, invalidate_entry_days, not_found, resolve_cost_center, soft_delete,
-    validate_entry_tags,
+    check_entry_activity, ensure_trackable, fetch_project, fetch_tag, invalidate_entry_days, not_found,
+    resolve_cost_center, soft_delete, validate_entry_tags,
 };
 use crate::db::{Core, WriteTx};
 use crate::events::DomainEvent;
-use crate::model::{EntryInput, EntrySource, TimeEntry};
+use crate::model::{BulkResult, EntryInput, EntryPatch, EntrySource, Tag, TimeEntry};
 use crate::report::{build_report, Report, ReportQuery};
 use crate::summary::{summarize, Range, Summary};
 use crate::{Error, Result};
@@ -15,7 +18,7 @@ use crate::{Error, Result};
 /// Live tag ids are aggregated into a comma-separated column.
 macro_rules! select {
     () => {
-        "SELECT e.id, e.workspace_id, e.user_id, e.project_id, e.start_at, e.end_at,
+        "SELECT e.id, e.workspace_id, e.user_id, e.activity_id, e.project_id, e.start_at, e.end_at,
     e.tz, e.note, e.billable, e.source, e.source_ref, e.locked, e.cost_center_id,
     e.created_at, e.updated_at,
     (SELECT group_concat(et.tag_id) FROM time_entry_tag et
@@ -35,6 +38,7 @@ fn from_row(r: &SqliteRow) -> Result<TimeEntry> {
         id: r.try_get("id")?,
         workspace_id: r.try_get("workspace_id")?,
         user_id: r.try_get("user_id")?,
+        activity_id: r.try_get("activity_id")?,
         project_id: r.try_get("project_id")?,
         start_at: r.try_get("start_at")?,
         end_at: r.try_get("end_at")?,
@@ -160,43 +164,100 @@ impl Core {
         let user = tx.ctx().user_id.clone();
         let existing = fetch_entry(tx.conn(), &user, id).await?;
         ensure_unlocked(&existing)?;
-        if !existing.is_running() && input.end_at.is_none() {
-            return Err(Error::validation("endAt", "a finished entry needs an end"));
-        }
-        let billable = match input.billable {
-            Some(b) => b,
-            None => existing.billable,
-        };
-        let project_changed = existing.project_id != input.project_id;
-        if project_changed {
-            if let Some(pid) = &input.project_id {
-                let ws = tx.ctx().workspace_id.clone();
-                ensure_trackable(&fetch_project(tx.conn(), &ws, pid).await?)?;
-            }
-        }
-        let ws = tx.ctx().workspace_id.clone();
-        validate_entry_tags(tx.conn(), &ws, input.project_id.as_deref(), &input.tag_ids).await?;
-        let cost_center_id = resolve_cost_center(
-            &mut tx,
-            input.cost_center_id.as_deref(),
-            input.project_id.as_deref(),
-            input.start_at,
-        )
-        .await?;
-        let entry = TimeEntry {
-            project_id: input.project_id,
-            start_at: input.start_at,
-            end_at: input.end_at,
-            tz: input.tz.unwrap_or(existing.tz.clone()),
-            note: input.note,
-            billable,
-            tag_ids: input.tag_ids,
-            cost_center_id,
-            ..existing
-        };
-        let entry = update_entry_row(&mut tx, entry).await?;
+        let entry = update_in(&mut tx, existing, input, true).await?;
         tx.commit().await?;
         Ok(entry)
+    }
+
+    /// Applies `patch` to the given entries in one transaction. Locked
+    /// entries are skipped; any other problem rolls everything back.
+    pub async fn bulk_update_entries(&self, ids: &[String], patch: EntryPatch) -> Result<BulkResult> {
+        let mut tx = self.begin().await?;
+        let user = tx.ctx().user_id.clone();
+        let mut tags: HashMap<String, Tag> = HashMap::new();
+        for id in patch.add_tag_ids.iter() {
+            let tag = fetch_tag(tx.conn(), id)
+                .await
+                .map_err(|_| Error::validation("addTagIds", format!("unknown tag {id}")))?;
+            tags.insert(id.clone(), tag);
+        }
+        let mut result = BulkResult::default();
+        for id in ids {
+            let e = fetch_entry(tx.conn(), &user, id).await?;
+            if e.locked {
+                result.skipped_locked += 1;
+                continue;
+            }
+            for tag_id in &e.tag_ids {
+                if !tags.contains_key(tag_id) {
+                    if let Ok(tag) = fetch_tag(tx.conn(), tag_id).await {
+                        tags.insert(tag_id.clone(), tag);
+                    }
+                }
+            }
+            let project_id = if patch.set_project {
+                patch.project_id.clone()
+            } else {
+                e.project_id.clone()
+            };
+            let group = |id: &String| tags.get(id).and_then(|t| t.group_name.clone());
+            let mut tag_ids: Vec<String> = e
+                .tag_ids
+                .iter()
+                .filter(|id| !patch.remove_tag_ids.contains(id))
+                .cloned()
+                .collect();
+            for added in &patch.add_tag_ids {
+                if let Some(g) = group(added) {
+                    tag_ids.retain(|id| id == added || group(id).as_deref() != Some(g.as_str()));
+                }
+                tag_ids.push(added.clone());
+            }
+            // Tags scoped to another project do not apply (also added ones).
+            tag_ids.retain(|id| {
+                tags.get(id)
+                    .is_none_or(|t| t.project_id.is_none() || t.project_id == project_id)
+            });
+            let input = EntryInput {
+                activity_id: patch.activity_id.clone().or_else(|| e.activity_id.clone()),
+                cost_center_id: if project_id == e.project_id {
+                    e.cost_center_id.clone()
+                } else {
+                    None
+                },
+                project_id,
+                start_at: e.start_at,
+                end_at: e.end_at,
+                tz: Some(e.tz.clone()),
+                note: e.note.clone(),
+                billable: Some(patch.billable.unwrap_or(e.billable)),
+                tag_ids,
+            }
+            .normalized()?;
+            update_in(&mut tx, e, input, false).await?;
+            result.changed += 1;
+        }
+        tx.commit().await?;
+        Ok(result)
+    }
+
+    /// Deletes the given entries in one transaction; locked ones are skipped.
+    pub async fn bulk_delete_entries(&self, ids: &[String]) -> Result<BulkResult> {
+        let mut tx = self.begin().await?;
+        let user = tx.ctx().user_id.clone();
+        let mut result = BulkResult::default();
+        for id in ids {
+            let e = fetch_entry(tx.conn(), &user, id).await?;
+            if e.locked {
+                result.skipped_locked += 1;
+                continue;
+            }
+            soft_delete(&mut tx, "time_entry", id).await?;
+            invalidate_entry_days(&mut tx, e.start_at, e.end_at).await?;
+            result.changed += 1;
+        }
+        tx.commit().await?;
+        Ok(result)
     }
 
     pub async fn delete_entry(&self, id: &str) -> Result<()> {
@@ -268,6 +329,54 @@ impl Core {
     }
 }
 
+/// Validates `input` against the unlocked entry `existing` and writes it.
+/// `require_activity = false` lets entries recorded before activities keep
+/// having none (bulk changes of other fields).
+async fn update_in(
+    tx: &mut WriteTx<'_>,
+    existing: TimeEntry,
+    input: EntryInput,
+    require_activity: bool,
+) -> Result<TimeEntry> {
+    if require_activity || input.activity_id.is_some() || existing.activity_id.is_some() {
+        check_entry_activity(tx, input.activity_id.as_deref(), existing.activity_id.as_deref()).await?;
+    }
+    if !existing.is_running() && input.end_at.is_none() {
+        return Err(Error::validation("endAt", "a finished entry needs an end"));
+    }
+    let billable = match input.billable {
+        Some(b) => b,
+        None => existing.billable,
+    };
+    let ws = tx.ctx().workspace_id.clone();
+    if existing.project_id != input.project_id {
+        if let Some(pid) = &input.project_id {
+            ensure_trackable(&fetch_project(tx.conn(), &ws, pid).await?)?;
+        }
+    }
+    validate_entry_tags(tx.conn(), &ws, input.project_id.as_deref(), &input.tag_ids).await?;
+    let cost_center_id = resolve_cost_center(
+        tx,
+        input.cost_center_id.as_deref(),
+        input.project_id.as_deref(),
+        input.start_at,
+    )
+    .await?;
+    let entry = TimeEntry {
+        activity_id: input.activity_id,
+        project_id: input.project_id,
+        start_at: input.start_at,
+        end_at: input.end_at,
+        tz: input.tz.unwrap_or(existing.tz.clone()),
+        note: input.note,
+        billable,
+        tag_ids: input.tag_ids,
+        cost_center_id,
+        ..existing
+    };
+    update_entry_row(tx, entry).await
+}
+
 fn ensure_unlocked(entry: &TimeEntry) -> Result<()> {
     if entry.locked {
         return Err(Error::Conflict("This entry is locked.".into()));
@@ -275,14 +384,22 @@ fn ensure_unlocked(entry: &TimeEntry) -> Result<()> {
     Ok(())
 }
 
-/// Builds a new entry from validated input (project and tags checked,
-/// billable defaulted from the project).
+/// Builds a new entry from validated input (activity, project and tags
+/// checked, billable defaulted from the project). Manual entries need an
+/// activity; the timer checks it in [`Core::start_timer`].
 pub(crate) async fn new_entry(
     tx: &mut WriteTx<'_>,
     input: EntryInput,
     source: EntrySource,
 ) -> Result<TimeEntry> {
     let ws = tx.ctx().workspace_id.clone();
+    if source == EntrySource::Manual {
+        check_entry_activity(tx, input.activity_id.as_deref(), None).await?;
+    } else if let Some(id) = &input.activity_id {
+        fetch_activity(tx.conn(), &ws, id)
+            .await
+            .map_err(|_| Error::validation("activityId", "activity not found"))?;
+    }
     let mut billable_default = false;
     if let Some(pid) = &input.project_id {
         let project = fetch_project(tx.conn(), &ws, pid).await?;
@@ -302,6 +419,7 @@ pub(crate) async fn new_entry(
         id: crate::ids::new_id(),
         workspace_id: ws,
         user_id: tx.ctx().user_id.clone(),
+        activity_id: input.activity_id,
         project_id: input.project_id,
         start_at: input.start_at,
         end_at: input.end_at,
@@ -321,14 +439,15 @@ pub(crate) async fn new_entry(
 pub(crate) async fn insert_entry(tx: &mut WriteTx<'_>, e: &TimeEntry) -> Result<()> {
     let s = tx.stamp();
     sqlx::query(
-        "INSERT INTO time_entry (id, workspace_id, user_id, project_id, start_at, end_at, tz, note,
-            billable, source, source_ref, locked, cost_center_id, created_at, updated_at, hlc,
+        "INSERT INTO time_entry (id, workspace_id, user_id, activity_id, project_id, start_at, end_at, tz,
+            note, billable, source, source_ref, locked, cost_center_id, created_at, updated_at, hlc,
             origin_device)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&e.id)
     .bind(&e.workspace_id)
     .bind(&e.user_id)
+    .bind(&e.activity_id)
     .bind(&e.project_id)
     .bind(e.start_at)
     .bind(e.end_at)
@@ -368,10 +487,11 @@ pub(crate) async fn update_entry_row(tx: &mut WriteTx<'_>, mut e: TimeEntry) -> 
     let s = tx.stamp();
     e.updated_at = s.now;
     sqlx::query(
-        "UPDATE time_entry SET project_id = ?, start_at = ?, end_at = ?, tz = ?, note = ?,
+        "UPDATE time_entry SET activity_id = ?, project_id = ?, start_at = ?, end_at = ?, tz = ?, note = ?,
             billable = ?, locked = ?, cost_center_id = ?, updated_at = ?, hlc = ?, origin_device = ?
          WHERE id = ? AND user_id = ?",
     )
+    .bind(&e.activity_id)
     .bind(&e.project_id)
     .bind(e.start_at)
     .bind(e.end_at)

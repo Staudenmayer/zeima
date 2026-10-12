@@ -3,6 +3,8 @@
 //! (docs/SPEC.md §9: dashboard < 300 ms). Run with
 //! `cargo test -p time-core --features db --release --test perf -- --ignored --nocapture`.
 
+mod common;
+
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -21,9 +23,12 @@ const NOW: i64 = 1_791_158_400_000;
 #[tokio::test]
 #[ignore = "performance check; run in release mode"]
 async fn one_year_dashboard_is_fast() {
-    let core = Core::open_in_memory(Arc::new(ManualClock::new(NOW)))
-        .await
-        .unwrap();
+    let core = common::with_activity(
+        Core::open_in_memory(Arc::new(ManualClock::new(NOW)))
+            .await
+            .unwrap(),
+    )
+    .await;
     core.set_default_tz("UTC").unwrap();
     let mut projects = Vec::new();
     for i in 0..10 {
@@ -52,6 +57,7 @@ async fn one_year_dashboard_is_fast() {
         for k in 0..6 {
             let start = day + 8 * HOUR + k * (HOUR + HOUR / 4);
             core.create_entry(EntryInput {
+                activity_id: common::activity(),
                 project_id: Some(projects[(d as usize + k as usize) % projects.len()].clone()),
                 start_at: start,
                 end_at: Some(start + HOUR + HOUR / 4),

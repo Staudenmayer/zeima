@@ -101,6 +101,7 @@ mod tests {
             id: format!("{start}"),
             workspace_id: "w".into(),
             user_id: "u".into(),
+            activity_id: None,
             project_id: project.map(Into::into),
             start_at: start,
             end_at: end,

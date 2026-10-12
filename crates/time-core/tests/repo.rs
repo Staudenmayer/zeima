@@ -1,10 +1,13 @@
 #![cfg(feature = "db")]
 
+mod common;
+
 use std::sync::Arc;
 
 use time_core::clock::ManualClock;
 use time_core::model::{
-    BudgetPeriod, EntryInput, ProjectInput, ProjectStatus, StartTimer, TagInput, TimerState,
+    ActivityInput, BudgetPeriod, EntryInput, EntryPatch, ProjectInput, ProjectStatus, StartTimer, TagInput,
+    TimerState,
 };
 use time_core::summary::Range;
 use time_core::{Core, Error};
@@ -14,7 +17,10 @@ const T0: i64 = 1_700_000_000_000;
 
 async fn setup() -> (Core, Arc<ManualClock>) {
     let clock = Arc::new(ManualClock::new(T0));
-    (Core::open_in_memory(clock.clone()).await.unwrap(), clock)
+    (
+        common::with_activity(Core::open_in_memory(clock.clone()).await.unwrap()).await,
+        clock,
+    )
 }
 
 fn project(name: &str, alias: Option<&str>) -> ProjectInput {
@@ -44,6 +50,7 @@ fn tag(name: &str, project_id: Option<&str>, group: Option<&str>) -> TagInput {
 
 fn manual(project_id: Option<&str>, start: i64, end: i64, tag_ids: Vec<String>) -> EntryInput {
     EntryInput {
+        activity_id: common::activity(),
         project_id: project_id.map(Into::into),
         start_at: start,
         end_at: Some(end),
@@ -191,6 +198,7 @@ async fn deleted_tags_disappear_from_entries() {
 async fn manual_entries_need_an_end() {
     let (core, _) = setup().await;
     let input = EntryInput {
+        activity_id: common::activity(),
         end_at: None,
         ..manual(None, T0, T0, vec![])
     };
@@ -206,6 +214,7 @@ async fn split_running_entry_keeps_second_part_running() {
     let p = core.create_project(project("P", None)).await.unwrap();
     let TimerState::Running { entry } = core
         .start_timer(StartTimer {
+            activity_id: common::activity(),
             project_id: Some(p.id.clone()),
             tag_ids: vec![],
             note: "x".into(),
@@ -288,6 +297,7 @@ async fn domain_events_are_published_after_commit() {
     let (core, clock) = setup().await;
     let mut events = core.subscribe();
     core.start_timer(StartTimer {
+        activity_id: common::activity(),
         project_id: None,
         tag_ids: vec![],
         note: String::new(),
@@ -321,4 +331,107 @@ async fn domain_events_are_published_after_commit() {
     let hooks: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
     assert!(matches!(hooks[0], DomainEvent::EntryCreated { .. }));
     assert!(matches!(&hooks[1], DomainEvent::EntryDeleted { entry_id } if *entry_id == e.id));
+}
+
+#[tokio::test]
+async fn bulk_update_applies_patch_and_tag_rules() {
+    let (core, _) = setup().await;
+    let a = core.create_project(project("A", Some("A"))).await.unwrap();
+    let b = core.create_project(project("B", Some("B"))).await.unwrap();
+    let dev = core.create_tag(tag("Dev", None, Some("kind"))).await.unwrap();
+    let ops = core.create_tag(tag("Ops", None, Some("kind"))).await.unwrap();
+    let only_a = core.create_tag(tag("A-only", Some(&a.id), None)).await.unwrap();
+    let meeting = core
+        .create_activity(ActivityInput {
+            name: "Meeting".into(),
+            color: "#ef4444".into(),
+            archived: false,
+        })
+        .await
+        .unwrap();
+    let e1 = core
+        .create_entry(manual(
+            Some(&a.id),
+            T0,
+            T0 + 60 * MIN,
+            vec![dev.id.clone(), only_a.id.clone()],
+        ))
+        .await
+        .unwrap();
+    let e2 = core
+        .create_entry(manual(None, T0 + 60 * MIN, T0 + 90 * MIN, vec![]))
+        .await
+        .unwrap();
+    let ids = vec![e1.id.clone(), e2.id.clone()];
+
+    // Ops replaces Dev (same group); moving to B drops A's scoped tag.
+    let result = core
+        .bulk_update_entries(
+            &ids,
+            EntryPatch {
+                activity_id: Some(meeting.id.clone()),
+                set_project: true,
+                project_id: Some(b.id.clone()),
+                add_tag_ids: vec![ops.id.clone()],
+                billable: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!((result.changed, result.skipped_locked), (2, 0));
+    for id in &ids {
+        let e = core.get_entry(id).await.unwrap();
+        assert_eq!(e.activity_id.as_deref(), Some(meeting.id.as_str()));
+        assert_eq!(e.project_id.as_deref(), Some(b.id.as_str()));
+        assert_eq!(e.tag_ids, vec![ops.id.clone()]);
+        assert!(e.billable);
+    }
+
+    // Unset fields stay; removing a tag only removes that one.
+    core.bulk_update_entries(
+        &ids,
+        EntryPatch {
+            remove_tag_ids: vec![ops.id.clone()],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let e = core.get_entry(&e1.id).await.unwrap();
+    assert!(e.tag_ids.is_empty());
+    assert_eq!(e.project_id.as_deref(), Some(b.id.as_str()));
+
+    let deleted = core.bulk_delete_entries(&ids).await.unwrap();
+    assert_eq!(deleted.changed, 2);
+    assert!(core.get_entry(&e1.id).await.is_err());
+}
+
+#[tokio::test]
+async fn bulk_update_keeps_entries_without_activity_editable() {
+    let (core, _) = setup().await;
+    // Entries from before activities (only addons can create them now).
+    let old = core
+        .create_entry_from(
+            EntryInput {
+                activity_id: None,
+                ..manual(None, T0, T0 + 30 * MIN, vec![])
+            },
+            time_core::model::EntrySource::Addon,
+            None,
+        )
+        .await
+        .unwrap();
+    core.bulk_update_entries(
+        std::slice::from_ref(&old.id),
+        EntryPatch {
+            billable: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let e = core.get_entry(&old.id).await.unwrap();
+    assert!(e.billable);
+    assert_eq!(e.activity_id, None);
 }

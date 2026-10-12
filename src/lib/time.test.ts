@@ -17,6 +17,8 @@ import {
   parseDate,
   parseDateText,
   parseTimeText,
+  daysBetween,
+  rangeFromDates,
   rangeFromInputs,
   setTimeZone,
   setWeekStart,
@@ -80,6 +82,17 @@ describe('inputs', () => {
   it('treats an end before the start as the next day', () => {
     const { startAt, endAt } = rangeFromInputs('2026-10-04', '22:00', '01:30')
     expect(endAt - startAt).toBe(3.5 * HOUR)
+  })
+  it('spans several days with an end date', () => {
+    const { startAt, endAt } = rangeFromDates('2026-10-04', '22:00', '2026-10-06', '01:30')
+    expect(endAt - startAt).toBe(27.5 * HOUR)
+    expect(daysBetween(startAt, endAt)).toBe(2)
+  })
+  it('only rolls over midnight on the same date', () => {
+    const { startAt, endAt } = rangeFromDates('2026-10-04', '22:00', '2026-10-05', '23:00')
+    expect(endAt - startAt).toBe(25 * HOUR)
+    const before = rangeFromDates('2026-10-05', '22:00', '2026-10-04', '23:00')
+    expect(before.endAt).toBeLessThan(before.startAt)
   })
 })
 

@@ -1,6 +1,7 @@
 //! Repositories. Each is an `impl Core` block; writes go through
 //! [`crate::db::WriteTx`] so they are stamped and change-logged.
 
+mod activities;
 mod addons;
 mod budget;
 mod cost_centers;
@@ -15,10 +16,11 @@ pub use budget::BudgetStatus;
 pub(crate) use work::invalidate_entry_days;
 pub use work::{default_schedule, Balance, HolidayView, ProfileSummary, VacationSummary, WorkScheduleInput};
 
+pub(crate) use activities::check_entry_activity;
 pub(crate) use cost_centers::{check_cost_center_ref, resolve_cost_center};
 pub(crate) use entries::{fetch_entry, fetch_running, insert_entry, new_entry, update_entry_row};
 pub(crate) use projects::{ensure_trackable, fetch_project, soft_delete};
-pub(crate) use tags::validate_entry_tags;
+pub(crate) use tags::{fetch_tag, validate_entry_tags};
 
 use crate::Error;
 

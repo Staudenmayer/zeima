@@ -26,7 +26,7 @@ const value = computed({
 
 <template>
   <Select v-model="value">
-    <SelectTrigger class="w-full">
+    <SelectTrigger class="w-full min-w-0">
       <SelectValue>
         <ProjectDot :project="model ? projects.byId.get(model) : null" />
       </SelectValue>

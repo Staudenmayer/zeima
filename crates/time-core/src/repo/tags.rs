@@ -95,7 +95,7 @@ impl Core {
     }
 }
 
-async fn fetch_tag(conn: &mut SqliteConnection, id: &str) -> Result<Tag> {
+pub(crate) async fn fetch_tag(conn: &mut SqliteConnection, id: &str) -> Result<Tag> {
     let row = sqlx::query(concat!(
         "SELECT ",
         columns!(),

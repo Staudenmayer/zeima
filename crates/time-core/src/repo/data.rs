@@ -14,6 +14,7 @@ use crate::Result;
 const EXPORT_TABLES: &[(&str, bool)] = &[
     ("workspace", true),
     ("app_user", true),
+    ("activity", true),
     ("project", true),
     ("tag", true),
     ("cost_center", true),

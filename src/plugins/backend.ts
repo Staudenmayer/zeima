@@ -2,6 +2,7 @@
 
 import type { Router } from 'vue-router'
 import { events } from '@/bindings'
+import { useActivitiesStore } from '@/stores/activities'
 import { useCostCentersStore } from '@/stores/costCenters'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -11,6 +12,7 @@ import { useWorkStore } from '@/stores/work'
 import { applyLocale } from '@/plugins/i18n'
 
 export async function connectBackend(router: Router) {
+  const activities = useActivitiesStore()
   const projects = useProjectsStore()
   const tags = useTagsStore()
   const timer = useTimerStore()
@@ -21,6 +23,7 @@ export async function connectBackend(router: Router) {
   await events.timerChanged.listen((e) => timer.set(e.payload))
   await events.dataChanged.listen(async (e) => {
     const kinds = e.payload.kinds
+    if (kinds.includes('activity')) await activities.load()
     if (kinds.includes('project')) await projects.load()
     if (kinds.includes('tag')) await tags.load()
     if (kinds.includes('costCenter')) await costCenters.load()
@@ -39,7 +42,7 @@ export async function connectBackend(router: Router) {
   })
   await events.navigate.listen((e) => void router.push(e.payload.path))
 
-  await Promise.all([projects.load(), tags.load(), costCenters.load(), timer.load(), settings.load()])
+  await Promise.all([activities.load(), projects.load(), tags.load(), costCenters.load(), timer.load(), settings.load()])
   applyLocale(settings.settings?.locale ?? null)
   // Work data uses the UI language (profile and holiday names).
   await work.load()

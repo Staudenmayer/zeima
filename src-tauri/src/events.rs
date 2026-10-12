@@ -12,6 +12,7 @@ pub struct TimerChanged(pub TimerState);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub enum DataKind {
+    Activity,
     Project,
     Tag,
     Entry,

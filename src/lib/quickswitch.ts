@@ -1,29 +1,61 @@
-// Quick-switch input: `#ALIAS @tag note text`.
-//   #token  project, matched by alias, then name (case-insensitive)
-//   @token  tag (repeatable), matched by name
-//   rest    note
-// Without `#`, the text filters the project list instead.
+// Quick-switch input: `activity words @project #tag`.
+//   words     search the activities (required; the user picks one)
+//   @token    project, matched by alias, then name (case-insensitive)
+//   #token    tag (repeatable), matched by name
+// The token still being typed at the end of the input switches the list to
+// project or tag suggestions; picking one turns it into a chip.
 
-export interface ParsedQuery {
-  project: string | null
-  tags: string[]
-  note: string
+export type TokenKind = 'project' | 'tag'
+
+export interface Token {
+  kind: TokenKind
+  /** Text after the `@` / `#`; empty right after typing the prefix. */
+  term: string
+  /** Position of the token in the input, `end` exclusive. */
+  start: number
+  end: number
 }
 
+export interface ParsedQuery {
+  /** Finished `@` / `#` tokens (followed by a space). */
+  tokens: Token[]
+  /** The `@` / `#` token being typed at the end of the input. */
+  active: Token | null
+  /** All other words: the activity search. */
+  text: string
+}
+
+const PREFIX: Record<string, TokenKind> = { '@': 'project', '#': 'tag' }
+
 export function parseQuery(input: string): ParsedQuery {
-  let project: string | null = null
-  const tags: string[] = []
+  const tokens: Token[] = []
   const words: string[] = []
-  for (const word of input.trim().split(/\s+/).filter(Boolean)) {
-    if (word.startsWith('#') && word.length > 1 && project === null) {
-      project = word.slice(1)
-    } else if (word.startsWith('@') && word.length > 1) {
-      tags.push(word.slice(1))
+  let active: Token | null = null
+  for (const m of input.matchAll(/\S+/g)) {
+    const word = m[0]
+    const start = m.index
+    const end = start + word.length
+    const kind = PREFIX[word[0]]
+    if (kind && end === input.length) {
+      active = { kind, term: word.slice(1), start, end }
+    } else if (kind && word.length > 1) {
+      tokens.push({ kind, term: word.slice(1), start, end })
     } else {
       words.push(word)
     }
   }
-  return { project, tags, note: words.join(' ') }
+  return { tokens, active, text: words.join(' ') }
+}
+
+/** `input` without the given tokens, with whitespace tidied up. */
+export function removeTokens(input: string, tokens: Token[]): string {
+  let out = input
+  for (const t of [...tokens].sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, t.start) + out.slice(t.end)
+  }
+  const trimmed = out.replace(/\s+/g, ' ').trimStart()
+  // Keep a trailing space so the next word starts fresh.
+  return trimmed.trim() ? trimmed.replace(/\s*$/, ' ') : ''
 }
 
 interface Named {
@@ -65,7 +97,13 @@ export function rank<T extends Named>(items: T[], query: string): T[] {
     .map((r) => r.item)
 }
 
-/** Best match for a `#token` / `@token`, or null. */
+/** Best match for an `@token` / `#token`, or null. */
 export function resolve<T extends Named>(items: T[], token: string): T | null {
   return rank(items, token)[0] ?? null
+}
+
+/** True when `query` names `item` exactly (alias or name), ignoring case. */
+export function isExact(item: Named, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  return !!q && (item.name.toLowerCase() === q || item.alias?.toLowerCase() === q)
 }

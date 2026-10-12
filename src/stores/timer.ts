@@ -37,9 +37,21 @@ export const useTimerStore = defineStore('timer', () => {
   const pause = async () => set(await call(commands.timerPause()))
   const resume = async () => set(await call(commands.timerResume()))
 
-  /** Start the same activity again (project, tags, note). */
-  async function continueEntry(entry: { projectId: string | null; tagIds: string[]; note: string; billable: boolean }) {
-    await start({ projectId: entry.projectId, tagIds: entry.tagIds, note: entry.note, billable: entry.billable })
+  /** Start the same work again (activity, project, tags, note). */
+  async function continueEntry(entry: {
+    activityId: string | null
+    projectId: string | null
+    tagIds: string[]
+    note: string
+    billable: boolean
+  }) {
+    await start({
+      activityId: entry.activityId,
+      projectId: entry.projectId,
+      tagIds: entry.tagIds,
+      note: entry.note,
+      billable: entry.billable,
+    })
   }
 
   return { state, now, running, paused, elapsedMs, set, load, start, stop, pause, resume, continueEntry }

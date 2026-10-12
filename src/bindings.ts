@@ -13,6 +13,12 @@ export const commands = {
 	projectUpdate: (id: string, input: ProjectInput) => typedError<Project, CmdError>(__TAURI_INVOKE("project_update", { id, input })),
 	projectDelete: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("project_delete", { id })),
 	projectRecent: (limit: number) => typedError<Project[], CmdError>(__TAURI_INVOKE("project_recent", { limit })),
+	activityList: (includeArchived: boolean) => typedError<Activity[], CmdError>(__TAURI_INVOKE("activity_list", { includeArchived })),
+	activityCreate: (input: ActivityInput) => typedError<Activity, CmdError>(__TAURI_INVOKE("activity_create", { input })),
+	activityUpdate: (id: string, input: ActivityInput) => typedError<Activity, CmdError>(__TAURI_INVOKE("activity_update", { id, input })),
+	activityDelete: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("activity_delete", { id })),
+	/**  Recently tracked activity/project/tag combinations, newest first. */
+	activityRecent: (limit: number) => typedError<RecentActivity[], CmdError>(__TAURI_INVOKE("activity_recent", { limit })),
 	tagList: () => typedError<Tag[], CmdError>(__TAURI_INVOKE("tag_list")),
 	tagCreate: (input: TagInput) => typedError<Tag, CmdError>(__TAURI_INVOKE("tag_create", { input })),
 	tagUpdate: (id: string, input: TagInput) => typedError<Tag, CmdError>(__TAURI_INVOKE("tag_update", { id, input })),
@@ -21,6 +27,10 @@ export const commands = {
 	entryCreate: (input: EntryInput) => typedError<TimeEntry, CmdError>(__TAURI_INVOKE("entry_create", { input })),
 	entryUpdate: (id: string, input: EntryInput) => typedError<TimeEntry, CmdError>(__TAURI_INVOKE("entry_update", { id, input })),
 	entryDelete: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("entry_delete", { id })),
+	/**  Applies `patch` to several entries at once; locked ones are skipped. */
+	entryBulkUpdate: (ids: string[], patch: EntryPatch) => typedError<BulkResult, CmdError>(__TAURI_INVOKE("entry_bulk_update", { ids, patch })),
+	/**  Deletes several entries at once; locked ones are skipped. */
+	entryBulkDelete: (ids: string[]) => typedError<BulkResult, CmdError>(__TAURI_INVOKE("entry_bulk_delete", { ids })),
 	/**  `at` is unix ms. Passed as `f64` because IPC numbers are JS numbers. */
 	entrySplit: (id: string, at: number | null) => typedError<[TimeEntry, TimeEntry], CmdError>(__TAURI_INVOKE("entry_split", { id, at })),
 	entryDuplicate: (id: string) => typedError<TimeEntry, CmdError>(__TAURI_INVOKE("entry_duplicate", { id })),
@@ -37,6 +47,8 @@ export const commands = {
 	 */
 	settingsSet: (settings: AppSettings) => typedError<AppSettings, CmdError>(__TAURI_INVOKE("settings_set", { settings })),
 	windowShowMain: (route: string | null) => typedError<null, CmdError>(__TAURI_INVOKE("window_show_main", { route })),
+	/**  Opens the quick-switch palette (e.g. to pick an activity from a prompt). */
+	quickswitchShow: () => typedError<null, CmdError>(__TAURI_INVOKE("quickswitch_show")),
 	quickswitchHide: () => typedError<null, CmdError>(__TAURI_INVOKE("quickswitch_hide")),
 	/**
 	 *  Opens the system print dialog for the calling window (also offers
@@ -178,6 +190,27 @@ export type AbsenceTypeInput = {
 	affectsVacation: boolean,
 };
 
+/**
+ *  What kind of work an entry is (e.g. Meeting, Development). Required on
+ *  new entries; project and tags are optional.
+ */
+export type Activity = {
+	id: string,
+	workspaceId: string,
+	name: string,
+	color: string,
+	/**  Hidden from pickers; entries keep it. */
+	archived: boolean,
+	createdAt: number,
+	updatedAt: number,
+};
+
+export type ActivityInput = {
+	name: string,
+	color: string,
+	archived?: boolean,
+};
+
 export type AddonExportFormat = {
 	addonId: string,
 	addonName: string,
@@ -247,6 +280,7 @@ export type AddonSuggestion = {
 	addonId: string,
 	label: string,
 	detail: string | null,
+	activityId: string | null,
 	projectId: string | null,
 	tagIds: string[],
 	note: string,
@@ -377,6 +411,12 @@ export type BudgetStatus = {
 	warnPct: number,
 };
 
+/**  Outcome of a bulk action. Locked entries are skipped, not errors. */
+export type BulkResult = {
+	changed: number,
+	skippedLocked: number,
+};
+
 export type CmdError = {
 	/**  Stable code: not_found, validation, conflict, database, … */
 	code: string,
@@ -435,7 +475,7 @@ export type DataChanged = {
 	kinds: DataKind[],
 };
 
-export type DataKind = "project" | "tag" | "entry" | "settings" | "costCenter" | 
+export type DataKind = "activity" | "project" | "tag" | "entry" | "settings" | "costCenter" | 
 /**  Schedules, absences, holidays, balance corrections, work settings. */
 "work" | 
 /**  Auto-pause items or the morning check-in. */
@@ -473,6 +513,8 @@ export type DurationFormat =
 "decimal";
 
 export type EntryInput = {
+	/**  Required for manual entries and edits. */
+	activityId?: string | null,
 	projectId: string | null,
 	startAt: number,
 	endAt: number | null,
@@ -483,6 +525,21 @@ export type EntryInput = {
 	tagIds: string[],
 	/**  `None` = resolve from the project, then the user's default. */
 	costCenterId?: string | null,
+};
+
+/**
+ *  Changes applied to several entries at once (timesheet bulk actions).
+ *  Unset fields keep each entry's value.
+ */
+export type EntryPatch = {
+	activityId?: string | null,
+	/**  Replace the project with `project_id` (`None` = no project). */
+	setProject?: boolean,
+	projectId?: string | null,
+	/**  Added tags replace tags of the same group. */
+	addTagIds?: string[],
+	removeTagIds?: string[],
+	billable?: boolean | null,
 };
 
 export type EntrySource = "timer" | "manual" | "calendar" | "meeting" | "import" | "addon";
@@ -661,6 +718,16 @@ export type Range = {
 	to: number,
 };
 
+/**
+ *  A recently tracked combination, offered for one-step restarts in the
+ *  quick switch, the tray and the morning check-in.
+ */
+export type RecentActivity = {
+	activityId: string,
+	projectId: string | null,
+	tagIds: string[],
+};
+
 export type RegionInfo = {
 	id: string,
 	name: { [key in string]: string },
@@ -684,6 +751,8 @@ export type Report = {
 };
 
 export type ReportFilter = {
+	/**  Empty = all. `null` matches entries without an activity. */
+	activityIds?: (string | null)[],
 	/**  Empty = all. `null` matches entries without a project. */
 	projectIds?: (string | null)[],
 	/**  Empty = all; otherwise entries with at least one of these tags. */
@@ -693,7 +762,7 @@ export type ReportFilter = {
 	billable?: boolean | null,
 };
 
-export type ReportGroup = "project" | "tag" | "costCenter" | "billable" | "day" | 
+export type ReportGroup = "activity" | "project" | "tag" | "costCenter" | "billable" | "day" | 
 /**
  *  Key: first day of the week (`2026-10-05`); the week starts on the
  *  configured day.
@@ -757,6 +826,8 @@ export type SettingType = "text" | "number" | "boolean" |
 "password";
 
 export type StartTimer = {
+	/**  Required. */
+	activityId?: string | null,
 	projectId: string | null,
 	tagIds: string[],
 	note: string,
@@ -799,6 +870,11 @@ export type TimeEntry = {
 	id: string,
 	workspaceId: string,
 	userId: string,
+	/**
+	 *  `None` only on entries recorded before activities existed (and
+	 *  possibly on entries created by addons).
+	 */
+	activityId: string | null,
 	projectId: string | null,
 	startAt: number,
 	/**  `None` while the timer is running. */

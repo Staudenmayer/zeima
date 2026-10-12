@@ -172,10 +172,28 @@ export function fromInputs(date: string, time: string): number {
  * means the entry crosses midnight.
  */
 export function rangeFromInputs(date: string, start: string, end: string): { startAt: number; endAt: number } {
-  const startAt = fromInputs(date, start)
-  let endAt = fromInputs(date, end)
-  if (endAt < startAt) endAt = addDays(endAt, 1)
+  return rangeFromDates(date, start, date, end)
+}
+
+/**
+ * Start/end from start and end date and time (entries may span days). On
+ * the same date, an end time before the start time means the next day.
+ */
+export function rangeFromDates(
+  startDate: string,
+  start: string,
+  endDate: string,
+  end: string,
+): { startAt: number; endAt: number } {
+  const startAt = fromInputs(startDate, start)
+  let endAt = fromInputs(endDate, end)
+  if (endDate === startDate && endAt < startAt) endAt = addDays(endAt, 1)
   return { startAt, endAt }
+}
+
+/** Whole calendar days from `a` to `b` in the configured zone (`b` later → positive). */
+export function daysBetween(a: number, b: number): number {
+  return Math.round((startOfDay(b) - startOfDay(a)) / (24 * HOUR))
 }
 
 /** Minutes for an hours field: `7:45` (hours:minutes) or `7.75` / `7,75` (decimal). */
