@@ -1,13 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": [
-    "main"
-  ],
-  "permissions": [
-    "core:default",
-    "opener:default",
-    "sql:default"
-  ]
+  "description": "Capability for the app windows. App commands (src/bindings.ts) are allowed by default; plugin access is listed here.",
+  "windows": ["main", "quickswitch", "prompt"],
+  "permissions": ["core:default", "opener:default"]
 }

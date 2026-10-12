@@ -1,0 +1,31 @@
+# Expected results for CH.toml. Checked by `cargo test` (jurisdiction tests).
+
+[[holidays]]
+year = 2026
+dates = ["2026-01-01", "2026-05-14", "2026-08-01", "2026-12-25"]
+
+[[holidays]]
+year = 2026
+region = "CH-ZH"
+dates = ["2026-01-01", "2026-01-02", "2026-04-03", "2026-04-06", "2026-05-01", "2026-05-14", "2026-05-25", "2026-08-01", "2026-12-25", "2026-12-26"]
+
+[[holidays]]
+year = 2025
+region = "CH-BE"
+dates = ["2025-01-01", "2025-01-02", "2025-04-18", "2025-04-21", "2025-05-29", "2025-06-09", "2025-08-01", "2025-12-25", "2025-12-26"]
+
+[[breaks]]
+worked_minutes = 330
+required_minutes = 0
+
+[[breaks]]
+worked_minutes = 331
+required_minutes = 15
+
+[[breaks]]
+worked_minutes = 421
+required_minutes = 30
+
+[[breaks]]
+worked_minutes = 541
+required_minutes = 60

@@ -1,0 +1,88 @@
+#:schema ./profile.schema.json
+# Switzerland. Best-effort defaults, not legal advice. See docs/country-profiles.md.
+#
+# Most Swiss public holidays are cantonal. The country level contains the
+# days treated like Sundays nationwide (ArG Art. 20a); only some cantons are
+# filled in so far. Contributions for other cantons are welcome.
+
+schema_version = 1
+id = "CH"
+version = "2026.1"
+name = { de = "Schweiz", en = "Switzerland", fr = "Suisse", it = "Svizzera" }
+maintainer = "Time core team"
+sources = [
+  "Arbeitsgesetz (ArG, SR 822.11) Art. 9, 15, 15a, 20a, https://www.fedlex.admin.ch/",
+  "Obligationenrecht (OR, SR 220) Art. 329a, https://www.fedlex.admin.ch/",
+]
+default_locale = "de-CH"
+week_start = "mon"
+
+[work_time]
+max_weekly_minutes = 2700      # ArG Art. 9: 45 h (industry, offices); 50 h for other workers
+min_daily_rest_minutes = 660   # ArG Art. 15a: 11 h
+standard_weekly_minutes = 2520 # 42 h is common; check your contract
+standard_workdays = ["mon", "tue", "wed", "thu", "fri"]
+
+# ArG Art. 15: > 5.5 h → 15 min, > 7 h → 30 min, > 9 h → 60 min.
+[[breaks]]
+after_minutes = 330
+break_minutes = 15
+min_part_minutes = 15
+mode = "required"
+
+[[breaks]]
+after_minutes = 420
+break_minutes = 30
+min_part_minutes = 15
+mode = "required"
+
+[[breaks]]
+after_minutes = 540
+break_minutes = 60
+min_part_minutes = 15
+mode = "required"
+
+[vacation]
+default_days = 20 # OR Art. 329a: 4 weeks
+unit = "workdays"
+
+[[holidays]]
+id = "new_year"
+name = { de = "Neujahr", en = "New Year's Day", fr = "Nouvel An", it = "Capodanno" }
+rule = { fixed = "01-01" }
+
+[[holidays]]
+id = "ascension"
+name = { de = "Auffahrt", en = "Ascension Day", fr = "Ascension", it = "Ascensione" }
+rule = { easter_offset = 39 }
+
+[[holidays]]
+id = "national_day"
+name = { de = "Bundesfeiertag", en = "Swiss National Day", fr = "Fête nationale", it = "Festa nazionale" }
+rule = { fixed = "08-01" }
+
+[[holidays]]
+id = "christmas"
+name = { de = "Weihnachtstag", en = "Christmas Day", fr = "Noël", it = "Natale" }
+rule = { fixed = "12-25" }
+
+[regions."CH-ZH"]
+name = { de = "Zürich", en = "Zurich" }
+holidays = [
+  { id = "berchtold", name = { de = "Berchtoldstag", en = "Berchtold's Day" }, rule = { fixed = "01-02" } },
+  { id = "good_friday", name = { de = "Karfreitag", en = "Good Friday" }, rule = { easter_offset = -2 } },
+  { id = "easter_monday", name = { de = "Ostermontag", en = "Easter Monday" }, rule = { easter_offset = 1 } },
+  { id = "labour_day", name = { de = "Tag der Arbeit", en = "Labour Day" }, rule = { fixed = "05-01" } },
+  { id = "whit_monday", name = { de = "Pfingstmontag", en = "Whit Monday" }, rule = { easter_offset = 50 } },
+  { id = "st_stephen", name = { de = "Stephanstag", en = "St. Stephen's Day" }, rule = { fixed = "12-26" } },
+]
+
+[regions."CH-BE"]
+name = { de = "Bern", en = "Bern" }
+holidays = [
+  { id = "berchtold", name = { de = "Berchtoldstag", en = "Berchtold's Day" }, rule = { fixed = "01-02" } },
+  { id = "good_friday", name = { de = "Karfreitag", en = "Good Friday" }, rule = { easter_offset = -2 } },
+  { id = "easter_monday", name = { de = "Ostermontag", en = "Easter Monday" }, rule = { easter_offset = 1 } },
+  { id = "whit_monday", name = { de = "Pfingstmontag", en = "Whit Monday" }, rule = { easter_offset = 50 } },
+  { id = "st_stephen", name = { de = "Stephanstag", en = "St. Stephen's Day" }, rule = { fixed = "12-26" } },
+]

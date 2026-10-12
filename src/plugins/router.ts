@@ -10,3 +10,4 @@ export const router = createRouter({
 if (import.meta.hot) { 
   handleHotUpdate(router) 
 } 
+router.onError((err) => console.error('navigation failed', err))

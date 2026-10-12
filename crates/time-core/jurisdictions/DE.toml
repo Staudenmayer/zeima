@@ -1,0 +1,196 @@
+#:schema ./profile.schema.json
+# Germany. Best-effort defaults, not legal advice. See docs/country-profiles.md.
+
+schema_version = 1
+id = "DE"
+version = "2026.1"
+name = { de = "Deutschland", en = "Germany" }
+maintainer = "Time core team"
+sources = [
+  "https://www.gesetze-im-internet.de/arbzg/", # Arbeitszeitgesetz (ArbZG)
+  "https://www.gesetze-im-internet.de/burlg/", # Bundesurlaubsgesetz (BUrlG)
+]
+default_locale = "de-DE"
+week_start = "mon"
+
+[work_time]
+max_daily_minutes = 600        # ArbZG §3: 8 h, extendable to 10 h
+min_daily_rest_minutes = 660   # ArbZG §5: 11 h
+standard_weekly_minutes = 2400
+standard_workdays = ["mon", "tue", "wed", "thu", "fri"]
+# ArbZG limits the week only via 6 × 8 h on average; no fixed weekly cap.
+
+# ArbZG §4: more than 6 h → 30 min, more than 9 h → 45 min; parts ≥ 15 min.
+[[breaks]]
+after_minutes = 360
+break_minutes = 30
+min_part_minutes = 15
+mode = "required"
+
+[[breaks]]
+after_minutes = 540
+break_minutes = 45
+min_part_minutes = 15
+mode = "required"
+
+[vacation]
+default_days = 20 # BUrlG §3: 24 Werktage = 20 workdays on a 5-day week
+unit = "workdays"
+
+# Nationwide public holidays
+[[holidays]]
+id = "new_year"
+name = { de = "Neujahr", en = "New Year's Day" }
+rule = { fixed = "01-01" }
+
+[[holidays]]
+id = "good_friday"
+name = { de = "Karfreitag", en = "Good Friday" }
+rule = { easter_offset = -2 }
+
+[[holidays]]
+id = "easter_monday"
+name = { de = "Ostermontag", en = "Easter Monday" }
+rule = { easter_offset = 1 }
+
+[[holidays]]
+id = "labour_day"
+name = { de = "Tag der Arbeit", en = "Labour Day" }
+rule = { fixed = "05-01" }
+
+[[holidays]]
+id = "ascension"
+name = { de = "Christi Himmelfahrt", en = "Ascension Day" }
+rule = { easter_offset = 39 }
+
+[[holidays]]
+id = "whit_monday"
+name = { de = "Pfingstmontag", en = "Whit Monday" }
+rule = { easter_offset = 50 }
+
+[[holidays]]
+id = "german_unity"
+name = { de = "Tag der Deutschen Einheit", en = "German Unity Day" }
+rule = { fixed = "10-03" }
+
+[[holidays]]
+id = "christmas"
+name = { de = "1. Weihnachtstag", en = "Christmas Day" }
+rule = { fixed = "12-25" }
+
+[[holidays]]
+id = "st_stephen"
+name = { de = "2. Weihnachtstag", en = "Boxing Day" }
+rule = { fixed = "12-26" }
+
+# State holidays. Only holidays that apply in the whole state are listed;
+# local ones (e.g. Fronleichnam in parts of Saxony and Thuringia,
+# Mariä Himmelfahrt in parts of Bavaria, Augsburger Friedensfest) can be
+# added as custom holidays.
+[regions."DE-BW"]
+name = { de = "Baden-Württemberg", en = "Baden-Württemberg" }
+holidays = [
+  { id = "epiphany", name = { de = "Heilige Drei Könige", en = "Epiphany" }, rule = { fixed = "01-06" } },
+  { id = "corpus_christi", name = { de = "Fronleichnam", en = "Corpus Christi" }, rule = { easter_offset = 60 } },
+  { id = "all_saints", name = { de = "Allerheiligen", en = "All Saints' Day" }, rule = { fixed = "11-01" } },
+]
+
+[regions."DE-BY"]
+name = { de = "Bayern", en = "Bavaria" }
+holidays = [
+  { id = "epiphany", name = { de = "Heilige Drei Könige", en = "Epiphany" }, rule = { fixed = "01-06" } },
+  { id = "corpus_christi", name = { de = "Fronleichnam", en = "Corpus Christi" }, rule = { easter_offset = 60 } },
+  { id = "all_saints", name = { de = "Allerheiligen", en = "All Saints' Day" }, rule = { fixed = "11-01" } },
+]
+
+[regions."DE-BE"]
+name = { de = "Berlin", en = "Berlin" }
+holidays = [
+  { id = "womens_day", name = { de = "Internationaler Frauentag", en = "International Women's Day" }, rule = { fixed = "03-08" }, valid_from_year = 2019 },
+]
+
+[regions."DE-BB"]
+name = { de = "Brandenburg", en = "Brandenburg" }
+holidays = [
+  { id = "reformation_day", name = { de = "Reformationstag", en = "Reformation Day" }, rule = { fixed = "10-31" } },
+]
+
+[regions."DE-HB"]
+name = { de = "Bremen", en = "Bremen" }
+holidays = [
+  { id = "reformation_day", name = { de = "Reformationstag", en = "Reformation Day" }, rule = { fixed = "10-31" }, valid_from_year = 2018 },
+]
+
+[regions."DE-HH"]
+name = { de = "Hamburg", en = "Hamburg" }
+holidays = [
+  { id = "reformation_day", name = { de = "Reformationstag", en = "Reformation Day" }, rule = { fixed = "10-31" }, valid_from_year = 2018 },
+]
+
+[regions."DE-HE"]
+name = { de = "Hessen", en = "Hesse" }
+holidays = [
+  { id = "corpus_christi", name = { de = "Fronleichnam", en = "Corpus Christi" }, rule = { easter_offset = 60 } },
+]
+
+[regions."DE-MV"]
+name = { de = "Mecklenburg-Vorpommern", en = "Mecklenburg-Western Pomerania" }
+holidays = [
+  { id = "womens_day", name = { de = "Internationaler Frauentag", en = "International Women's Day" }, rule = { fixed = "03-08" }, valid_from_year = 2023 },
+  { id = "reformation_day", name = { de = "Reformationstag", en = "Reformation Day" }, rule = { fixed = "10-31" } },
+]
+
+[regions."DE-NI"]
+name = { de = "Niedersachsen", en = "Lower Saxony" }
+holidays = [
+  { id = "reformation_day", name = { de = "Reformationstag", en = "Reformation Day" }, rule = { fixed = "10-31" }, valid_from_year = 2018 },
+]
+
+[regions."DE-NW"]
+name = { de = "Nordrhein-Westfalen", en = "North Rhine-Westphalia" }
+holidays = [
+  { id = "corpus_christi", name = { de = "Fronleichnam", en = "Corpus Christi" }, rule = { easter_offset = 60 } },
+  { id = "all_saints", name = { de = "Allerheiligen", en = "All Saints' Day" }, rule = { fixed = "11-01" } },
+]
+
+[regions."DE-RP"]
+name = { de = "Rheinland-Pfalz", en = "Rhineland-Palatinate" }
+holidays = [
+  { id = "corpus_christi", name = { de = "Fronleichnam", en = "Corpus Christi" }, rule = { easter_offset = 60 } },
+  { id = "all_saints", name = { de = "Allerheiligen", en = "All Saints' Day" }, rule = { fixed = "11-01" } },
+]
+
+[regions."DE-SL"]
+name = { de = "Saarland", en = "Saarland" }
+holidays = [
+  { id = "corpus_christi", name = { de = "Fronleichnam", en = "Corpus Christi" }, rule = { easter_offset = 60 } },
+  { id = "assumption", name = { de = "Mariä Himmelfahrt", en = "Assumption Day" }, rule = { fixed = "08-15" } },
+  { id = "all_saints", name = { de = "Allerheiligen", en = "All Saints' Day" }, rule = { fixed = "11-01" } },
+]
+
+[regions."DE-SN"]
+name = { de = "Sachsen", en = "Saxony" }
+holidays = [
+  { id = "reformation_day", name = { de = "Reformationstag", en = "Reformation Day" }, rule = { fixed = "10-31" } },
+  { id = "repentance_day", name = { de = "Buß- und Bettag", en = "Repentance and Prayer Day" }, rule = { weekday_before = { month = 11, day = 23, weekday = "wed" } } },
+]
+
+[regions."DE-ST"]
+name = { de = "Sachsen-Anhalt", en = "Saxony-Anhalt" }
+holidays = [
+  { id = "epiphany", name = { de = "Heilige Drei Könige", en = "Epiphany" }, rule = { fixed = "01-06" } },
+  { id = "reformation_day", name = { de = "Reformationstag", en = "Reformation Day" }, rule = { fixed = "10-31" } },
+]
+
+[regions."DE-SH"]
+name = { de = "Schleswig-Holstein", en = "Schleswig-Holstein" }
+holidays = [
+  { id = "reformation_day", name = { de = "Reformationstag", en = "Reformation Day" }, rule = { fixed = "10-31" }, valid_from_year = 2018 },
+]
+
+[regions."DE-TH"]
+name = { de = "Thüringen", en = "Thuringia" }
+holidays = [
+  { id = "childrens_day", name = { de = "Weltkindertag", en = "World Children's Day" }, rule = { fixed = "09-20" }, valid_from_year = 2019 },
+  { id = "reformation_day", name = { de = "Reformationstag", en = "Reformation Day" }, rule = { fixed = "10-31" } },
+]

@@ -1,0 +1,31 @@
+[package]
+name = "time-core"
+description = "Domain models, persistence and business rules for Time"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# SQLite repositories and services. Pure logic must compile without this
+# feature so the crate can later be built for WASM (see docs/SPEC.md §3.1).
+db = ["dep:sqlx", "dep:tokio"]
+# Derive specta::Type for IPC bindings generation.
+specta = ["dep:specta", "dep:specta-typescript"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+schemars.workspace = true
+sqlx = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+specta = { workspace = true, optional = true }
+specta-typescript = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -132,7 +132,7 @@ time/
 │  ├─ time-core-wasm/        wasm-bindgen wrapper → npm package @time/core-wasm
 │  ├─ time-api-client/       Rust client generated from openapi.json (progenitor)
 │  └─ time-addon-sdk/        Rust SDK for WASM addons
-├─ server/                   (Phase 6) Fastify API (cloud + self-hosted, one image)
+├─ server/                   (Phase 5) Fastify API (cloud + self-hosted, one image)
 ├─ packages/
 │  ├─ api-contract/          openapi.json (generated, committed) + openapi-typescript types
 │  └─ shared-fixtures/       JSON test vectors shared by Rust and TS (sync merge, permissions)
@@ -252,8 +252,8 @@ Cache these in a `daily_summary` table that is recomputed on change, for fast da
   - The icon shows state (idle / tracking / paused) and the elapsed time as the tooltip (Linux: menu title).
   - Menu: current activity + stop, pause/resume, **5 most recent projects** for one-click switching, "New entry…", "Open dashboard", Quit.
 - **Global shortcuts** (configurable)
-  - `Ctrl+Shift+Space`: toggle the main window (exists today)
-  - `Ctrl+Shift+T`: open the **quick-switch palette**, a small always-on-top window
+  - `Ctrl+Shift+T`: toggle the main window
+  - `Ctrl+Shift+Space`: open the **quick-switch palette**, a small always-on-top window
   - `Ctrl+Shift+P`: pause/resume
 - **Quick-switch palette**
   - Fuzzy search over projects (name and alias), tags and recent combinations.
@@ -279,7 +279,7 @@ Rules are evaluated by the Rust timer engine, which runs whether or not the wind
 | **Idle** | No input for N min (OS idle time) → ask on return: *discard idle time / keep / assign to other project* | 10 min, prompt |
 | **Lock / Suspend** | Screen locked or system sleep → pause from lock time; resume prompt on unlock | on |
 | **Night / end of day** | Timer still running after `latest_end` of the schedule or a fixed time (e.g. 22:00) → stop at last activity | 22:00 |
-| **Max day length / rest time** | Warn when work exceeds the profile's daily max, or when rest between days is below its minimum; org-configurable | From profile (AT: 10 h / 11 h rest) |
+| **Max day length / rest time** | Warn when work exceeds the profile's daily max, or when rest between days is below its minimum; org-configurable | From profile (AT: 12 h / 11 h rest) |
 
 No auto-pause rule hardcodes a legal value. All defaults come from the active country profile (§5.13), and users or orgs may only make them stricter unless the profile marks a value as `advisory`.
 
@@ -314,6 +314,7 @@ Reports page: filter by period, user(s), group, project, tag, cost center or bil
 - Reports and exports aggregate by cost center. In the org edition, only admins can edit the list.
 
 ### 5.7 Calendar Integration
+Delivered as first-party **addons** (§5.12), not built into the app. The addon host provides the secret store, OAuth helper, scheduled sync and a timeline contribution they need.
 - Providers:
   - **Microsoft 365 / Outlook** (Microsoft Graph, OAuth 2 PKCE, loopback redirect)
   - **Google Calendar** (OAuth 2 PKCE)
@@ -361,7 +362,7 @@ Reports page: filter by period, user(s), group, project, tag, cost center or bil
 - **Hooks** (event bus): `entry.started`, `entry.stopped`, `entry.created/updated/deleted`, `day.closed`, `report.export` (custom export formats), `quickswitch.suggest`, `schedule.tick`.
 - **UI contributions** (v2): settings panel (declarative JSON form schema), dashboard widget (declarative chart spec), report export format. No arbitrary HTML/JS in v1, for security.
 - **Distribution**: local install from file in v1. Later a signed registry, and orgs can allowlist addons.
-- First-party addons to prove the API: Jira/GitHub issue linking, configurable CSV export format, Timeular BLE tracker, office Wi-Fi detection.
+- First-party addons to prove the API: calendars (§5.7, the first ones), Jira/GitHub issue linking, configurable CSV export format, Timeular BLE tracker, office Wi-Fi detection.
 
 ### 5.13 Country Profiles (Jurisdictions)
 All country-specific behaviour is **data, not code**. Adding a country means adding one file plus fixture tests. No Rust or Vue changes are needed.
@@ -379,15 +380,15 @@ default_locale = "de-AT"
 duration_format = "decimal"       # or "hm"
 
 [work_time]
-max_daily_minutes   = 600         # 10 h
-max_weekly_minutes  = 3000        # 50 h
+max_daily_minutes   = 720         # 12 h incl. overtime (AZG §9)
+max_weekly_minutes  = 3600        # 60 h incl. overtime
 min_daily_rest_minutes = 660      # 11 h
 standard_weekly_minutes = 2400    # 40 h default schedule
 
-[[breaks]]                        # evaluated in order, highest matching threshold wins
+[[breaks]]                        # the rule with the highest matching threshold wins
 after_minutes = 360               # > 6 h worked
 break_minutes = 30
-splittable = [10, 10, 10]         # or [15, 15]; optional
+min_part_minutes = 10             # gaps of at least this length count towards the break
 mode = "required"                 # required | advisory
 
 [vacation]
@@ -435,7 +436,7 @@ default = ["csv", "xlsx"]         # suggested export formats; addons can registe
 
 ---
 
-## 7. Server (Phase 6+)
+## 7. Server (Phase 5+)
 
 ### 7.0 Stack
 | Concern | Choice |
@@ -558,7 +559,7 @@ Pricing difference (suggested): self-hosted is sold as annual seat licenses (Ent
 ## 8. Frontend
 
 ### 8.1 Navigation (sidebar)
-`Dashboard` · `Timesheet` (day/week timeline) · `Projects` · `Tags` · `Reports` · `Absences` · `Calendar` · *(org)* `Team` (online users, work location) · `Meetings` · `Admin` (users, groups, cost centers, policies) · `Addons` · `Settings`
+`Dashboard` · `Timesheet` (day/week timeline) · `Projects` · `Tags` · `Reports` · `Absences` · *(org)* `Team` (online users, work location) · `Meetings` · `Admin` (users, groups, cost centers, policies) · `Addons` · `Settings`
 
 ### 8.2 Windows
 - **main**: the full app (existing)

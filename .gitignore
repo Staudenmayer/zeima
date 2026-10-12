@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust workspace build output
+/target/
+
+# Built addon packages
+addons/dist/
+addons/*/target/

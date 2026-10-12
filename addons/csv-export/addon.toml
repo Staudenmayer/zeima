@@ -1,0 +1,50 @@
+# Example addon: a report export format with its own settings.
+id = "dev.time.csv-export"
+name = "Custom CSV export"
+version = "1.0.0"
+author = "Time"
+description = "Exports report entries as CSV with the columns, delimiter and decimal separator you choose."
+min_app_version = "0.1.0"
+wasm = "csv_export.wasm"
+hooks = ["report.export"]
+
+[[export_formats]]
+id = "entries"
+name = "CSV (custom columns)"
+extension = "csv"
+
+[[settings]]
+key = "columns"
+label = "Columns"
+type = "text"
+default = "date,start,end,hours,project,alias,tags,note"
+description = "Comma-separated: date, start, end, hours, minutes, project, alias, client, tags, cost_center, billable, note"
+
+[[settings]]
+key = "delimiter"
+label = "Delimiter"
+type = "select"
+default = "auto"
+options = [
+  { value = "auto", label = "Automatic (; with decimal comma, otherwise ,)" },
+  { value = ";", label = "Semicolon ;" },
+  { value = ",", label = "Comma ," },
+  { value = "tab", label = "Tab" },
+]
+
+[[settings]]
+key = "decimal"
+label = "Decimal separator"
+type = "select"
+default = "auto"
+options = [
+  { value = "auto", label = "From the app's settings" },
+  { value = "point", label = "Point (7.50)" },
+  { value = "comma", label = "Comma (7,50)" },
+]
+
+[[settings]]
+key = "header"
+label = "Header row"
+type = "boolean"
+default = "true"

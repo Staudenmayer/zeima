@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AddonManifest",
+  "type": "object",
+  "properties": {
+    "allowed_hosts": {
+      "description": "Hosts reachable with the `network` permission, e.g. `api.github.com`\nor `*.example.com`.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
+    "author": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string",
+      "default": ""
+    },
+    "export_formats": {
+      "description": "Formats offered in the report export menu (`report.export`).",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ExportFormatDef"
+      }
+    },
+    "homepage": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "hooks": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Hook"
+      }
+    },
+    "id": {
+      "description": "Reverse-DNS id, e.g. `com.example.csv-export`.",
+      "type": "string"
+    },
+    "min_app_version": {
+      "description": "Oldest app version the addon works with.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "name": {
+      "type": "string"
+    },
+    "permissions": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Permission"
+      }
+    },
+    "schedule_minutes": {
+      "description": "Interval for `schedule.tick`, at least 1.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "default": null,
+      "minimum": 0
+    },
+    "settings": {
+      "description": "Settings form, in display order.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SettingField"
+      }
+    },
+    "version": {
+      "description": "`MAJOR.MINOR.PATCH`.",
+      "type": "string"
+    },
+    "wasm": {
+      "description": "WASM module, relative to `addon.toml`.",
+      "type": "string",
+      "default": "plugin.wasm"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "version",
+    "author"
+  ],
+  "$defs": {
+    "ExportFormatDef": {
+      "type": "object",
+      "properties": {
+        "extension": {
+          "description": "File extension without dot, e.g. `csv`.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Unique within the addon.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Shown in the report export menu.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "extension"
+      ]
+    },
+    "Hook": {
+      "description": "Events and calls an addon reacts to. Each hook maps to an exported\nWASM function (docs/addons.md).",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "entry.started",
+            "entry.stopped",
+            "entry.created",
+            "entry.updated",
+            "entry.deleted",
+            "day.closed"
+          ]
+        },
+        {
+          "description": "Custom report export formats (`export_formats`).",
+          "type": "string",
+          "const": "report.export"
+        },
+        {
+          "description": "Extra options in the quick switch.",
+          "type": "string",
+          "const": "quickswitch.suggest"
+        },
+        {
+          "description": "Called every `schedule_minutes`.",
+          "type": "string",
+          "const": "schedule.tick"
+        }
+      ]
+    },
+    "Permission": {
+      "description": "What an addon may do. The user grants all requested permissions when\ninstalling; host functions check them on every call.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "projects:read",
+            "tags:read",
+            "cost-centers:read"
+          ]
+        },
+        {
+          "description": "Read time entries.",
+          "type": "string",
+          "const": "entries:read"
+        },
+        {
+          "description": "Create time entries.",
+          "type": "string",
+          "const": "entries:write"
+        },
+        {
+          "description": "Show desktop notifications.",
+          "type": "string",
+          "const": "notify"
+        },
+        {
+          "description": "HTTP requests, only to `allowed_hosts`.",
+          "type": "string",
+          "const": "network"
+        }
+      ]
+    },
+    "SettingField": {
+      "description": "One field of the addon's settings form. Values reach the addon as\nExtism config strings under `key` (booleans as `true`/`false`).",
+      "type": "object",
+      "properties": {
+        "default": {
+          "description": "Default value as text.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "key": {
+          "description": "Letters, digits and `_`.",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SettingOption"
+          }
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "type": {
+          "$ref": "#/$defs/SettingType"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "type"
+      ]
+    },
+    "SettingOption": {
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ]
+    },
+    "SettingType": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "text",
+            "number",
+            "boolean"
+          ]
+        },
+        {
+          "description": "One of `options`.",
+          "type": "string",
+          "const": "select"
+        },
+        {
+          "description": "Text shown masked in the form.",
+          "type": "string",
+          "const": "password"
+        }
+      ]
+    }
+  }
+}
