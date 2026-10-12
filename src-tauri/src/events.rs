@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri_specta::Event;
-use time_core::model::TimerState;
+use zeima_core::model::TimerState;
 
 /// The timer started, stopped, paused or resumed.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]

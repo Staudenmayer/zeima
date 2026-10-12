@@ -386,9 +386,9 @@ mod tests {
 
     #[tokio::test]
     async fn bootstrap_is_stable_across_reopen() {
-        let dir = std::env::temp_dir().join(format!("time-core-test-{}", new_id()));
+        let dir = std::env::temp_dir().join(format!("zeima-core-test-{}", new_id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("time.db");
+        let path = dir.join("zeima.db");
         let clock: Arc<dyn Clock> = Arc::new(ManualClock::new(1_000));
         let first = Core::open(&path, clock.clone()).await.unwrap().ctx().clone();
         let second = Core::open(&path, clock).await.unwrap().ctx().clone();

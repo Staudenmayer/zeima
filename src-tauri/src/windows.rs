@@ -158,7 +158,7 @@ fn create_prompt(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     const HEIGHT: f64 = 460.0;
     const MARGIN: f64 = 16.0;
     let mut builder = WebviewWindowBuilder::new(app, PROMPT, WebviewUrl::App("/prompt".into()))
-        .title("Time")
+        .title("Zeima")
         .inner_size(WIDTH, HEIGHT)
         .resizable(false)
         .decorations(false)

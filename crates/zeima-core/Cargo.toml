@@ -1,6 +1,6 @@
 [package]
-name = "time-core"
-description = "Domain models, persistence and business rules for Time"
+name = "zeima-core"
+description = "Domain models, persistence and business rules for Zeima"
 edition.workspace = true
 version.workspace = true
 license.workspace = true

@@ -8,7 +8,7 @@ use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
 use tauri::{AppHandle, Manager, Wry};
 
-use time_core::model::{RecentActivity, StartTimer, TimeEntry, TimerState};
+use zeima_core::model::{RecentActivity, StartTimer, TimeEntry, TimerState};
 
 use crate::commands;
 use crate::events::DataKind;
@@ -96,7 +96,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     )?;
     let icon = TrayIconBuilder::with_id("main")
         .icon(idle.clone())
-        .tooltip("Time")
+        .tooltip("Zeima")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(on_menu_event)
@@ -130,7 +130,7 @@ pub async fn refresh(app: &AppHandle) {
     let _ = tray.icon.set_icon(Some(icon.clone()));
     let _ = tray
         .icon
-        .set_tooltip(Some(format!("Time · {}", view.status_line)));
+        .set_tooltip(Some(format!("Zeima · {}", view.status_line)));
     let _ = tray.icon.set_title(view.title.as_deref());
     match build_menu(app, &view) {
         Ok(menu) => {
@@ -140,7 +140,7 @@ pub async fn refresh(app: &AppHandle) {
     }
 }
 
-async fn load_view(app: &AppHandle) -> time_core::Result<View> {
+async fn load_view(app: &AppHandle) -> zeima_core::Result<View> {
     let state = app.state::<AppState>();
     let core = &state.core;
     let lang = state.settings().language();
@@ -361,7 +361,7 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
     }
 }
 
-async fn handle_async(app: &AppHandle, id: &str) -> time_core::Result<()> {
+async fn handle_async(app: &AppHandle, id: &str) -> zeima_core::Result<()> {
     let state = app.state::<AppState>();
     let core = &state.core;
     match id {

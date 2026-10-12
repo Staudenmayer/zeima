@@ -1,6 +1,6 @@
-# Writing addons for Time
+# Writing addons for Zeima
 
-Addons add features to Time without changing the app: export formats, quick-switch options, reactions to tracked time, and integrations with other services. An addon is a WebAssembly (WASM) module plus a manifest, `addon.toml`. Time runs it in a sandbox, so it can only use what the user granted when installing it.
+Addons add features to Zeima without changing the app: export formats, quick-switch options, reactions to tracked time, and integrations with other services. An addon is a WebAssembly (WASM) module plus a manifest, `addon.toml`. Zeima runs it in a sandbox, so it can only use what the user granted when installing it.
 
 This guide walks through a complete export-format addon, then documents everything an addon can use. The two addons in [`addons/`](../addons) are working examples:
 
@@ -33,7 +33,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-time-addon-sdk = { git = "<repository URL>", package = "time-addon-sdk" }
+zeima-addon-sdk = { git = "<repository URL>", package = "zeima-addon-sdk" }
 extism-pdk = "1.4"   # required: the #[plugin_fn] macro refers to it by name
 
 [profile.release]
@@ -42,7 +42,7 @@ lto = true
 strip = true
 ```
 
-Inside this repository, use `time-addon-sdk = { path = "../../crates/time-addon-sdk" }` instead.
+Inside this repository, use `zeima-addon-sdk = { path = "../../crates/zeima-addon-sdk" }` instead.
 
 ### 2. Write the manifest
 
@@ -74,7 +74,7 @@ The format appears in the Reports page's **Export** menu once the addon is insta
 use std::collections::HashMap;
 
 use extism_pdk::{plugin_fn, FnResult, Json};
-use time_addon_sdk::{ExportRequest, ExportResult};
+use zeima_addon_sdk::{ExportRequest, ExportResult};
 
 #[plugin_fn]
 pub fn export_report(Json(req): Json<ExportRequest>) -> FnResult<Json<ExportResult>> {
@@ -103,9 +103,9 @@ cp target/wasm32-unknown-unknown/release/hours_export.wasm .
 zip hours-export-1.0.0.zip addon.toml hours_export.wasm
 ```
 
-In Time, open **Addons → Install from file** and pick the zip. Time shows the permissions and hooks it asks for, then installs and enables it. Inside this repository, `addons/build.sh <folder>` does the build and the zip in one step.
+In Zeima, open **Addons → Install from file** and pick the zip. Zeima shows the permissions and hooks it asks for, then installs and enables it. Inside this repository, `addons/build.sh <folder>` does the build and the zip in one step.
 
-While developing, you can pick the `addon.toml` itself instead of a zip; Time then reads the module named in `wasm` from the same folder. Install again after each build: an install with the same `id` replaces the old version and keeps its settings.
+While developing, you can pick the `addon.toml` itself instead of a zip; Zeima then reads the module named in `wasm` from the same folder. Install again after each build: an install with the same `id` replaces the old version and keeps its settings.
 
 ## The manifest
 
@@ -117,7 +117,7 @@ While developing, you can pick the `addon.toml` itself instead of a zip; Time th
 | `author` | yes | Shown in the install dialog. |
 | `description` | | One or two sentences for the Addons page. |
 | `homepage` | | URL for more information. |
-| `min_app_version` | | Oldest Time version the addon supports. Older apps refuse to install it. |
+| `min_app_version` | | Oldest Zeima version the addon supports. Older apps refuse to install it. |
 | `wasm` | | Module file, relative to `addon.toml`. Default `plugin.wasm`. |
 | `permissions` | | What the addon may do (see [Permissions](#permissions)). |
 | `allowed_hosts` | with `network` | Hosts for HTTP requests: `api.example.com` or `*.example.com`. No scheme, path or port. |
@@ -126,11 +126,11 @@ While developing, you can pick the `addon.toml` itself instead of a zip; Time th
 | `[[export_formats]]` | with `report.export` | `id`, `name` (menu label), `extension` (without dot). |
 | `[[settings]]` | | Fields of the addon's settings form (see [Settings](#settings)). |
 
-Time validates the manifest when installing and refuses inconsistent ones, for example `network` without `allowed_hosts`. The JSON Schema is [`crates/time-core/addon.schema.json`](../crates/time-core/addon.schema.json); editors with TOML schema support can use it for completion.
+Zeima validates the manifest when installing and refuses inconsistent ones, for example `network` without `allowed_hosts`. The JSON Schema is [`crates/zeima-core/addon.schema.json`](../crates/zeima-core/addon.schema.json); editors with TOML schema support can use it for completion.
 
 ## Hooks
 
-Each hook calls one exported function. Declare only the hooks you implement: Time calls only those, and a declared hook without its export is reported as an error on the Addons page.
+Each hook calls one exported function. Declare only the hooks you implement: Zeima calls only those, and a declared hook without its export is reported as an error on the Addons page.
 
 | Hook | Export | Input | Output |
 |---|---|---|---|
@@ -144,7 +144,7 @@ Each hook calls one exported function. Declare only the hooks you implement: Tim
 | `report.export` | `export_report` | `ExportRequest` | `ExportResult { content }` |
 | `quickswitch.suggest` | `quickswitch_suggest` | `SuggestRequest { query }` | `Vec<Suggestion>` |
 
-All inputs and outputs are JSON with camelCase fields; the SDK types handle the conversion. Unknown fields are ignored, so addons keep working when Time adds fields.
+All inputs and outputs are JSON with camelCase fields; the SDK types handle the conversion. Unknown fields are ignored, so addons keep working when Zeima adds fields.
 
 **Events.** `on_event` receives every event hook the addon declared; check `event.kind` (`"entry.stopped"` etc.). `Event::entry()`, `Event::entry_id()` and `Event::date()` read the common fields. `day.closed` arrives once per day after midnight, also for days the app missed (up to a week back), with `day` holding the work-time result: `netMs`, `targetMs`, `deltaMs`, `firstStart`, `lastEnd`, `holiday` and more. Starting the timer sends `entry.created` and `entry.started`; stopping or pausing sends `entry.updated` and `entry.stopped`.
 
@@ -157,13 +157,13 @@ Events about entries the addon created itself (with `host::create_entry`) are no
 - `entries`, `projects`, `tags`, `costCenters`: the matching entries and the names to resolve their ids.
 - `regional`: the user's formats (`dateFormat`, `timeFormat`, `numberFormat`, `weekStart`, `timezone`, `language`), with "automatic" already resolved.
 
-Return the whole file as `content`; Time asks the user where to save it.
+Return the whole file as `content`; Zeima asks the user where to save it.
 
 **Quick switch.** `quickswitch_suggest` is called while the user types, with what they typed. Return up to 20 options. Choosing one starts the timer with its `activityId`, `projectId`, `tagIds` and `note`; without `activityId` the user picks the activity first. Answer fast: suggestions that take longer than 0.8 s are dropped.
 
 ## Host API
 
-The SDK's `host` module calls back into Time. Each call fails, and the hook with it, if the permission named here was not granted.
+The SDK's `host` module calls back into Zeima. Each call fails, and the hook with it, if the permission named here was not granted.
 
 | Function | Permission | Returns |
 |---|---|---|
@@ -198,7 +198,7 @@ description = "Shown under the field."
 options = [{ value = ";", label = "Semicolon" }, { value = ",", label = "Comma" }]  # select only
 ```
 
-Values reach the addon as Extism config strings. Read them with `extism_pdk::config::get("delimiter")`; unset fields get their `default`. Booleans are `"true"` or `"false"`. Time checks numbers and select values before saving, and reloads the addon with the new values.
+Values reach the addon as Extism config strings. Read them with `extism_pdk::config::get("delimiter")`; unset fields get their `default`. Booleans are `"true"` or `"false"`. Zeima checks numbers and select values before saving, and reloads the addon with the new values.
 
 ## Permissions
 
@@ -221,8 +221,8 @@ Ask for as little as you need: the install dialog lists every permission in plai
 - The module may be at most 50 MB.
 - Addons have no file system or clock access (no WASI). The current time arrives as `Tick.now`, or take it from the event you are handling.
 
-When a call fails or hits a limit, Time shows the error on the Addons page and carries on.
+When a call fails or hits a limit, Zeima shows the error on the Addons page and carries on.
 
 ## Versioning
 
-Increase `version` with every release. Installing a package with the same `id` replaces the old version; settings and storage are kept. Use `min_app_version` when you rely on features of a newer Time. Within a major version of the SDK, new fields are only ever added, never removed or renamed.
+Increase `version` with every release. Installing a package with the same `id` replaces the old version; settings and storage are kept. Use `min_app_version` when you rely on features of a newer Zeima. Within a major version of the SDK, new fields are only ever added, never removed or renamed.

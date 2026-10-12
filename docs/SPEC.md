@@ -1,7 +1,7 @@
-# Time — Product & Technical Specification
+# Zeima — Product & Technical Specification
 
 > Status: Draft v0.1 · 2026-10-04
-> Working name: **Time** (current package name `tray-app`, to be renamed)
+> Name: **Zeima**
 
 A local-first desktop time tracking and work-time management app that lives in the system tray.
 It combines **Timeular**-style fast, low-friction activity tracking with **BMD**-style
@@ -65,7 +65,7 @@ It runs fully offline for one person. A paid tier adds sync and organization fea
 │  ──────┼────────────────────────────────────────────────────────────────────── │
 │  Rust app shell (src-tauri)                                                    │
 │    tray · global shortcuts · windows · OS idle/lock/suspend watchers           │
-│    command handlers ──► time-core (domain crate)                               │
+│    command handlers ──► zeima-core (domain crate)                               │
 │                            ├─ repositories (SQLite via sqlx)                   │
 │                            ├─ timer engine & auto-pause rules                  │
 │                            ├─ work-time calculator (schedules, balances)       │
@@ -77,13 +77,13 @@ It runs fully offline for one person. A paid tier adds sync and organization fea
              Auth Code + PKCE)               │ Bearer access token (paid tiers only)
                     │                        │
 ┌───────────────────▼──────────┐   ┌─────────▼──────────────────────────────────────┐
-│  Keycloak                    │   │  Time API (Node 24 · Fastify · TypeScript)     │
+│  Keycloak                    │   │  Zeima API (Node 24 · Fastify · TypeScript)     │
 │   realm "time"               │   │   OpenAPI 3.1 via @fastify/swagger → /docs     │
 │   users · credentials · MFA  │◄──┤   JWT verify (JWKS) · authz policy layer       │
 │   organizations · groups     │   │   sync · org data · presence (WS) · meetings   │
 │   roles (realm + org groups) │──►│   calendar sync · licensing · billing webhooks │
 │   SSO brokering (Entra,      │   │   Keycloak Admin API client (service account)  │
-│   Google, SAML, LDAP)        │   │   @time/core-wasm (time-core compiled to WASM) │
+│   Google, SAML, LDAP)        │   │   @time/core-wasm (zeima-core compiled to WASM) │
 │   events ──► webhook ────────┼──►│                                                │
 └──────────────┬───────────────┘   └──────────────┬─────────────────────────────────┘
                │ own DB                           │ Drizzle ORM
@@ -100,7 +100,7 @@ It runs fully offline for one person. A paid tier adds sync and organization fea
 | Local store | **SQLite** (WAL mode) in the app data dir | Embedded, robust, single file and easy backup. The current `tauri-plugin-sql` `postgres` feature is not suitable for local-first use. |
 | Data access | **Rust owns the DB** (`sqlx` with the sqlite feature). The frontend calls typed commands and never sends raw SQL. | The timer, auto-pause and sync all run in Rust even when the window is hidden. One write path means one place for validation, change logging and permissions. `tauri-plugin-sql` will be removed. |
 | IPC typing | **tauri-specta** generates `src/bindings.ts` | End-to-end types with no hand-written `invoke` strings. |
-| Domain code | Separate crate **`crates/time-core`** with no Tauri dependency | Unit-testable. It is also compiled to **WASM** (`@time/core-wasm`) so the Node server uses exactly the same work-time math, country profiles and holiday rules as the desktop. That requires pure logic to stay I/O-free, with SQLite repositories behind a `db` cargo feature. |
+| Domain code | Separate crate **`crates/zeima-core`** with no Tauri dependency | Unit-testable. It is also compiled to **WASM** (`@time/core-wasm`) so the Node server uses exactly the same work-time math, country profiles and holiday rules as the desktop. That requires pure logic to stay I/O-free, with SQLite repositories behind a `db` cargo feature. |
 | Server | **Fastify** (TypeScript, Node 24 LTS) + TypeBox schemas | Fast, schema-first. Every route schema produces the OpenAPI document, request validation and response serialization from a single definition. |
 | API docs / contract | **@fastify/swagger** (OpenAPI 3.1) + **@fastify/swagger-ui** at `/docs` | The generated `openapi.json` is the contract. The desktop Rust sync client and the Vue API types are generated from it. |
 | Identity & access | **Keycloak** (OIDC) | Handles login, MFA, password reset, social login, enterprise SSO (Entra ID, Google, SAML, LDAP/AD) and org/role assignment without us building it. It is self-hostable, which matches §7.1. |
@@ -127,11 +127,11 @@ time/
 │  └─ i18n/                  de.ts, en.ts
 ├─ src-tauri/                Tauri app shell (tray, windows, commands, OS hooks)
 ├─ crates/
-│  ├─ time-core/             domain models, repos, timer, work-time calc, rules
+│  ├─ zeima-core/             domain models, repos, timer, work-time calc, rules
 │  │  └─ jurisdictions/      country profiles: AT.toml, DE.toml, CH.toml + fixtures
-│  ├─ time-core-wasm/        wasm-bindgen wrapper → npm package @time/core-wasm
+│  ├─ zeima-core-wasm/        wasm-bindgen wrapper → npm package @time/core-wasm
 │  ├─ time-api-client/       Rust client generated from openapi.json (progenitor)
-│  └─ time-addon-sdk/        Rust SDK for WASM addons
+│  └─ zeima-addon-sdk/        Rust SDK for WASM addons
 ├─ server/                   (Phase 5) Fastify API (cloud + self-hosted, one image)
 ├─ packages/
 │  ├─ api-contract/          openapi.json (generated, committed) + openapi-typescript types
@@ -375,7 +375,7 @@ Delivered as first-party **addons** (§5.12), not built into the app. The addon 
 ### 5.13 Country Profiles (Jurisdictions)
 All country-specific behaviour is **data, not code**. Adding a country means adding one file plus fixture tests. No Rust or Vue changes are needed.
 
-- **Location**: `crates/time-core/jurisdictions/<ISO-3166-1>.toml` (e.g. `AT.toml`, `DE.toml`, `CH.toml`). The files are embedded at build time. Addons and self-hosted servers can provide additional or overriding profiles.
+- **Location**: `crates/zeima-core/jurisdictions/<ISO-3166-1>.toml` (e.g. `AT.toml`, `DE.toml`, `CH.toml`). The files are embedded at build time. Addons and self-hosted servers can provide additional or overriding profiles.
 - **Inheritance**: `extends = "AT"` plus region sections (`[regions."AT-9"]` for Vienna, `[regions."DE-BY"]` for Bavaria). A region only lists what differs.
 - **Profile contents**:
 
@@ -433,7 +433,7 @@ default = ["csv", "xlsx"]         # suggested export formats; addons can registe
 
 ## 6. Sync Protocol (Pro / Org)
 
-1. Every local write goes through `time-core` and appends a `ChangeLog` row in the same transaction.
+1. Every local write goes through `zeima-core` and appends a `ChangeLog` row in the same transaction.
 2. **Push**: `POST /v1/sync/push { device_id, changes[] }`. The server validates permissions and applies field-level LWW by HLC, with rule overrides (e.g. `locked` entries can only be changed by managers). It returns accepted and rejected changes with reasons.
 3. **Pull**: `GET /v1/sync/pull?cursor=…` returns changes since the cursor for all workspaces the user can access (filtered by permission).
 4. Realtime: the WebSocket notifies "changes available" and carries presence.
@@ -544,7 +544,7 @@ Writes always go to Keycloak first (through the API's admin endpoints), then the
 **Realm as code**: `deploy/keycloak/realm-time.json` is versioned and imported on start (`--import-realm`). Changes are applied with `keycloak-config-cli` in CI/CD so cloud and self-hosted stay identical.
 
 ### 7.1 Deployment: Cloud-first, Self-hostable
-The **cloud** (EU region, GDPR) is the primary product and gets features first. The **self-hosted** edition runs the **same container images** (Time API + Keycloak + realm config) with a different configuration; there is no fork. Rules that keep this possible:
+The **cloud** (EU region, GDPR) is the primary product and gets features first. The **self-hosted** edition runs the **same container images** (Zeima API + Keycloak + realm config) with a different configuration; there is no fork. Rules that keep this possible:
 
 | Concern | Rule |
 |---|---|
@@ -575,7 +575,7 @@ Pricing difference (suggested): self-hosted is sold as annual seat licenses (Ent
 - **prompt**: small notification-style window for idle, morning and forgotten-timer prompts (native notifications where actions are supported)
 
 ### 8.3 State
-Pinia stores wrap generated bindings. Rust emits events (`timer://tick`, `entry://changed`, `presence://changed`) and stores subscribe to them. The UI never computes work-time math itself; it asks `time-core`.
+Pinia stores wrap generated bindings. Rust emits events (`timer://tick`, `entry://changed`, `presence://changed`) and stores subscribe to them. The UI never computes work-time math itself; it asks `zeima-core`.
 
 ### 8.4 i18n
 German and English from day one (both exist). Dates and numbers use the user locale. Durations are shown as `7:42 h` and as decimal `7.70 h` (toggle; accounting systems often need decimal).
@@ -592,7 +592,7 @@ German and English from day one (both exist). Dates and numbers use the user loc
 ---
 
 ## 10. Testing
-- `time-core`: unit tests for the work-time calculator (DST, cross-midnight, overlaps, schedule changes, holidays), auto-pause rules (simulated clock) and permission matrix. Property tests (`proptest`) for interval merging.
+- `zeima-core`: unit tests for the work-time calculator (DST, cross-midnight, overlaps, schedule changes, holidays), auto-pause rules (simulated clock) and permission matrix. Property tests (`proptest`) for interval merging.
 - Sync: deterministic multi-device simulation tests (two clients, one server, randomized op order → converge). Shared JSON test vectors run in both Rust and TS.
 - Server: Vitest + `app.inject()` per module; integration tests with Testcontainers (Postgres + Keycloak with realm import, real tokens); authz matrix tests from `permissions.yaml`; `oasdiff` breaking-change check; schema-lint (every route has response schemas).
 - Frontend: Vitest for stores and composables; Playwright (or WebdriverIO with tauri-driver) for smoke E2E.

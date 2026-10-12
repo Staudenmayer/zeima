@@ -5,10 +5,10 @@ mod common;
 use std::sync::Arc;
 
 use chrono::{NaiveDate, TimeZone};
-use time_core::clock::ManualClock;
-use time_core::model::{AbsenceInput, BalanceAdjustmentInput, EntryInput, HalfDay};
-use time_core::worktime::{parse_hhmm, ScheduleModel};
-use time_core::{Core, Error, WorkScheduleInput};
+use zeima_core::clock::ManualClock;
+use zeima_core::model::{AbsenceInput, BalanceAdjustmentInput, EntryInput, HalfDay};
+use zeima_core::worktime::{parse_hhmm, ScheduleModel};
+use zeima_core::{Core, Error, WorkScheduleInput};
 
 const MIN: i64 = 60_000;
 const HOUR: i64 = 60 * MIN;
@@ -96,7 +96,7 @@ async fn work_days_follow_entries_holidays_and_breaks() {
     assert_eq!(days[1].delta_ms, -90 * MIN);
 }
 
-async fn day(core: &Core) -> time_core::worktime::WorkDay {
+async fn day(core: &Core) -> zeima_core::worktime::WorkDay {
     core.work_days(date("2026-10-20"), date("2026-10-20"))
         .await
         .unwrap()

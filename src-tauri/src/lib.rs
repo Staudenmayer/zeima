@@ -20,8 +20,8 @@ use std::sync::{Arc, RwLock};
 use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
 use tauri_plugin_window_state::StateFlags;
-use time_core::clock::SystemClock;
-use time_core::Core;
+use zeima_core::clock::SystemClock;
+use zeima_core::Core;
 
 use crate::state::AppState;
 
@@ -173,7 +173,7 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let core =
-                tauri::async_runtime::block_on(Core::open(&data_dir.join("time.db"), Arc::new(SystemClock)))?;
+                tauri::async_runtime::block_on(Core::open(&data_dir.join("zeima.db"), Arc::new(SystemClock)))?;
             let settings = tauri::async_runtime::block_on(settings::load(&core));
             // Before anything computes days: zone and week start from the settings.
             tauri::async_runtime::block_on(settings::apply_regional(&core, &settings));

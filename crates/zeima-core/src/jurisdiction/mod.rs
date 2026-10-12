@@ -1,7 +1,7 @@
 //! Country profiles: legal work-time rules, breaks, vacation defaults and
 //! public holidays as data (docs/SPEC.md §5.13, docs/country-profiles.md).
 //!
-//! Profiles are TOML files in `crates/time-core/jurisdictions/`, embedded at
+//! Profiles are TOML files in `crates/zeima-core/jurisdictions/`, embedded at
 //! build time. Adding a country means adding a file and its fixtures; no code
 //! changes.
 

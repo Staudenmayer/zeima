@@ -18,7 +18,7 @@ documented APIs.
   owns authentication, org membership, roles and groups. Record-level
   authorization stays in the API (`can()`), not in Keycloak Authorization
   Services.
-- Domain math is shared by compiling `time-core` to WASM.
+- Domain math is shared by compiling `zeima-core` to WASM.
 - Cloud and self-hosted run the same images; only Postgres and Keycloak are
   required.
 

@@ -3,7 +3,7 @@
 
 use extism_pdk::{config, plugin_fn, FnResult, Json};
 use serde::{Deserialize, Serialize};
-use time_addon_sdk::{host, Event, SuggestRequest, Suggestion};
+use zeima_addon_sdk::{host, Event, SuggestRequest, Suggestion};
 
 const KEY: &str = "recent";
 

@@ -5,13 +5,13 @@ use chrono::NaiveDate;
 use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, State};
-use time_core::jurisdiction::{self, ProfileInfo};
-use time_core::model::{
+use zeima_core::jurisdiction::{self, ProfileInfo};
+use zeima_core::model::{
     Absence, AbsenceInput, AbsenceType, AbsenceTypeInput, BalanceAdjustment, BalanceAdjustmentInput,
     CustomHoliday, JurisdictionSelection, WorkSettings,
 };
-use time_core::worktime::{WorkDay, WorkSchedule};
-use time_core::{
+use zeima_core::worktime::{WorkDay, WorkSchedule};
+use zeima_core::{
     AwayItem, AwayResolution, Balance, HolidayView, ProfileSummary, VacationSummary, WorkScheduleInput,
 };
 

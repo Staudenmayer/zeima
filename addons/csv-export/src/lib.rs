@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use extism_pdk::{config, plugin_fn, FnResult, Json};
-use time_addon_sdk::{Entry, ExportRequest, ExportResult, Project};
+use zeima_addon_sdk::{Entry, ExportRequest, ExportResult, Project};
 
 #[plugin_fn]
 pub fn export_report(Json(req): Json<ExportRequest>) -> FnResult<Json<ExportResult>> {

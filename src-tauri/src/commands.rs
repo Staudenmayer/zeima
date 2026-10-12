@@ -1,4 +1,4 @@
-//! IPC commands. Each one is a thin wrapper around `time-core`; after a
+//! IPC commands. Each one is a thin wrapper around `zeima-core`; after a
 //! write it calls [`changed`] so windows and the tray update.
 
 use serde::Serialize;
@@ -6,12 +6,12 @@ use specta::Type;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_specta::Event;
-use time_core::locale::RegionalFormats;
-use time_core::model::{
+use zeima_core::locale::RegionalFormats;
+use zeima_core::model::{
     Activity as ActivityModel, ActivityInput, BulkResult, EntryInput, EntryPatch, Project, ProjectInput,
     RecentActivity, StartTimer, Tag, TagInput, TimeEntry, TimerState,
 };
-use time_core::summary::{Range, Summary};
+use zeima_core::summary::{Range, Summary};
 
 use crate::activity::Activity;
 use crate::events::{DataChanged, DataKind, PromptsChanged, TimerChanged};
@@ -29,14 +29,14 @@ pub struct CmdError {
     pub field: Option<String>,
 }
 
-impl From<time_core::Error> for CmdError {
-    fn from(err: time_core::Error) -> Self {
+impl From<zeima_core::Error> for CmdError {
+    fn from(err: zeima_core::Error) -> Self {
         let field = match &err {
-            time_core::Error::Validation { field, .. } => Some(field.clone()),
+            zeima_core::Error::Validation { field, .. } => Some(field.clone()),
             _ => None,
         };
         let message = match &err {
-            time_core::Error::Validation { message, .. } => message.clone(),
+            zeima_core::Error::Validation { message, .. } => message.clone(),
             other => other.to_string(),
         };
         Self {
@@ -428,7 +428,7 @@ pub async fn timer_resume(app: AppHandle, state: State<'_, AppState>) -> CmdResu
 }
 
 /// Pauses a running timer or resumes a paused one; does nothing when idle.
-pub async fn toggle_pause(app: &AppHandle) -> time_core::Result<()> {
+pub async fn toggle_pause(app: &AppHandle) -> zeima_core::Result<()> {
     let state = app.state::<AppState>();
     match state.core.timer_state().await? {
         TimerState::Running { .. } => {
@@ -464,7 +464,7 @@ pub async fn settings_set(
 ) -> CmdResult<AppSettings> {
     let previous = state.settings();
     if let Some(tz) = &settings.timezone {
-        time_core::model::validate_tz(tz).map_err(CmdError::from)?;
+        zeima_core::model::validate_tz(tz).map_err(CmdError::from)?;
     }
     if let Err(message) = shortcuts::apply(&app, &settings) {
         let _ = shortcuts::apply(&app, &previous);

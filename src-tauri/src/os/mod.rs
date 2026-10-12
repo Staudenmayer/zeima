@@ -1,7 +1,7 @@
 //! OS activity: how long since the last input, and whether the screen is
 //! locked. Each platform reports what it can; unknown values are `None`.
 //! Sleep/suspend is detected platform-independently from clock jumps
-//! (see `time_core::autopause::Detector`).
+//! (see `zeima_core::autopause::Detector`).
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 mod generic;
@@ -44,7 +44,7 @@ impl ActivityProbe for NoProbe {
 
 #[cfg(test)]
 mod tests {
-    /// Manual check on a real desktop: `cargo test -p time-app probe_live -- --ignored --nocapture`
+    /// Manual check on a real desktop: `cargo test -p zeima probe_live -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn probe_live() {

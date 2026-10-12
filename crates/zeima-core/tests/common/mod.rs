@@ -2,8 +2,8 @@
 
 use std::cell::RefCell;
 
-use time_core::model::ActivityInput;
-use time_core::Core;
+use zeima_core::model::ActivityInput;
+use zeima_core::Core;
 
 thread_local! {
     // `#[tokio::test]` runs each test on its own single thread, so the

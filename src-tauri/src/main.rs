@@ -14,5 +14,5 @@ fn main() {
     if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
         std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
     }
-    time_app_lib::run()
+    zeima_lib::run()
 }

@@ -1,4 +1,4 @@
-//! Domain core for Time.
+//! Domain core for Zeima.
 //!
 //! Pure modules (models, validation, clocks, summaries) compile without any
 //! I/O so the crate can be built for WASM and reused by the server. SQLite

@@ -327,7 +327,7 @@ impl AddonManifest {
     }
 }
 
-/// JSON Schema of `addon.toml` (`crates/time-core/addon.schema.json`).
+/// JSON Schema of `addon.toml` (`crates/zeima-core/addon.schema.json`).
 pub fn json_schema() -> String {
     let schema = schemars::schema_for!(AddonManifest);
     serde_json::to_string_pretty(&schema).expect("schema serializes") + "\n"

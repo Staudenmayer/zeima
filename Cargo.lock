@@ -5654,70 +5654,8 @@ dependencies = [
  "num-conv",
  "powerfmt",
  "serde_core",
- "time-core 0.1.9",
+ "time-core",
  "time-macros",
-]
-
-[[package]]
-name = "time-addon-sdk"
-version = "0.1.0"
-dependencies = [
- "extism-pdk",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "time-app"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "chrono-tz",
- "extism",
- "iana-time-zone",
- "rust_xlsxwriter",
- "serde",
- "serde_json",
- "specta",
- "specta-typescript",
- "sys-locale",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tauri-plugin-window-state",
- "tauri-specta",
- "time-addon-sdk",
- "time-core 0.1.0",
- "tokio",
- "toml 1.1.6+spec-1.1.0",
- "user-idle",
- "wayland-client",
- "wayland-protocols",
- "zbus",
- "zip",
-]
-
-[[package]]
-name = "time-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "chrono-tz",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "specta",
- "specta-typescript",
- "sqlx",
- "thiserror 2.0.21",
- "tokio",
- "toml 1.1.6+spec-1.1.0",
- "uuid",
 ]
 
 [[package]]
@@ -5733,7 +5671,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e689342a48d2ea927c87ea50cabf8594854bf940e9310208848d680d668ed85"
 dependencies = [
  "num-conv",
- "time-core 0.1.9",
+ "time-core",
 ]
 
 [[package]]
@@ -7739,6 +7677,68 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1afec51604565183aeb5c54c20aeab286120d4e4460f7f76e3e8bb8c0d99473"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "zeima"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "extism",
+ "iana-time-zone",
+ "rust_xlsxwriter",
+ "serde",
+ "serde_json",
+ "specta",
+ "specta-typescript",
+ "sys-locale",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-window-state",
+ "tauri-specta",
+ "tokio",
+ "toml 1.1.6+spec-1.1.0",
+ "user-idle",
+ "wayland-client",
+ "wayland-protocols",
+ "zbus",
+ "zeima-addon-sdk",
+ "zeima-core",
+ "zip",
+]
+
+[[package]]
+name = "zeima-addon-sdk"
+version = "0.1.0"
+dependencies = [
+ "extism-pdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "zeima-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "specta",
+ "specta-typescript",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml 1.1.6+spec-1.1.0",
+ "uuid",
 ]
 
 [[package]]

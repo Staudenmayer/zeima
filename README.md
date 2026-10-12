@@ -1,4 +1,4 @@
-# Time
+# Zeima
 
 Local-first time tracking and work-time management that lives in the system
 tray. Tauri 2 + Vue 3, with a Rust core on SQLite.
@@ -11,7 +11,7 @@ tray. Tauri 2 + Vue 3, with a Rust core on SQLite.
 
 | Path | What |
 |---|---|
-| `crates/time-core` | Domain models, validation, SQLite repositories, timer engine. Pure logic builds without the `db` feature. |
+| `crates/zeima-core` | Domain models, validation, SQLite repositories, timer engine. Pure logic builds without the `db` feature. |
 | `src-tauri` | Tauri shell: tray, global shortcuts, windows, IPC commands, background heartbeat |
 | `src` | Vue frontend. `src/bindings.ts` is generated from Rust; do not edit. |
 
@@ -27,7 +27,7 @@ bun run test             # frontend unit tests
 bun run typecheck
 ```
 
-Data is stored in `time.db` in the app data folder (shown under Settings → About).
+Data is stored in `zeima.db` in the app data folder (shown under Settings → About).
 
 ## Shortcuts (defaults, configurable)
 

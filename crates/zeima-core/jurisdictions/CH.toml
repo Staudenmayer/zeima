@@ -9,7 +9,7 @@ schema_version = 1
 id = "CH"
 version = "2026.1"
 name = { de = "Schweiz", en = "Switzerland", fr = "Suisse", it = "Svizzera" }
-maintainer = "Time core team"
+maintainer = "Zeima core team"
 sources = [
   "Arbeitsgesetz (ArG, SR 822.11) Art. 9, 15, 15a, 20a, https://www.fedlex.admin.ch/",
   "Obligationenrecht (OR, SR 220) Art. 329a, https://www.fedlex.admin.ch/",
