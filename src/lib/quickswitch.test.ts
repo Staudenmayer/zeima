@@ -1,22 +1,49 @@
 import { describe, expect, it } from 'vitest'
-import { matchScore, parseQuery, rank, resolve } from './quickswitch'
+import { isExact, matchScore, parseQuery, rank, removeTokens, resolve } from './quickswitch'
 
 describe('parseQuery', () => {
-  it('splits project, tags and note', () => {
-    expect(parseQuery('#INT @meeting @remote sprint planning')).toEqual({
-      project: 'INT',
-      tags: ['meeting', 'remote'],
-      note: 'sprint planning',
-    })
+  it('splits finished project and tag tokens from the activity text', () => {
+    const p = parseQuery('meet @INT #remote #client ')
+    expect(p.text).toBe('meet')
+    expect(p.active).toBeNull()
+    expect(p.tokens.map((t) => [t.kind, t.term])).toEqual([
+      ['project', 'INT'],
+      ['tag', 'remote'],
+      ['tag', 'client'],
+    ])
   })
-  it('works in any order and ignores extra spaces', () => {
-    expect(parseQuery('  fix login   #web  @dev ')).toEqual({ project: 'web', tags: ['dev'], note: 'fix login' })
+  it('treats the last token as active while it is typed', () => {
+    expect(parseQuery('dev @we').active).toEqual({ kind: 'project', term: 'we', start: 4, end: 7 })
+    expect(parseQuery('dev #').active).toEqual({ kind: 'tag', term: '', start: 4, end: 5 })
+    expect(parseQuery('dev #').text).toBe('dev')
   })
-  it('keeps a lone # or @ as text and uses only the first project', () => {
-    expect(parseQuery('# @ #a #b')).toEqual({ project: 'a', tags: [], note: '# @ #b' })
+  it('ends the active token with a space', () => {
+    const p = parseQuery('@web ')
+    expect(p.active).toBeNull()
+    expect(p.tokens).toHaveLength(1)
+  })
+  it('keeps a lone finished prefix as text', () => {
+    expect(parseQuery('a @ b').text).toBe('a @ b')
   })
   it('handles empty input', () => {
-    expect(parseQuery('')).toEqual({ project: null, tags: [], note: '' })
+    expect(parseQuery('')).toEqual({ tokens: [], active: null, text: '' })
+  })
+})
+
+describe('removeTokens', () => {
+  it('cuts tokens out and keeps a trailing space for the next word', () => {
+    const input = 'code @web #dev review'
+    const { tokens } = parseQuery(input)
+    expect(removeTokens(input, tokens)).toBe('code review ')
+  })
+  it('removes the active token', () => {
+    const input = 'code @we'
+    const { active } = parseQuery(input)
+    expect(removeTokens(input, [active!])).toBe('code ')
+  })
+  it('returns an empty string when nothing is left', () => {
+    const input = '@we'
+    expect(removeTokens(input, [parseQuery(input).active!])).toBe('')
   })
 })
 
@@ -39,5 +66,10 @@ describe('matching', () => {
   })
   it('returns null when nothing matches', () => {
     expect(resolve(projects, 'zzz')).toBeNull()
+  })
+  it('detects exact names and aliases', () => {
+    expect(isExact(projects[0], 'web')).toBe(true)
+    expect(isExact(projects[0], 'website')).toBe(false)
+    expect(isExact(projects[0], ' ')).toBe(false)
   })
 })

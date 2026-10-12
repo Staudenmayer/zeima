@@ -154,6 +154,7 @@ impl Core {
 /// Tables that support soft delete. The table name is interpolated into
 /// SQL, so it must come from this fixed list.
 const SOFT_DELETE_TABLES: &[&str] = &[
+    "activity",
     "project",
     "tag",
     "time_entry",

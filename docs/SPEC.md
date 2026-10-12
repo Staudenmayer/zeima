@@ -175,7 +175,7 @@ A **workspace** is the ownership boundary. Free users have one local personal wo
 | Field | Notes |
 |---|---|
 | `name` | |
-| `alias` | Short ID / project number, e.g. `P-2024-017` or `INT`. Unique per workspace and usable in the quick switch (`#INT`). |
+| `alias` | Short ID / project number, e.g. `P-2024-017` or `INT`. Unique per workspace and usable in the quick switch (`@INT`). |
 | `color`, `icon` | |
 | `parent_id` | Optional sub-projects / phases |
 | `client` | Optional free text (v1) |
@@ -188,6 +188,11 @@ A **workspace** is the ownership boundary. Free users have one local personal wo
 | `status` | `active` \| `paused` \| `archived` |
 | `visibility` | `private` \| `workspace` \| `groups` (org) |
 
+**Activity** — `name, color, archived`
+- What kind of work an entry is (e.g. *Meeting*, *Development*, *Review*). Created by the user beforehand (or inline from the quick switch).
+- **Required** when starting the timer, creating an entry by hand or editing one. Project and tags stay optional.
+- Archived activities are hidden from pickers; activities with entries cannot be deleted, only archived.
+
 **Tag** — `name, color, project_id NULL, group_name NULL`
 - `project_id = NULL` → global tag. A non-null `project_id` makes it a **project-scoped tag** (the project's "own tag system", e.g. *Design / Backend / QA* only within project X).
 - `group_name` allows mutually exclusive tag groups (e.g. activity type: *Development* vs *Meeting*).
@@ -199,6 +204,7 @@ A **workspace** is the ownership boundary. Free users have one local personal wo
 | Field | Notes |
 |---|---|
 | `user_id` | |
+| `activity_id` | required for new entries; `NULL` only on entries recorded before activities existed or created by addons |
 | `project_id` | nullable (untracked work time is still work time) |
 | `cost_center_id` | resolved at write time, overridable |
 | `start_at`, `end_at` | UTC ms; `end_at NULL` = running |
@@ -250,14 +256,16 @@ Cache these in a `daily_summary` table that is recomputed on change, for fast da
 ### 5.1 Tracking (Timeular-style)
 - **Tray**
   - The icon shows state (idle / tracking / paused) and the elapsed time as the tooltip (Linux: menu title).
-  - Menu: current activity + stop, pause/resume, **5 most recent projects** for one-click switching, "New entry…", "Open dashboard", Quit.
+  - Menu: current activity + stop, pause/resume, **5 most recent activity/project/tag combinations** for one-click switching, "Start tracking…" (opens the quick switch), "Open dashboard", Quit.
 - **Global shortcuts** (configurable)
   - `Ctrl+Shift+T`: toggle the main window
   - `Ctrl+Shift+Space`: open the **quick-switch palette**, a small always-on-top window
   - `Ctrl+Shift+P`: pause/resume
 - **Quick-switch palette**
-  - Fuzzy search over projects (name and alias), tags and recent combinations.
-  - Syntax: `#ALIAS @tag note text`. For example, `#INT @meeting sprint planning` starts tracking on project INT with tag *meeting*.
+  - Plain text searches the **activities**; with an empty input the most recent activity/project/tag combinations are offered for one-step restarts, followed by all activities (recently used first).
+  - `@` switches the list to **projects** (alias and name, recently used first), `#` to **tags** (global and the chosen project's). Picking one (Enter/Tab, or finishing the token with a space) turns it into a chip; Backspace on an empty input removes the last chip.
+  - When nothing matches, the list offers to create the activity (and start it), project or tag right there.
+  - For example, `dev @INT #review` + Enter starts *Development* on project INT with tag *review*.
 - **Switching** stops the current entry and starts a new one with the same timestamp, so there are no gaps.
 - **Manual entries**: day timeline editor (drag to create or resize), list view, duplicate, split, merge.
 - **Forgotten-timer protection**: the night auto-pause (§5.3) plus a prompt on next start: "Timer ran overnight. Keep until 18:30 / custom / keep all."

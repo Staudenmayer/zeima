@@ -20,6 +20,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import EmptyState from '@/components/time/EmptyState.vue'
 import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
+import ActivityLabel from '@/components/time/ActivityLabel.vue'
 import ProjectDot from '@/components/time/ProjectDot.vue'
 import TagList from '@/components/time/TagList.vue'
 import { useFormat } from '@/composables/useFormat'
@@ -27,6 +28,7 @@ import { useReportLabels } from '@/composables/useReportLabels'
 import { call, errorMessage } from '@/lib/ipc'
 import { addDays, parseDate, presetRange, toDateInput, type PeriodPreset } from '@/lib/time'
 import { costCenterLabel, useCostCentersStore } from '@/stores/costCenters'
+import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useTagsStore } from '@/stores/tags'
@@ -37,6 +39,7 @@ definePage({ meta: { titleKey: 'nav.reports' } })
 const { t } = useI18n()
 const format = useFormat()
 const settings = useSettingsStore()
+const activities = useActivitiesStore()
 const projects = useProjectsStore()
 const tags = useTagsStore()
 const costCenters = useCostCentersStore()
@@ -44,7 +47,7 @@ const timer = useTimerStore()
 const labels = useReportLabels()
 
 const presets: PeriodPreset[] = ['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth', 'thisYear', 'lastYear']
-const groups: ReportGroup[] = ['project', 'tag', 'costCenter', 'billable', 'day', 'week', 'month']
+const groups: ReportGroup[] = ['activity', 'project', 'tag', 'costCenter', 'billable', 'day', 'week', 'month']
 const NONE = 'none'
 
 // Remembered between visits (per device).
@@ -52,6 +55,7 @@ const state = useStorage('reports.state', {
   period: 'thisMonth' as PeriodPreset | 'custom',
   customFrom: toDateInput(Date.now()),
   customTo: toDateInput(Date.now()),
+  activityIds: [] as (string | null)[],
   projectIds: [] as (string | null)[],
   tagIds: [] as (string | null)[],
   costCenterIds: [] as (string | null)[],
@@ -80,6 +84,7 @@ const groupBy = computed<ReportGroup[]>(() =>
 const query = computed<ReportQuery>(() => ({
   range: range.value,
   filter: {
+    activityIds: state.value.activityIds,
     projectIds: state.value.projectIds,
     tagIds: state.value.tagIds.filter((id): id is string => id !== null),
     costCenterIds: state.value.costCenterIds,
@@ -106,11 +111,15 @@ async function reload() {
 watch(query, reload, { immediate: true, deep: true })
 useIntervalFn(() => timer.running && void reload(), 60_000)
 const unlisten = events.dataChanged.listen((e) => {
-  if (e.payload.kinds.some((k) => k === 'entry' || k === 'project' || k === 'tag' || k === 'costCenter')) void reload()
+  if (e.payload.kinds.some((k) => k === 'entry' || k === 'activity' || k === 'project' || k === 'tag' || k === 'costCenter')) void reload()
 })
 onScopeDispose(() => void unlisten.then((fn) => fn()))
 
 // Filter options
+const activityOptions = computed<FilterOption[]>(() => [
+  ...activities.all.map((a) => ({ value: a.id, label: a.name, color: a.color })),
+  { value: null, label: t('activities.none') },
+])
 const projectOptions = computed<FilterOption[]>(() => [
   ...projects.all.map((p) => ({ value: p.id, label: p.alias ? `${p.name} (${p.alias})` : p.name, color: p.color })),
   { value: null, label: t('common.noProject') },
@@ -122,10 +131,11 @@ const costCenterOptions = computed<FilterOption[]>(() => [
 ])
 const hasFilter = computed(
   () =>
-    state.value.projectIds.length + state.value.tagIds.length + state.value.costCenterIds.length > 0 ||
+    state.value.activityIds.length + state.value.projectIds.length + state.value.tagIds.length + state.value.costCenterIds.length > 0 ||
     state.value.billable !== 'all',
 )
 function clearFilters() {
+  state.value.activityIds = []
   state.value.projectIds = []
   state.value.tagIds = []
   state.value.costCenterIds = []
@@ -233,6 +243,7 @@ function entryDuration(e: { startAt: number; endAt: number | null }) {
     <span v-else class="text-sm text-muted-foreground">{{ periodLabel }}</span>
 
     <span class="mx-1 h-5 w-px bg-border" />
+    <MultiFilter v-model="state.activityIds" :label="$t('entry.activity')" :options="activityOptions" />
     <MultiFilter v-model="state.projectIds" :label="$t('entry.project')" :options="projectOptions" />
     <MultiFilter v-if="tagOptions.length" v-model="state.tagIds" :label="$t('entry.tags')" :options="tagOptions" />
     <MultiFilter
@@ -406,6 +417,7 @@ function entryDuration(e: { startAt: number; endAt: number | null }) {
         <tr class="border-b">
           <th class="px-3 py-2 font-medium">{{ $t('entry.date') }}</th>
           <th class="px-3 py-2 font-medium">{{ $t('timesheet.time') }}</th>
+          <th class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</th>
           <th class="px-3 py-2 font-medium">{{ $t('entry.project') }}</th>
           <th class="px-3 py-2 font-medium">{{ $t('entry.tags') }}</th>
           <th v-if="costCenters.all.length" class="px-3 py-2 font-medium">{{ $t('costCenters.costCenter') }}</th>
@@ -419,6 +431,7 @@ function entryDuration(e: { startAt: number; endAt: number | null }) {
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">
             {{ format.time(e.startAt) }}–{{ e.endAt === null ? '' : format.time(e.endAt) }}
           </td>
+          <td class="max-w-44 px-3 py-1.5"><ActivityLabel :activity="e.activityId ? activities.byId.get(e.activityId) : null" /></td>
           <td class="max-w-56 px-3 py-1.5"><ProjectDot :project="e.projectId ? projects.byId.get(e.projectId) : null" /></td>
           <td class="px-3 py-1.5"><TagList :ids="e.tagIds" /></td>
           <td v-if="costCenters.all.length" class="whitespace-nowrap px-3 py-1.5 font-mono text-xs text-muted-foreground">

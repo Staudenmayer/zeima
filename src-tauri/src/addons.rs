@@ -239,6 +239,7 @@ fn time_create_entry(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserDat
         Some(Permission::EntriesWrite),
         |ctx, n: sdk::NewEntry| {
             let input = EntryInput {
+                activity_id: n.activity_id,
                 project_id: n.project_id,
                 start_at: n.start_at,
                 end_at: Some(n.end_at),
@@ -715,8 +716,21 @@ mod tests {
         .id
     }
 
-    fn entry_input(project: &str, note: &str) -> EntryInput {
+    /// A manual entry on `project` with a "Work" activity.
+    async fn entry_input(core: &time_core::Core, project: &str, note: &str) -> EntryInput {
+        let activity = match core.list_activities(false).await.unwrap().into_iter().next() {
+            Some(a) => a,
+            None => core
+                .create_activity(time_core::model::ActivityInput {
+                    name: "Work".into(),
+                    color: "#3b82f6".into(),
+                    archived: false,
+                })
+                .await
+                .unwrap(),
+        };
         EntryInput {
+            activity_id: Some(activity.id),
             project_id: Some(project.into()),
             start_at: T0,
             end_at: Some(T0 + HOUR + HOUR / 2),
@@ -735,7 +749,7 @@ mod tests {
         };
         let pid = project(&f.core).await;
         f.core
-            .create_entry(entry_input(&pid, "Design; review"))
+            .create_entry(entry_input(&f.core, &pid, "Design; review").await)
             .await
             .unwrap();
         let range = Range {
@@ -776,7 +790,7 @@ mod tests {
         let pid = project(&f.core).await;
         let entry = f
             .core
-            .create_entry(entry_input(&pid, "Write docs"))
+            .create_entry(entry_input(&f.core, &pid, "Write docs").await)
             .await
             .unwrap();
 
@@ -811,7 +825,10 @@ mod tests {
             return;
         };
         let pid = project(&f.core).await;
-        f.core.create_entry(entry_input(&pid, "")).await.unwrap();
+        f.core
+            .create_entry(entry_input(&f.core, &pid, "").await)
+            .await
+            .unwrap();
         let date = "2026-10-05".parse().unwrap();
         let day = f.core.work_days(date, date).await.unwrap().remove(0);
         f.addons.dispatch(&DomainEvent::DayClosed { date, day }).await;

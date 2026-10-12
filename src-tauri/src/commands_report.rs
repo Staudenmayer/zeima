@@ -149,10 +149,11 @@ pub async fn report_export(
     let core = &state.core;
     let formats = state.settings().formats();
     let report = core.report(&query).await?;
+    let activities = core.list_activities(true).await?;
     let projects = core.list_projects(true).await?;
     let tags = core.list_tags().await?;
     let cost_centers = core.list_cost_centers().await?;
-    let lookup = Lookup::new(&projects, &tags, &cost_centers);
+    let lookup = Lookup::new(&activities, &projects, &tags, &cost_centers);
     let tz = core.tz()?;
     let summary = || summary_table(&report, &query.group_by, &lookup, &formats);
     let entries = || entries_table(&report, &lookup, tz, core.now_ms(), &formats);

@@ -1,5 +1,7 @@
 #![cfg(feature = "db")]
 
+mod common;
+
 use std::sync::Arc;
 
 use chrono::NaiveDate;
@@ -15,9 +17,12 @@ const HOUR: i64 = 3_600_000;
 const T0: i64 = 1_791_187_200_000;
 
 async fn setup() -> Core {
-    let core = Core::open_in_memory(Arc::new(ManualClock::new(T0)))
-        .await
-        .unwrap();
+    let core = common::with_activity(
+        Core::open_in_memory(Arc::new(ManualClock::new(T0)))
+            .await
+            .unwrap(),
+    )
+    .await;
     core.set_default_tz("UTC").unwrap();
     core
 }
@@ -55,6 +60,7 @@ fn project(cost_center_id: Option<&str>) -> ProjectInput {
 
 fn entry(project_id: Option<&str>, start: i64, cost_center_id: Option<&str>) -> EntryInput {
     EntryInput {
+        activity_id: common::activity(),
         project_id: project_id.map(Into::into),
         start_at: start,
         end_at: Some(start + HOUR),
@@ -120,6 +126,7 @@ async fn entry_cost_center_resolves_explicit_then_project_then_user() {
     // The timer resolves too.
     let TimerState::Running { entry } = core
         .start_timer(StartTimer {
+            activity_id: common::activity(),
             project_id: Some(with_default.id.clone()),
             tag_ids: vec![],
             note: String::new(),
@@ -230,9 +237,12 @@ async fn json_export_and_backup_contain_the_data() {
     // On disk: SQLite skips VACUUM INTO for in-memory databases.
     let dir = std::env::temp_dir().join(format!("time-backup-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let core = Core::open(&dir.join("time.db"), Arc::new(ManualClock::new(T0)))
-        .await
-        .unwrap();
+    let core = common::with_activity(
+        Core::open(&dir.join("time.db"), Arc::new(ManualClock::new(T0)))
+            .await
+            .unwrap(),
+    )
+    .await;
     core.set_default_tz("UTC").unwrap();
     let a = core.save_cost_center(None, cc("100")).await.unwrap();
     core.create_entry(entry(None, T0, Some(&a.id))).await.unwrap();
@@ -242,6 +252,11 @@ async fn json_export_and_backup_contain_the_data() {
     assert_eq!(tables["cost_center"][0]["code"], "100");
     assert_eq!(tables["time_entry"][0]["cost_center_id"], a.id.as_str());
     assert_eq!(tables["time_entry"][0]["start_at"], T0);
+    assert_eq!(tables["activity"][0]["name"], "Work");
+    assert_eq!(
+        tables["time_entry"][0]["activity_id"],
+        tables["activity"][0]["id"]
+    );
     assert!(tables["work_settings"].is_array());
 
     let path = dir.join("backup.db");

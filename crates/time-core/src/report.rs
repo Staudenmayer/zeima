@@ -1,4 +1,4 @@
-//! Report engine: filters entries and groups their time by project, tag,
+//! Report engine: filters entries and groups their time by activity, project, tag,
 //! cost center, billable flag or calendar period. Pure functions.
 //!
 //! Durations are sums of entry time clipped to the range: overlapping
@@ -21,6 +21,7 @@ use crate::worktime::{day_bounds, local_date};
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
 pub enum ReportGroup {
+    Activity,
     Project,
     Tag,
     CostCenter,
@@ -43,6 +44,8 @@ impl ReportGroup {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
 pub struct ReportFilter {
+    /// Empty = all. `null` matches entries without an activity.
+    pub activity_ids: Vec<Option<String>>,
     /// Empty = all. `null` matches entries without a project.
     pub project_ids: Vec<Option<String>>,
     /// Empty = all; otherwise entries with at least one of these tags.
@@ -54,7 +57,8 @@ pub struct ReportFilter {
 
 impl ReportFilter {
     pub fn matches(&self, e: &TimeEntry) -> bool {
-        (self.project_ids.is_empty() || self.project_ids.contains(&e.project_id))
+        (self.activity_ids.is_empty() || self.activity_ids.contains(&e.activity_id))
+            && (self.project_ids.is_empty() || self.project_ids.contains(&e.project_id))
             && (self.tag_ids.is_empty() || e.tag_ids.iter().any(|t| self.tag_ids.contains(t)))
             && (self.cost_center_ids.is_empty() || self.cost_center_ids.contains(&e.cost_center_id))
             && self.billable.is_none_or(|b| b == e.billable)
@@ -170,6 +174,7 @@ fn totals(pieces: &[&Piece]) -> (i64, i64, u32) {
 fn keys(piece: &Piece, by: ReportGroup, week_start: WeekStart) -> Vec<Option<String>> {
     let e = piece.entry;
     match by {
+        ReportGroup::Activity => vec![e.activity_id.clone()],
         ReportGroup::Project => vec![e.project_id.clone()],
         ReportGroup::CostCenter => vec![e.cost_center_id.clone()],
         ReportGroup::Billable => vec![Some(e.billable.to_string())],
@@ -240,6 +245,7 @@ mod tests {
             id: id.into(),
             workspace_id: "w".into(),
             user_id: "u".into(),
+            activity_id: None,
             project_id: project.map(Into::into),
             start_at: start,
             end_at: end,

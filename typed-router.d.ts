@@ -45,6 +45,13 @@ declare module 'vue-router/auto-routes' {
       Record<never, never>,
       | never
     >,
+    '/activities/': RouteRecordInfo<
+      '/activities/',
+      '/activities',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
     '/addons/': RouteRecordInfo<
       '/addons/',
       '/addons',
@@ -160,6 +167,14 @@ declare module 'vue-router/auto-routes' {
     'src/pages/absences/index.vue': {
       routes:
         | '/absences/'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/activities/index.vue': {
+      routes:
+        | '/activities/'
       views:
         | never
       pathParamNames:

@@ -2,14 +2,16 @@
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { Coffee, Moon, Play, Sun, UtensilsCrossed, X } from '@lucide/vue'
-import { commands, events, type AwayItem, type AwayResolution, type Project } from '@/bindings'
+import { Coffee, Moon, Play, Search, Sun, UtensilsCrossed, X } from '@lucide/vue'
+import { commands, events, type AwayItem, type AwayResolution, type RecentActivity } from '@/bindings'
 import { Button } from '@/components/ui/button'
+import ActivityLabel from '@/components/time/ActivityLabel.vue'
 import ProjectDot from '@/components/time/ProjectDot.vue'
 import ProjectSelect from '@/components/time/ProjectSelect.vue'
 import { useFormat } from '@/composables/useFormat'
 import { call, errorMessage } from '@/lib/ipc'
 import { formatDuration } from '@/lib/time'
+import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useTimerStore } from '@/stores/timer'
 
@@ -18,12 +20,13 @@ definePage({ meta: { layout: 'bare' } })
 
 const { t } = useI18n()
 const format = useFormat()
+const activities = useActivitiesStore()
 const projects = useProjectsStore()
 const timer = useTimerStore()
 
 const away = ref<AwayItem[]>([])
 const morning = ref(false)
-const recent = ref<Project[]>([])
+const recent = ref<RecentActivity[]>([])
 const assigning = ref<string | null>(null)
 const assignProject = ref<string | null>(null)
 
@@ -31,7 +34,7 @@ async function load() {
   const state = await call(commands.promptState()).catch(() => null)
   away.value = state?.away ?? []
   morning.value = state?.morning ?? false
-  if (morning.value) recent.value = await call(commands.projectRecent(4)).catch(() => [])
+  if (morning.value) recent.value = await call(commands.activityRecent(4)).catch(() => [])
   if (away.value.length === 0 && !morning.value) void commands.promptHide()
 }
 
@@ -70,9 +73,9 @@ async function resolve(item: AwayItem, resolution: AwayResolution) {
   }
 }
 
-async function startProject(id: string | null) {
+async function startRecent(r: RecentActivity) {
   try {
-    await timer.start({ projectId: id, tagIds: [], note: '', billable: null })
+    await timer.start({ activityId: r.activityId, projectId: r.projectId, tagIds: r.tagIds, note: '', billable: null })
   } catch (err) {
     toast.error(errorMessage(err))
   }
@@ -91,10 +94,18 @@ const empty = computed(() => away.value.length === 0 && !morning.value)
     <div v-if="morning" class="grid gap-2 rounded-lg border p-3">
       <div class="flex items-center gap-2 font-medium"><Sun class="size-4 text-amber-500" /> {{ $t('prompt.morning') }}</div>
       <div class="flex flex-wrap gap-1.5">
-        <Button v-for="p in recent" :key="p.id" size="sm" variant="outline" @click="startProject(p.id)">
-          <Play /> <ProjectDot :project="p" />
+        <Button
+          v-for="r in recent"
+          :key="`${r.activityId}|${r.projectId}|${r.tagIds.join()}`"
+          size="sm"
+          variant="outline"
+          class="max-w-full"
+          @click="startRecent(r)"
+        >
+          <Play /> <ActivityLabel :activity="activities.byId.get(r.activityId)" class="min-w-0" />
+          <ProjectDot v-if="r.projectId" :project="projects.byId.get(r.projectId)" class="min-w-0 text-muted-foreground" />
         </Button>
-        <Button size="sm" variant="outline" @click="startProject(null)"><Play /> {{ $t('common.noProject') }}</Button>
+        <Button size="sm" variant="outline" @click="commands.quickswitchShow()"><Search /> {{ $t('prompt.choose') }}</Button>
       </div>
       <Button size="sm" variant="ghost" class="justify-self-end" @click="commands.morningDismiss()">{{ $t('prompt.dismiss') }}</Button>
     </div>

@@ -7,7 +7,10 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_specta::Event;
 use time_core::locale::RegionalFormats;
-use time_core::model::{EntryInput, Project, ProjectInput, StartTimer, Tag, TagInput, TimeEntry, TimerState};
+use time_core::model::{
+    Activity as ActivityModel, ActivityInput, BulkResult, EntryInput, EntryPatch, Project, ProjectInput,
+    RecentActivity, StartTimer, Tag, TagInput, TimeEntry, TimerState,
+};
 use time_core::summary::{Range, Summary};
 
 use crate::activity::Activity;
@@ -189,6 +192,59 @@ pub async fn project_recent(state: State<'_, AppState>, limit: u32) -> CmdResult
 }
 
 // --------------------------------------------------------------------------
+// Activities
+// --------------------------------------------------------------------------
+
+#[tauri::command]
+#[specta::specta]
+pub async fn activity_list(
+    state: State<'_, AppState>,
+    include_archived: bool,
+) -> CmdResult<Vec<ActivityModel>> {
+    Ok(state.core.list_activities(include_archived).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn activity_create(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: ActivityInput,
+) -> CmdResult<ActivityModel> {
+    let activity = state.core.create_activity(input).await?;
+    changed(&app, &[DataKind::Activity]).await;
+    Ok(activity)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn activity_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    input: ActivityInput,
+) -> CmdResult<ActivityModel> {
+    let activity = state.core.update_activity(&id, input).await?;
+    changed(&app, &[DataKind::Activity]).await;
+    Ok(activity)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn activity_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state.core.delete_activity(&id).await?;
+    changed(&app, &[DataKind::Activity]).await;
+    Ok(())
+}
+
+/// Recently tracked activity/project/tag combinations, newest first.
+#[tauri::command]
+#[specta::specta]
+pub async fn activity_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<RecentActivity>> {
+    Ok(state.core.recent_activities(limit).await?)
+}
+
+// --------------------------------------------------------------------------
 // Tags
 // --------------------------------------------------------------------------
 
@@ -268,6 +324,33 @@ pub async fn entry_delete(app: AppHandle, state: State<'_, AppState>, id: String
     state.core.delete_entry(&id).await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(())
+}
+
+/// Applies `patch` to several entries at once; locked ones are skipped.
+#[tauri::command]
+#[specta::specta]
+pub async fn entry_bulk_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    patch: EntryPatch,
+) -> CmdResult<BulkResult> {
+    let result = state.core.bulk_update_entries(&ids, patch).await?;
+    changed(&app, &[DataKind::Entry]).await;
+    Ok(result)
+}
+
+/// Deletes several entries at once; locked ones are skipped.
+#[tauri::command]
+#[specta::specta]
+pub async fn entry_bulk_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> CmdResult<BulkResult> {
+    let result = state.core.bulk_delete_entries(&ids).await?;
+    changed(&app, &[DataKind::Entry]).await;
+    Ok(result)
 }
 
 /// `at` is unix ms. Passed as `f64` because IPC numbers are JS numbers.
@@ -435,6 +518,14 @@ pub async fn window_show_main(app: AppHandle, route: Option<String>) -> CmdResul
 #[specta::specta]
 pub async fn window_print(window: tauri::WebviewWindow) -> CmdResult<()> {
     window.print().map_err(|e| CmdError::other("print", e))
+}
+
+/// Opens the quick-switch palette (e.g. to pick an activity from a prompt).
+#[tauri::command]
+#[specta::specta]
+pub async fn quickswitch_show(app: AppHandle) -> CmdResult<()> {
+    windows::show_quickswitch(&app);
+    Ok(())
 }
 
 #[tauri::command]

@@ -12,6 +12,7 @@ import {
   Palmtree,
   Puzzle,
   Settings,
+  Shapes,
   Tags,
   Timer,
 } from '@lucide/vue'
@@ -37,6 +38,7 @@ const { t } = useI18n()
 const tracking = computed(() => [
   { title: t('nav.dashboard'), url: '/', icon: LayoutDashboard },
   { title: t('nav.timesheet'), url: '/timesheet', icon: Clock },
+  { title: t('nav.activities'), url: '/activities', icon: Shapes },
   { title: t('nav.projects'), url: '/projects', icon: FolderKanban },
   { title: t('nav.tags'), url: '/tags', icon: Tags },
   { title: t('nav.costCenters'), url: '/cost-centers', icon: Landmark },

@@ -1,5 +1,7 @@
 #![cfg(feature = "db")]
 
+mod common;
+
 use std::sync::Arc;
 
 use chrono::{NaiveDate, TimeZone};
@@ -28,7 +30,7 @@ const DAY: &str = "2026-06-01";
 
 async fn setup() -> (Core, Arc<ManualClock>, String) {
     let clock = Arc::new(ManualClock::new(at(DAY, "09:00")));
-    let core = Core::open_in_memory(clock.clone()).await.unwrap();
+    let core = common::with_activity(Core::open_in_memory(clock.clone()).await.unwrap()).await;
     core.set_default_tz("Europe/Vienna").unwrap();
     let project = core
         .create_project(ProjectInput {
@@ -47,6 +49,7 @@ async fn setup() -> (Core, Arc<ManualClock>, String) {
         .await
         .unwrap();
     core.start_timer(StartTimer {
+        activity_id: common::activity(),
         project_id: Some(project.id.clone()),
         tag_ids: vec![],
         note: "work".into(),
@@ -235,6 +238,7 @@ async fn forgotten_timer_after_app_was_closed() {
     assert_eq!(entries(&core).await, vec![(s("09:00"), Some(s("17:00")))]);
     // A recent heartbeat is not a forgotten timer.
     core.start_timer(StartTimer {
+        activity_id: common::activity(),
         project_id: None,
         tag_ids: vec![],
         note: String::new(),
@@ -311,6 +315,7 @@ async fn undo_after_the_continuation_was_edited_fills_the_gap() {
     core.update_entry(
         &next.id,
         EntryInput {
+            activity_id: common::activity(),
             project_id: Some(project),
             start_at: next.start_at,
             end_at: None,

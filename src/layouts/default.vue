@@ -1,7 +1,7 @@
 <template>
   <SidebarProvider>
     <AppSidebar />
-    <SidebarInset>
+    <SidebarInset :class="route.meta.fill ? 'h-svh' : ''">
       <header class="flex h-14 shrink-0 items-center gap-2 border-b px-4">
         <SidebarTrigger class="-ml-1" />
         <Separator orientation="vertical" class="mr-2 data-[orientation=vertical]:h-4" />
@@ -10,7 +10,7 @@
           <TimerPill />
         </div>
       </header>
-      <main class="p-6">
+      <main :class="route.meta.fill ? 'flex min-h-0 flex-1 flex-col overflow-y-auto p-6' : 'p-6'">
         <slot />
       </main>
       <OnboardingDialog />

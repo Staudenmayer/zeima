@@ -2,6 +2,7 @@ import { useI18n } from 'vue-i18n'
 import type { ReportGroup } from '@/bindings'
 import { useFormat } from '@/composables/useFormat'
 import { getWeekStart, isoWeek, parseDate } from '@/lib/time'
+import { useActivitiesStore } from '@/stores/activities'
 import { costCenterLabel, useCostCentersStore } from '@/stores/costCenters'
 import { useProjectsStore } from '@/stores/projects'
 import { useTagsStore } from '@/stores/tags'
@@ -10,12 +11,15 @@ import { useTagsStore } from '@/stores/tags'
 export function useReportLabels() {
   const { t } = useI18n()
   const format = useFormat()
+  const activities = useActivitiesStore()
   const projects = useProjectsStore()
   const tags = useTagsStore()
   const costCenters = useCostCentersStore()
 
   function label(group: ReportGroup, key: string | null): string {
     switch (group) {
+      case 'activity':
+        return key ? (activities.byId.get(key)?.name ?? key) : t('activities.none')
       case 'project':
         return key ? (projects.byId.get(key)?.name ?? key) : t('common.noProject')
       case 'tag':
@@ -42,6 +46,7 @@ export function useReportLabels() {
   }
 
   function color(group: ReportGroup, key: string | null): string | undefined {
+    if (group === 'activity') return key ? activities.byId.get(key)?.color : undefined
     if (group === 'project') return key ? projects.byId.get(key)?.color : undefined
     if (group === 'tag') return key ? tags.byId.get(key)?.color : undefined
     return undefined

@@ -1,5 +1,7 @@
 #![cfg(feature = "db")]
 
+mod common;
+
 use std::sync::Arc;
 
 use chrono::{NaiveDate, TimeZone};
@@ -27,7 +29,7 @@ fn at(day: &str, hhmm: &str) -> i64 {
 /// "Now" is Saturday 31 Oct 2026, 12:00 in Vienna; Austria selected.
 async fn setup() -> (Core, Arc<ManualClock>) {
     let clock = Arc::new(ManualClock::new(at("2026-10-31", "12:00")));
-    let core = Core::open_in_memory(clock.clone()).await.unwrap();
+    let core = common::with_activity(Core::open_in_memory(clock.clone()).await.unwrap()).await;
     core.set_default_tz("Europe/Vienna").unwrap();
     core.set_jurisdiction("AT", Some("AT-9")).await.unwrap();
     // Default schedule starts "today"; move it to the start of the month.
@@ -47,6 +49,7 @@ async fn setup() -> (Core, Arc<ManualClock>) {
 
 async fn work(core: &Core, day: &str, from: &str, to: &str) -> String {
     core.create_entry(EntryInput {
+        activity_id: common::activity(),
         project_id: None,
         start_at: at(day, from),
         end_at: Some(at(day, to)),
@@ -64,7 +67,7 @@ async fn work(core: &Core, day: &str, from: &str, to: &str) -> String {
 #[tokio::test]
 async fn selecting_a_country_creates_a_default_schedule() {
     let clock = Arc::new(ManualClock::new(at("2026-10-31", "12:00")));
-    let core = Core::open_in_memory(clock).await.unwrap();
+    let core = common::with_activity(Core::open_in_memory(clock).await.unwrap()).await;
     assert!(core.jurisdiction().await.unwrap().is_none());
     core.set_jurisdiction("DE", Some("DE-BY")).await.unwrap();
     let schedules = core.list_schedules().await.unwrap();
@@ -113,6 +116,7 @@ async fn cache_is_invalidated_by_every_kind_of_change() {
     core.update_entry(
         &id,
         EntryInput {
+            activity_id: common::activity(),
             project_id: None,
             start_at: at("2026-10-20", "08:00"),
             end_at: Some(at("2026-10-20", "17:00")),
