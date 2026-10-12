@@ -4,7 +4,7 @@
 //! Plugins run on blocking threads with a time limit per call and a memory
 //! cap. HTTP is Extism's built-in client, limited to the manifest's
 //! `allowed_hosts` and only with the `network` permission. Host functions
-//! read and write through `time-core`, so addon writes are validated and
+//! read and write through `zeima-core`, so addon writes are validated and
 //! change-logged like any other write.
 
 use std::collections::{BTreeMap, HashMap};
@@ -18,12 +18,12 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
-use time_addon_sdk as sdk;
-use time_core::addon::{AddonManifest, Hook, Permission, SettingType};
-use time_core::events::DomainEvent;
-use time_core::model::{EntryInput, EntrySource};
-use time_core::summary::Range;
-use time_core::AddonRecord;
+use zeima_addon_sdk as sdk;
+use zeima_core::addon::{AddonManifest, Hook, Permission, SettingType};
+use zeima_core::events::DomainEvent;
+use zeima_core::model::{EntryInput, EntrySource};
+use zeima_core::summary::Range;
+use zeima_core::AddonRecord;
 
 use crate::events::DataKind;
 use crate::state::AppState;
@@ -81,7 +81,7 @@ pub type NotifyFn = Arc<dyn Fn(&str, &str) + Send + Sync>;
 /// based ones, tests their own.
 #[derive(Clone)]
 pub struct HostServices {
-    pub core: Arc<time_core::Core>,
+    pub core: Arc<zeima_core::Core>,
     pub notify: NotifyFn,
     /// Called after an addon created an entry, so windows reload.
     pub entries_changed: Arc<dyn Fn() + Send + Sync>,
@@ -129,7 +129,7 @@ impl HostCtx {
         }
     }
 
-    fn core(&self) -> Arc<time_core::Core> {
+    fn core(&self) -> Arc<zeima_core::Core> {
         self.services.core.clone()
     }
 }
@@ -140,7 +140,7 @@ fn convert<A: Serialize, B: DeserializeOwned>(value: A) -> Result<B, extism::Err
 }
 
 /// Entries for addons, with local start and end in `tz`.
-pub fn sdk_entries(entries: Vec<time_core::model::TimeEntry>, tz: chrono_tz::Tz) -> Vec<sdk::Entry> {
+pub fn sdk_entries(entries: Vec<zeima_core::model::TimeEntry>, tz: chrono_tz::Tz) -> Vec<sdk::Entry> {
     let local = |ms: i64| {
         chrono::DateTime::from_timestamp_millis(ms)
             .map(|d| d.with_timezone(&tz).format("%Y-%m-%dT%H:%M").to_string())
@@ -190,7 +190,7 @@ where
     Ok(())
 }
 
-fn time_list_entries(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+fn zeima_list_entries(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(
         p,
         i,
@@ -207,19 +207,19 @@ fn time_list_entries(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserDat
     )
 }
 
-fn time_list_projects(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+fn zeima_list_projects(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(p, i, o, u, Some(Permission::ProjectsRead), |ctx, (): ()| {
         convert::<_, Vec<sdk::Project>>(block_on(ctx.core().list_projects(true))?)
     })
 }
 
-fn time_list_tags(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+fn zeima_list_tags(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(p, i, o, u, Some(Permission::TagsRead), |ctx, (): ()| {
         convert::<_, Vec<sdk::Tag>>(block_on(ctx.core().list_tags())?)
     })
 }
 
-fn time_list_cost_centers(
+fn zeima_list_cost_centers(
     p: &mut CurrentPlugin,
     i: &[Val],
     o: &mut [Val],
@@ -230,7 +230,7 @@ fn time_list_cost_centers(
     })
 }
 
-fn time_create_entry(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+fn zeima_create_entry(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(
         p,
         i,
@@ -261,7 +261,7 @@ fn time_create_entry(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserDat
     )
 }
 
-fn time_notify(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+fn zeima_notify(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(
         p,
         i,
@@ -277,13 +277,13 @@ fn time_notify(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<Host
     )
 }
 
-fn time_kv_get(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+fn zeima_kv_get(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(p, i, o, u, None, |ctx, key: String| {
         Ok(block_on(ctx.core().addon_kv_get(&ctx.addon_id, &key))?)
     })
 }
 
-fn time_kv_set(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+fn zeima_kv_set(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(p, i, o, u, None, |ctx, w: sdk::KvWrite| {
         Ok(block_on(ctx.core().addon_kv_set(
             &ctx.addon_id,
@@ -293,7 +293,7 @@ fn time_kv_set(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<Host
     })
 }
 
-fn time_kv_keys(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+fn zeima_kv_keys(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(p, i, o, u, None, |ctx, prefix: String| {
         Ok(block_on(ctx.core().addon_kv_keys(&ctx.addon_id, &prefix))?)
     })
@@ -345,40 +345,40 @@ fn build_plugin(
             [PTR],
             [PTR],
             data.clone(),
-            time_list_entries,
+            zeima_list_entries,
         )
         .with_function(
             sdk::host_fns::LIST_PROJECTS,
             [PTR],
             [PTR],
             data.clone(),
-            time_list_projects,
+            zeima_list_projects,
         )
         .with_function(
             sdk::host_fns::LIST_TAGS,
             [PTR],
             [PTR],
             data.clone(),
-            time_list_tags,
+            zeima_list_tags,
         )
         .with_function(
             sdk::host_fns::LIST_COST_CENTERS,
             [PTR],
             [PTR],
             data.clone(),
-            time_list_cost_centers,
+            zeima_list_cost_centers,
         )
         .with_function(
             sdk::host_fns::CREATE_ENTRY,
             [PTR],
             [PTR],
             data.clone(),
-            time_create_entry,
+            zeima_create_entry,
         )
-        .with_function(sdk::host_fns::NOTIFY, [PTR], [PTR], data.clone(), time_notify)
-        .with_function(sdk::host_fns::KV_GET, [PTR], [PTR], data.clone(), time_kv_get)
-        .with_function(sdk::host_fns::KV_SET, [PTR], [PTR], data.clone(), time_kv_set)
-        .with_function(sdk::host_fns::KV_KEYS, [PTR], [PTR], data, time_kv_keys)
+        .with_function(sdk::host_fns::NOTIFY, [PTR], [PTR], data.clone(), zeima_notify)
+        .with_function(sdk::host_fns::KV_GET, [PTR], [PTR], data.clone(), zeima_kv_get)
+        .with_function(sdk::host_fns::KV_SET, [PTR], [PTR], data.clone(), zeima_kv_set)
+        .with_function(sdk::host_fns::KV_KEYS, [PTR], [PTR], data, zeima_kv_keys)
         .build()
         .map_err(|e| format!("could not load {}: {e}", manifest.wasm))
 }
@@ -546,7 +546,7 @@ impl Addons {
     }
 
     /// Export formats of enabled addons: (addon id, addon name, format).
-    pub fn export_formats(&self) -> Vec<(String, String, time_core::addon::ExportFormatDef)> {
+    pub fn export_formats(&self) -> Vec<(String, String, zeima_core::addon::ExportFormatDef)> {
         let mut out: Vec<_> = self
             .loaded()
             .into_iter()
@@ -633,8 +633,8 @@ pub fn start(app: &AppHandle) {
 /// `addons/build.sh csv-export` and `addons/build.sh recent-notes`).
 #[cfg(test)]
 mod tests {
-    use time_core::clock::ManualClock;
-    use time_core::model::ProjectInput;
+    use zeima_core::clock::ManualClock;
+    use zeima_core::model::ProjectInput;
 
     use super::*;
 
@@ -644,7 +644,7 @@ mod tests {
 
     struct Fixture {
         addons: Addons,
-        core: Arc<time_core::Core>,
+        core: Arc<zeima_core::Core>,
         notifications: Arc<Mutex<Vec<(String, String)>>>,
         _dir: PathBuf,
     }
@@ -659,7 +659,7 @@ mod tests {
             return None;
         }
         let core = Arc::new(
-            time_core::Core::open_in_memory(Arc::new(ManualClock::new(T0)))
+            zeima_core::Core::open_in_memory(Arc::new(ManualClock::new(T0)))
                 .await
                 .unwrap(),
         );
@@ -697,7 +697,7 @@ mod tests {
         })
     }
 
-    async fn project(core: &time_core::Core) -> String {
+    async fn project(core: &zeima_core::Core) -> String {
         core.create_project(ProjectInput {
             name: "Website".into(),
             alias: Some("WEB".into()),
@@ -705,10 +705,10 @@ mod tests {
             parent_id: None,
             client: None,
             budget_minutes: None,
-            budget_period: time_core::model::BudgetPeriod::Total,
+            budget_period: zeima_core::model::BudgetPeriod::Total,
             budget_warn_pct: 80,
             billable_default: false,
-            status: time_core::model::ProjectStatus::Active,
+            status: zeima_core::model::ProjectStatus::Active,
             cost_center_id: None,
         })
         .await
@@ -717,11 +717,11 @@ mod tests {
     }
 
     /// A manual entry on `project` with a "Work" activity.
-    async fn entry_input(core: &time_core::Core, project: &str, note: &str) -> EntryInput {
+    async fn entry_input(core: &zeima_core::Core, project: &str, note: &str) -> EntryInput {
         let activity = match core.list_activities(false).await.unwrap().into_iter().next() {
             Some(a) => a,
             None => core
-                .create_activity(time_core::model::ActivityInput {
+                .create_activity(zeima_core::model::ActivityInput {
                     name: "Work".into(),
                     color: "#3b82f6".into(),
                     archived: false,
@@ -744,7 +744,7 @@ mod tests {
 
     #[tokio::test]
     async fn csv_export_addon_writes_the_configured_csv() {
-        let Some(f) = load("dev.time.csv-export-1.0.0.zip", &[]).await else {
+        let Some(f) = load("dev.zeima.csv-export-1.0.0.zip", &[]).await else {
             return;
         };
         let pid = project(&f.core).await;
@@ -772,7 +772,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let csv = f.addons.export("dev.time.csv-export", &request).await.unwrap();
+        let csv = f.addons.export("dev.zeima.csv-export", &request).await.unwrap();
         let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').lines().collect();
         assert_eq!(lines[0], "date;start;end;hours;project;alias;tags;note");
         assert_eq!(
@@ -783,10 +783,10 @@ mod tests {
 
     #[tokio::test]
     async fn recent_notes_addon_uses_events_storage_and_suggestions() {
-        let Some(f) = load("dev.time.recent-notes-1.0.0.zip", &[Permission::ProjectsRead]).await else {
+        let Some(f) = load("dev.zeima.recent-notes-1.0.0.zip", &[Permission::ProjectsRead]).await else {
             return;
         };
-        let id = "dev.time.recent-notes";
+        let id = "dev.zeima.recent-notes";
         let pid = project(&f.core).await;
         let entry = f
             .core
@@ -817,7 +817,7 @@ mod tests {
     #[tokio::test]
     async fn granted_notify_reaches_the_user_with_the_addon_name() {
         let Some(f) = load(
-            "dev.time.recent-notes-1.0.0.zip",
+            "dev.zeima.recent-notes-1.0.0.zip",
             &[Permission::ProjectsRead, Permission::Notify],
         )
         .await
@@ -832,7 +832,7 @@ mod tests {
         let date = "2026-10-05".parse().unwrap();
         let day = f.core.work_days(date, date).await.unwrap().remove(0);
         f.addons.dispatch(&DomainEvent::DayClosed { date, day }).await;
-        assert_eq!(f.addons.error("dev.time.recent-notes"), None);
+        assert_eq!(f.addons.error("dev.zeima.recent-notes"), None);
         let shown = f.notifications.lock().unwrap().clone();
         assert_eq!(
             shown,

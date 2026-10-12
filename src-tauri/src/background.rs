@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use chrono::{Duration as Days, NaiveDate};
 use tauri::{AppHandle, Manager};
-use time_core::events::DomainEvent;
-use time_core::model::TimerState;
+use zeima_core::events::DomainEvent;
+use zeima_core::model::TimerState;
 
 use crate::state::AppState;
 use crate::{addons, backup, budget, tray};

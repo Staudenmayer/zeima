@@ -20,12 +20,12 @@ the whole machine or all their data.
   client, limited to `allowed_hosts`.
 - Each call has a time limit (10 s, 0.8 s for quick-switch suggestions), each
   plugin a memory cap (64 MB). Failures are recorded and shown, never fatal.
-- Addon writes go through `time-core` like UI writes (validated,
+- Addon writes go through `zeima-core` like UI writes (validated,
   change-logged) and are recorded with source `addon` and the addon's id.
 - The contract is JSON with camelCase fields, defined once in
-  `crates/time-addon-sdk` and used by both the host and addons. Fields are
+  `crates/zeima-addon-sdk` and used by both the host and addons. Fields are
   only ever added within a major version; unknown fields are ignored.
-- Domain events come from a bus in `time-core`: repositories queue them on
+- Domain events come from a bus in `zeima-core`: repositories queue them on
   the write transaction and they are published after commit.
 - Installed addons, their settings and key-value storage are device-local
   tables, not synced: the modules live on disk on one machine.

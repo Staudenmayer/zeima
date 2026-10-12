@@ -1,4 +1,4 @@
-//! SDK for Time addons (docs/addons.md).
+//! SDK for Zeima addons (docs/addons.md).
 //!
 //! An addon is a WASM module plus an `addon.toml` manifest. The app calls
 //! the module's exported functions for the hooks the manifest declares:
@@ -237,15 +237,15 @@ pub struct KvWrite {
 /// Names of the host functions (module `extism:host/user`). Every input
 /// and output is JSON.
 pub mod host_fns {
-    pub const LIST_ENTRIES: &str = "time_list_entries";
-    pub const LIST_PROJECTS: &str = "time_list_projects";
-    pub const LIST_TAGS: &str = "time_list_tags";
-    pub const LIST_COST_CENTERS: &str = "time_list_cost_centers";
-    pub const CREATE_ENTRY: &str = "time_create_entry";
-    pub const NOTIFY: &str = "time_notify";
-    pub const KV_GET: &str = "time_kv_get";
-    pub const KV_SET: &str = "time_kv_set";
-    pub const KV_KEYS: &str = "time_kv_keys";
+    pub const LIST_ENTRIES: &str = "zeima_list_entries";
+    pub const LIST_PROJECTS: &str = "zeima_list_projects";
+    pub const LIST_TAGS: &str = "zeima_list_tags";
+    pub const LIST_COST_CENTERS: &str = "zeima_list_cost_centers";
+    pub const CREATE_ENTRY: &str = "zeima_create_entry";
+    pub const NOTIFY: &str = "zeima_notify";
+    pub const KV_GET: &str = "zeima_kv_get";
+    pub const KV_SET: &str = "zeima_kv_set";
+    pub const KV_KEYS: &str = "zeima_kv_keys";
 }
 
 /// The host API. Each call fails (and the hook with it) if the manifest
@@ -258,46 +258,46 @@ pub mod host {
 
     #[host_fn]
     extern "ExtismHost" {
-        fn time_list_entries(range: Json<Range>) -> Json<Vec<Entry>>;
-        fn time_list_projects(unit: Json<()>) -> Json<Vec<Project>>;
-        fn time_list_tags(unit: Json<()>) -> Json<Vec<Tag>>;
-        fn time_list_cost_centers(unit: Json<()>) -> Json<Vec<CostCenter>>;
-        fn time_create_entry(entry: Json<NewEntry>) -> Json<Entry>;
-        fn time_notify(n: Json<Notification>) -> Json<()>;
-        fn time_kv_get(key: Json<String>) -> Json<Option<String>>;
-        fn time_kv_set(write: Json<KvWrite>) -> Json<()>;
-        fn time_kv_keys(prefix: Json<String>) -> Json<Vec<String>>;
+        fn zeima_list_entries(range: Json<Range>) -> Json<Vec<Entry>>;
+        fn zeima_list_projects(unit: Json<()>) -> Json<Vec<Project>>;
+        fn zeima_list_tags(unit: Json<()>) -> Json<Vec<Tag>>;
+        fn zeima_list_cost_centers(unit: Json<()>) -> Json<Vec<CostCenter>>;
+        fn zeima_create_entry(entry: Json<NewEntry>) -> Json<Entry>;
+        fn zeima_notify(n: Json<Notification>) -> Json<()>;
+        fn zeima_kv_get(key: Json<String>) -> Json<Option<String>>;
+        fn zeima_kv_set(write: Json<KvWrite>) -> Json<()>;
+        fn zeima_kv_keys(prefix: Json<String>) -> Json<Vec<String>>;
     }
 
     /// Entries overlapping `range` (`entries:read`).
     pub fn list_entries(range: Range) -> FnResult<Vec<Entry>> {
-        Ok(unsafe { time_list_entries(Json(range)) }?.0)
+        Ok(unsafe { zeima_list_entries(Json(range)) }?.0)
     }
 
     /// All projects, archived ones included (`projects:read`).
     pub fn list_projects() -> FnResult<Vec<Project>> {
-        Ok(unsafe { time_list_projects(Json(())) }?.0)
+        Ok(unsafe { zeima_list_projects(Json(())) }?.0)
     }
 
     /// `tags:read`
     pub fn list_tags() -> FnResult<Vec<Tag>> {
-        Ok(unsafe { time_list_tags(Json(())) }?.0)
+        Ok(unsafe { zeima_list_tags(Json(())) }?.0)
     }
 
     /// `cost-centers:read`
     pub fn list_cost_centers() -> FnResult<Vec<CostCenter>> {
-        Ok(unsafe { time_list_cost_centers(Json(())) }?.0)
+        Ok(unsafe { zeima_list_cost_centers(Json(())) }?.0)
     }
 
     /// Creates a finished entry (`entries:write`).
     pub fn create_entry(entry: NewEntry) -> FnResult<Entry> {
-        Ok(unsafe { time_create_entry(Json(entry)) }?.0)
+        Ok(unsafe { zeima_create_entry(Json(entry)) }?.0)
     }
 
     /// Desktop notification (`notify`).
     pub fn notify(title: &str, body: &str) -> FnResult<()> {
         unsafe {
-            time_notify(Json(Notification {
+            zeima_notify(Json(Notification {
                 title: title.into(),
                 body: body.into(),
             }))
@@ -307,12 +307,12 @@ pub mod host {
 
     /// The addon's own storage; no permission needed.
     pub fn kv_get(key: &str) -> FnResult<Option<String>> {
-        Ok(unsafe { time_kv_get(Json(key.to_string())) }?.0)
+        Ok(unsafe { zeima_kv_get(Json(key.to_string())) }?.0)
     }
 
     pub fn kv_set(key: &str, value: &str) -> FnResult<()> {
         unsafe {
-            time_kv_set(Json(KvWrite {
+            zeima_kv_set(Json(KvWrite {
                 key: key.into(),
                 value: Some(value.into()),
             }))
@@ -322,7 +322,7 @@ pub mod host {
 
     pub fn kv_delete(key: &str) -> FnResult<()> {
         unsafe {
-            time_kv_set(Json(KvWrite {
+            zeima_kv_set(Json(KvWrite {
                 key: key.into(),
                 value: None,
             }))
@@ -332,7 +332,7 @@ pub mod host {
 
     /// Keys starting with `prefix`, sorted.
     pub fn kv_keys(prefix: &str) -> FnResult<Vec<String>> {
-        Ok(unsafe { time_kv_keys(Json(prefix.to_string())) }?.0)
+        Ok(unsafe { zeima_kv_keys(Json(prefix.to_string())) }?.0)
     }
 }
 

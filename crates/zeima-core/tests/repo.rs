@@ -4,13 +4,13 @@ mod common;
 
 use std::sync::Arc;
 
-use time_core::clock::ManualClock;
-use time_core::model::{
+use zeima_core::clock::ManualClock;
+use zeima_core::model::{
     ActivityInput, BudgetPeriod, EntryInput, EntryPatch, ProjectInput, ProjectStatus, StartTimer, TagInput,
     TimerState,
 };
-use time_core::summary::Range;
-use time_core::{Core, Error};
+use zeima_core::summary::Range;
+use zeima_core::{Core, Error};
 
 const MIN: i64 = 60_000;
 const T0: i64 = 1_700_000_000_000;
@@ -293,7 +293,7 @@ async fn summaries_per_day() {
 
 #[tokio::test]
 async fn domain_events_are_published_after_commit() {
-    use time_core::events::DomainEvent;
+    use zeima_core::events::DomainEvent;
     let (core, clock) = setup().await;
     let mut events = core.subscribe();
     core.start_timer(StartTimer {
@@ -417,7 +417,7 @@ async fn bulk_update_keeps_entries_without_activity_editable() {
                 activity_id: None,
                 ..manual(None, T0, T0 + 30 * MIN, vec![])
             },
-            time_core::model::EntrySource::Addon,
+            zeima_core::model::EntrySource::Addon,
             None,
         )
         .await

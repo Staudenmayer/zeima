@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Time",
+  "productName": "Zeima",
   "version": "0.1.0",
-  "identifier": "com.sebi.time",
+  "identifier": "com.sebi.zeima",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Time",
+        "title": "Zeima",
         "width": 1100,
         "height": 720,
         "minWidth": 720,

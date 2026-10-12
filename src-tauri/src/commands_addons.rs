@@ -8,10 +8,10 @@ use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
-use time_addon_sdk as sdk;
-use time_core::addon::{AddonManifest, SettingType};
-use time_core::report::ReportQuery;
-use time_core::AddonRecord;
+use zeima_addon_sdk as sdk;
+use zeima_core::addon::{AddonManifest, SettingType};
+use zeima_core::report::ReportQuery;
+use zeima_core::AddonRecord;
 
 use crate::addons::{addons_dir, read_manifest, Addons, MANIFEST_FILE};
 use crate::commands::{CmdError, CmdResult};
@@ -137,7 +137,7 @@ pub async fn addon_pick(app: AppHandle, state: State<'_, AppState>) -> CmdResult
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
-        .add_filter("Time addon", &["zip", "timeaddon", "toml"])
+        .add_filter("Zeima addon", &["zip", "zeimaaddon", "toml"])
         .pick_file(move |path| {
             let _ = tx.send(path);
         });

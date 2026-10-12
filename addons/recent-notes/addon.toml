@@ -1,9 +1,9 @@
 # Example addon: reacts to events, keeps its own storage, adds quick-switch
 # options and sends notifications.
-id = "dev.time.recent-notes"
+id = "dev.zeima.recent-notes"
 name = "Recent notes"
 version = "1.0.0"
-author = "Time"
+author = "Zeima"
 description = "Offers your recent notes in the quick switch (\"Continue: …\") and sends a short summary of yesterday."
 min_app_version = "0.1.0"
 wasm = "recent_notes.wasm"

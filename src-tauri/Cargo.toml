@@ -1,6 +1,6 @@
 [package]
-name = "time-app"
-description = "Time: local-first time tracking"
+name = "zeima"
+description = "Zeima: local-first time tracking"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -9,14 +9,14 @@ license.workspace = true
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "time_app_lib"
+name = "zeima_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-time-core = { workspace = true, features = ["db", "specta"] }
+zeima-core = { workspace = true, features = ["db", "specta"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
@@ -36,7 +36,7 @@ sys-locale = "0.3"
 tauri-plugin-notification = "2"
 tauri-plugin-dialog = "2"
 rust_xlsxwriter = "0.99.1"
-time-addon-sdk.workspace = true
+zeima-addon-sdk.workspace = true
 toml.workspace = true
 zip = { version = "8", default-features = false, features = ["deflate"] }
 extism = "1.41"

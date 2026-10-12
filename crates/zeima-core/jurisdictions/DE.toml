@@ -5,7 +5,7 @@ schema_version = 1
 id = "DE"
 version = "2026.1"
 name = { de = "Deutschland", en = "Germany" }
-maintainer = "Time core team"
+maintainer = "Zeima core team"
 sources = [
   "https://www.gesetze-im-internet.de/arbzg/", # Arbeitszeitgesetz (ArbZG)
   "https://www.gesetze-im-internet.de/burlg/", # Bundesurlaubsgesetz (BUrlG)

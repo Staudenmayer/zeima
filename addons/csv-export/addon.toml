@@ -1,8 +1,8 @@
 # Example addon: a report export format with its own settings.
-id = "dev.time.csv-export"
+id = "dev.zeima.csv-export"
 name = "Custom CSV export"
 version = "1.0.0"
-author = "Time"
+author = "Zeima"
 description = "Exports report entries as CSV with the columns, delimiter and decimal separator you choose."
 min_app_version = "0.1.0"
 wasm = "csv_export.wasm"

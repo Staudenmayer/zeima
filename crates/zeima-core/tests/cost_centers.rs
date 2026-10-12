@@ -5,12 +5,12 @@ mod common;
 use std::sync::Arc;
 
 use chrono::NaiveDate;
-use time_core::clock::ManualClock;
-use time_core::model::{
+use zeima_core::clock::ManualClock;
+use zeima_core::model::{
     BudgetPeriod, CostCenterAssignmentInput, CostCenterInput, EntryInput, ProjectInput, ProjectStatus,
     StartTimer, TimerState,
 };
-use time_core::{Core, Error};
+use zeima_core::{Core, Error};
 
 const HOUR: i64 = 3_600_000;
 /// 2026-10-05 08:00 UTC (a Monday).
@@ -238,7 +238,7 @@ async fn json_export_and_backup_contain_the_data() {
     let dir = std::env::temp_dir().join(format!("time-backup-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let core = common::with_activity(
-        Core::open(&dir.join("time.db"), Arc::new(ManualClock::new(T0)))
+        Core::open(&dir.join("zeima.db"), Arc::new(ManualClock::new(T0)))
             .await
             .unwrap(),
     )
@@ -269,7 +269,7 @@ async fn json_export_and_backup_contain_the_data() {
 
 #[tokio::test]
 async fn addon_records_and_storage() {
-    use time_core::addon::Permission;
+    use zeima_core::addon::Permission;
     let core = setup().await;
     let a = core
         .save_addon("com.example.a", "1.0.0", &[Permission::EntriesRead])

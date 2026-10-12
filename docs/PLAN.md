@@ -1,4 +1,4 @@
-# Time — Implementation Plan
+# Zeima — Implementation Plan
 
 > Companion to [SPEC.md](./SPEC.md). Status: Draft v0.1 · 2026-10-04
 > Each phase ends in a usable, shippable state. Phases 0–4 are the **Free/local** product. Phases 5–7 add the paid tiers. Integrations such as calendars are addons, not built-in features.
@@ -14,12 +14,12 @@ Phases 0–2 are implemented (2026-10-04), Phase 3 on 2026-10-10; Phase 4 is in 
 Goal: the project skeleton every later phase builds on.
 
 - [x] `git init`, first commit of the current state; add `.editorconfig`, rustfmt and clippy config
-- [x] Rename the product: `productName` (Time), `identifier` (`com.sebi.time`), window title, `package.json` name, Cargo package (`time-app`)
-- [x] Convert to a **Cargo workspace** (root `Cargo.toml` with members `src-tauri`, `crates/time-core`)
+- [x] Rename the product: `productName` (Zeima), `identifier` (`com.sebi.zeima`), window title, `package.json` name, Cargo package (`zeima`)
+- [x] Convert to a **Cargo workspace** (root `Cargo.toml` with members `src-tauri`, `crates/zeima-core`)
 - [ ] **bun workspaces**: *deferred to Phase 5, when `server/` and `packages/*` exist*
-- [x] `crates/time-core`: `sqlx` 0.9 (sqlite, bundled), `uuid` (v7), `chrono` + `chrono-tz`, `thiserror`, `serde`
+- [x] `crates/zeima-core`: `sqlx` 0.9 (sqlite, bundled), `uuid` (v7), `chrono` + `chrono-tz`, `thiserror`, `serde`
   - [x] Pure logic free of I/O; `sqlx`/tokio behind the `db` feature (CI checks the crate builds without it)
-  - [x] DB bootstrap: `app_data_dir/time.db`, WAL mode, `foreign_keys=ON`, `sqlx::migrate!`
+  - [x] DB bootstrap: `app_data_dir/zeima.db`, WAL mode, `foreign_keys=ON`, `sqlx::migrate!`
   - [x] `Core::begin()` → `WriteTx` stamps rows and writes `change_log` in the same transaction (`log_upsert`, `log_delete`, `soft_delete`)
   - [x] HLC implementation + per-install `device_id`
 - [x] Remove `tauri-plugin-sql` (Rust + JS + capability `sql:default`)
@@ -29,7 +29,7 @@ Goal: the project skeleton every later phase builds on.
 - [x] CI: `.github/workflows/ci.yml` (fmt, clippy `-D warnings`, `cargo test` on Linux/Windows/macOS, bindings drift check, `vue-tsc`, `vitest`, vite build)
 - [x] `docs/adr/0001-local-first-sqlite-rust-owned-db.md`, `docs/adr/0002-fastify-openapi-keycloak-server.md`
 
-**Done when:** the app starts, creates `time.db` with migrations applied, and the frontend calls a typed command. ✅
+**Done when:** the app starts, creates `zeima.db` with migrations applied, and the frontend calls a typed command. ✅
 
 ---
 
@@ -37,7 +37,7 @@ Goal: the project skeleton every later phase builds on.
 
 Goal: track time on projects with tags from the tray. A daily-driver for one user.
 
-**Backend (`time-core`)**
+**Backend (`zeima-core`)**
 - [x] Migrations `0001_meta` (`local_meta`, `change_log`) and `0002_core` (`workspace`, `app_user`, `project`, `tag`, `time_entry`, `time_entry_tag`, `pause`). *Device settings live in `local_meta`; a synced `setting` table is added when the first synced setting appears.*
 - [x] Bootstrap a local personal workspace and local user on first run
 - [x] Repositories + validation: Project (unique alias, case-insensitive; parent cycle check; delete blocked when entries exist → archive), Tag (global/project-scoped, one tag per group), TimeEntry (create/update/delete/split/duplicate, locked entries protected)
@@ -56,14 +56,14 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 - [x] Quick-switch palette: fuzzy search, `#alias @tag note` parser (18 Vitest tests incl. date helpers)
 - [x] Header: running-timer pill with pause/resume/stop and quick switch
 
-**Done when:** one user tracks a full workday from the tray and quick switch, edits entries, and data survives restart and crash. *Verified: app starts, bootstraps `time.db`; a full manual workday test is still to be done by a person.*
+**Done when:** one user tracks a full workday from the tray and quick switch, edits entries, and data survives restart and crash. *Verified: app starts, bootstraps `zeima.db`; a full manual workday test is still to be done by a person.*
 
 ---
 
 ## Phase 2 — Work Hours & Auto-Pause ✅
 
 - [x] Migration `0003_worktime`: `jurisdiction_selection`, `work_schedule`, `absence_type`, `absence`, `custom_holiday`, `balance_adjustment`, `work_settings` (incl. auto-pause config), `daily_summary`; `pause` gains `followup_entry_id`, `applied`. *Auto-pause rules are one config object in `work_settings`, not an `auto_pause_rule` table.*
-- [x] **Work-time calculator** (`time-core/src/worktime.rs`, pure): interval merge, local-day clipping (DST-safe), break detection + deduction per profile, targets from schedules/holidays/absences (half days, comp time), trust-based model, balance, warnings (daily max, rest time, break). Reference month (Oct 2026, AT) checked against a hand calculation: **+4:00 h**.
+- [x] **Work-time calculator** (`zeima-core/src/worktime.rs`, pure): interval merge, local-day clipping (DST-safe), break detection + deduction per profile, targets from schedules/holidays/absences (half days, comp time), trust-based model, balance, warnings (daily max, rest time, break). Reference month (Oct 2026, AT) checked against a hand calculation: **+4:00 h**.
 - [x] `daily_summary` cache: past days are cached with the profile version; every write that affects a day deletes its rows (entries invalidate their date range + the next day for the rest check). A test compares cache and fresh computation after every kind of change.
 - [x] **Country profile engine**: TOML format + generated JSON Schema (`profile.schema.json`, CI drift check), region add/remove, rule-based holidays (fixed, Western/Orthodox Easter offset, nth/last weekday, weekday before/after, validity years), profile versioning. *`extends` between countries is not implemented yet; regions cover current needs.*
 - [x] Profiles `AT` (9 states), `DE` (16 states), `CH` (federal + ZH, BE) with fixtures (holidays for several years incl. regions, break thresholds). *Values written from the law texts; they need review by someone familiar with each country before release.*
@@ -71,7 +71,7 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 - [x] Custom (company) holidays on top of profile holidays.
 - [x] `docs/country-profiles.md`
 - [x] **OS watchers** (`src-tauri/src/os/`): Linux idle via GNOME Mutter, Wayland `ext-idle-notify-v1` (KDE/Sway/Hyprland) or freedesktop screensaver; lock via logind `LockedHint` + screensaver; Windows/macOS idle via `user-idle`. Suspend is detected on all platforms from wall-clock jumps. *Windows/macOS lock state is not read directly; a locked screen shows up as idle time.*
-- [x] **Auto-pause engine** (`time-core/src/autopause.rs` + `away.rs`): idle (prompt by default), lock/sleep/app closed (exclude by default), lunch detection, night stop for forgotten timers (also on startup via heartbeat), daily-max notification, morning check-in. All legal numbers come from the profile.
+- [x] **Auto-pause engine** (`zeima-core/src/autopause.rs` + `away.rs`): idle (prompt by default), lock/sleep/app closed (exclude by default), lunch detection, night stop for forgotten timers (also on startup via heartbeat), daily-max notification, morning check-in. All legal numbers come from the profile.
 - [x] Prompt window (bottom-right, does not take focus): every auto-pause can be accepted, undone ("it was work", merges the entry back), or assigned to another project; morning check-in with recent projects.
 - [x] Pages: `settings/work-hours` (country, legal summary, schedules with validity dates, vacation days, break deduction, balance corrections), `settings/auto-pause`, `absences/` (vacation summary, list, types, holidays). Dashboard: today vs target, flexitime balance, week chart with targets. Timesheet: per-day target, difference, holiday, absence and warning badges.
 
@@ -82,7 +82,7 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 ## Phase 3 — Dashboard, Reports, Cost Centers ✅
 
 - [x] Migration `0004_cost_centers` *(0003 was taken by work time)*: `cost_center` (code, name, parent, active, validity), `cost_center_assignment` (user default with validity; `group_id` reserved for the org edition), `cost_center_id` on `project` and `time_entry`. Resolution when an entry is written: explicit → project default → user default on the entry's date; inactive or expired defaults are skipped. Moving an entry to another project re-resolves it unless the cost center was picked explicitly.
-- [x] Report query engine (`time-core/src/report.rs`, pure): filter by project, tag, cost center, billable; nested group-by over project, tag, cost center, billable, day/week/month (local days, DST-safe). *Sums clipped entry durations, so overlaps count per entry; tag rows count an entry once per tag. Reads `time_entry` only: `daily_summary` holds work-time days, which the monthly timesheet uses instead.*
+- [x] Report query engine (`zeima-core/src/report.rs`, pure): filter by project, tag, cost center, billable; nested group-by over project, tag, cost center, billable, day/week/month (local days, DST-safe). *Sums clipped entry durations, so overlaps count per entry; tag rows count an entry once per tag. Reads `time_entry` only: `daily_summary` holds work-time days, which the monthly timesheet uses instead.*
 - [x] **Dashboard**: widgets can be reordered and hidden (*stored per device, not synced*); new widgets for project budgets and cost centers this month. *`BarChart.vue` was already replaced by `WeekChart.vue` in Phase 2.*
 - [x] Project budget warnings: notification at the warning threshold and at 100 %, once per threshold and budget period (checked after entry/project changes and every 30 s while tracking)
 - [x] Pages: `reports/` (period presets, filters, two grouping levels, summary and entries views), `reports/timesheet` (printable monthly timesheet with signature lines), `cost-centers/`
@@ -95,8 +95,8 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 
 ## Phase 4 — Addon System v1 (in progress)
 
-- [x] Internal **event bus** in `time-core`: repositories queue `DomainEvent`s on the write transaction, published after commit (`entry.started/stopped/created/updated/deleted`); the app adds `day.closed` once per finished day (catching up to a week).
-- [x] `crates/time-addon-sdk` (Rust, JSON contract shared with the host) + manifest schema (`addon.toml`, `crates/time-core/addon.schema.json`, CI drift check)
+- [x] Internal **event bus** in `zeima-core`: repositories queue `DomainEvent`s on the write transaction, published after commit (`entry.started/stopped/created/updated/deleted`); the app adds `day.closed` once per finished day (catching up to a week).
+- [x] `crates/zeima-addon-sdk` (Rust, JSON contract shared with the host) + manifest schema (`addon.toml`, `crates/zeima-core/addon.schema.json`, CI drift check)
 - [x] Extism host in `src-tauri` (`addons.rs`): load, permission check on every host call, per-addon KV store, `network` limited to `allowed_hosts`, 10 s per call (0.8 s for suggestions), 64 MB memory, no WASI. *Addon-created entries carry source `addon` and are not echoed back to the addon that made them.* ADR 0003.
 - [x] Hooks: `entry.*`, `day.closed`, `report.export`, `quickswitch.suggest`, `schedule.tick`
 - [x] Declarative settings form. *A field list in `addon.toml` (text, number, boolean, select, password) instead of full JSON Schema: ordered, simpler to write, enough for v1.*
@@ -133,7 +133,7 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 - [ ] CI: lint, typecheck, Vitest, Testcontainers (Postgres + Keycloak), `oasdiff breaking`, route schema lint
 
 **5c. Shared logic & contracts**
-- [ ] `crates/time-core-wasm` (wasm-bindgen, `--target nodejs`) → `@time/core-wasm`: work-time calc, balances, holidays, country profiles
+- [ ] `crates/zeima-core-wasm` (wasm-bindgen, `--target nodejs`) → `@time/core-wasm`: work-time calc, balances, holidays, country profiles
 - [ ] `packages/shared-fixtures/sync/*.json` test vectors; Rust and TS merge implementations both pass them
 - [ ] `crates/time-api-client` generated with `progenitor`; Vue types via `openapi-typescript` + `openapi-fetch` (fetch = `@tauri-apps/plugin-http`)
 
@@ -190,7 +190,7 @@ Order is by dependency:
 
 ## Cross-Cutting Rules (apply in every phase)
 
-- Every write goes through `time-core` repositories, which write the `change_log` in the same transaction. No exceptions.
+- Every write goes through `zeima-core` repositories, which write the `change_log` in the same transaction. No exceptions.
 - Every synced table gets the common columns (SPEC §4) and soft delete from its first migration. Do not retrofit them later.
 - Feature gates use `has_feature(...)`. In Free, org-only UI is hidden, not shown as broken.
 - New user-facing strings go into **both** `de.ts` and `en.ts`.
@@ -210,7 +210,7 @@ Order is by dependency:
 | Self-hosted drifts from cloud | Same images and realm file, self-hosted compose stack runs in CI, API compatibility range |
 | Keycloak operational complexity (upgrades, HA, theme breakage) | Pin a supported version range, realm-as-code with `keycloak-config-cli`, Testcontainers tests on every Keycloak bump, compose E2E in CI |
 | Mirror tables drift from Keycloak | Three update paths (token upsert, event webhook, nightly reconcile) + a drift metric/alert |
-| Logic drift between Rust client and TS server | Domain math in one place (`time-core` → WASM); shared JSON test vectors for sync merge and permissions |
+| Logic drift between Rust client and TS server | Domain math in one place (`zeima-core` → WASM); shared JSON test vectors for sync merge and permissions |
 | Sync bugs corrupt data | Tombstones, change log, server-side history table, convergence tests, local backups |
 | Scope creep before revenue | Ship 1.0 Free early; validate demand for Org before Phase 6 |
 | Works-council or privacy objections | Privacy-first defaults (SPEC §12); documented visibility model |

@@ -18,7 +18,7 @@ pub async fn check(app: &AppHandle) {
     }
 }
 
-async fn check_inner(app: &AppHandle) -> time_core::Result<()> {
+async fn check_inner(app: &AppHandle) -> zeima_core::Result<()> {
     let state = app.state::<AppState>();
     let core = &state.core;
     let statuses = core.budget_statuses().await?;

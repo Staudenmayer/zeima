@@ -1,7 +1,7 @@
 # Country profiles
 
 Country-specific rules (legal limits, breaks, vacation, public holidays) are
-data in `crates/time-core/jurisdictions/`. Adding or fixing a country needs no
+data in `crates/zeima-core/jurisdictions/`. Adding or fixing a country needs no
 Rust or Vue changes. See also [SPEC §5.13](SPEC.md).
 
 > Profiles are best-effort defaults, not legal advice. Every profile lists the
@@ -25,11 +25,11 @@ Rust or Vue changes. See also [SPEC §5.13](SPEC.md).
    - `[vacation]`: statutory minimum for a full-time 5-day week.
    - `[[holidays]]`: public holidays of the whole country (see rules below). Use `day_off = false` for days worth showing that are not days off.
    - `[regions."<ID>-<code>"]`: ISO 3166-2 subdivisions with their extra holidays (`holidays = [...]`) or removed national ones (`remove_holidays = ["id"]`).
-2. Register the file in `BUNDLED` in `crates/time-core/src/jurisdiction/mod.rs`, and its fixtures in `FIXTURES` in `jurisdiction/tests.rs`.
+2. Register the file in `BUNDLED` in `crates/zeima-core/src/jurisdiction/mod.rs`, and its fixtures in `FIXTURES` in `jurisdiction/tests.rs`.
 3. Write `<ID>.fixtures.toml` with dates taken from an official source, not from this program:
    - holidays for at least 3 years, including at least one region,
    - break requirements around each threshold (e.g. 360 → 0, 361 → 30).
-4. Run `cargo test -p time-core --features db`. The tests check the fixtures, ISO codes, duplicate holidays and that every region resolves.
+4. Run `cargo test -p zeima-core --features db`. The tests check the fixtures, ISO codes, duplicate holidays and that every region resolves.
 5. Open a pull request. Name the sources you used to check the fixtures.
 
 ## Holiday rules

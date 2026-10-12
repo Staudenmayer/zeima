@@ -61,10 +61,10 @@ jobs:
       # The test suite regenerates src/bindings.ts; it must match the commit.
       - name: Generated files are up to date
         if: runner.os == 'Linux'
-        run: git diff --exit-code src/bindings.ts crates/time-core/jurisdictions/profile.schema.json crates/time-core/addon.schema.json
-      - name: time-core builds without the db feature (WASM-ready)
+        run: git diff --exit-code src/bindings.ts crates/zeima-core/jurisdictions/profile.schema.json crates/zeima-core/addon.schema.json
+      - name: zeima-core builds without the db feature (WASM-ready)
         if: runner.os == 'Linux'
-        run: cargo check -p time-core --no-default-features
+        run: cargo check -p zeima-core --no-default-features
       - name: Addon SDK builds for WASM
         if: runner.os == 'Linux'
-        run: cargo check -p time-addon-sdk --target wasm32-unknown-unknown
+        run: cargo check -p zeima-addon-sdk --target wasm32-unknown-unknown

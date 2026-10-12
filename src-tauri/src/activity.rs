@@ -8,10 +8,10 @@ use std::time::Duration;
 use chrono::{NaiveDate, Timelike};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
-use time_core::autopause::{AutoPauseConfig, AwayPeriod, Detector, Observation};
-use time_core::model::TimerState;
-use time_core::summary::Range;
-use time_core::worktime::DayWarning;
+use zeima_core::autopause::{AutoPauseConfig, AwayPeriod, Detector, Observation};
+use zeima_core::model::TimerState;
+use zeima_core::summary::Range;
+use zeima_core::worktime::DayWarning;
 
 use crate::commands;
 use crate::events::DataKind;
@@ -143,7 +143,7 @@ async fn offer_morning(app: &AppHandle, cfg: &AutoPauseConfig) {
         return;
     }
     let idle = matches!(core.timer_state().await, Ok(TimerState::Idle));
-    let (from, to) = time_core::worktime::day_bounds(today, tz);
+    let (from, to) = zeima_core::worktime::day_bounds(today, tz);
     let tracked_today = core
         .list_entries(Range { from, to })
         .await

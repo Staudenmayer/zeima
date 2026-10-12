@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
-use time_core::model::WorkSettings;
-use time_core::Core;
+use zeima_core::model::WorkSettings;
+use zeima_core::Core;
 
 use crate::settings::AppSettings;
 

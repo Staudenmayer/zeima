@@ -1,6 +1,6 @@
 // `{'@'}` escapes "@", which vue-i18n otherwise treats as a linked message.
 export default {
-  app: { name: 'Time', personal: 'Personal workspace', local: 'Local only' },
+  app: { name: 'Zeima', personal: 'Personal workspace', local: 'Local only' },
   nav: {
     dashboard: 'Dashboard',
     timesheet: 'Timesheet',
@@ -180,7 +180,7 @@ export default {
       exportHint: 'Everything you tracked and set up, as one JSON file.',
       exportJson: 'Export as JSON',
       backupsTitle: 'Backups',
-      backupsHint: 'Time backs up its database once a day and keeps the last 14 days.',
+      backupsHint: 'Zeima backs up its database once a day and keeps the last 14 days.',
       backupNow: 'Back up now',
       backupDone: 'Backup saved',
       openFolder: 'Open folder',
@@ -355,7 +355,7 @@ export default {
     custom: 'custom',
   },
   prompt: {
-    title: 'Time',
+    title: 'Zeima',
     awayExcluded: 'You were away {from}–{to} ({duration}). The time was removed from {project}.',
     awayAsk: 'No activity {from}–{to} ({duration}) while tracking {project}.',
     night: 'The timer for {project} was still running. It was stopped at your last activity ({from}).',
@@ -371,7 +371,7 @@ export default {
   },
   onboarding: {
     title: 'Where do you work?',
-    description: 'Time uses your country\'s rules for breaks, limits, vacation and public holidays. You can change this later under Settings → Work hours.',
+    description: 'Zeima uses your country\'s rules for breaks, limits, vacation and public holidays. You can change this later under Settings → Work hours.',
     continue: 'Continue',
   },
   costCenters: {

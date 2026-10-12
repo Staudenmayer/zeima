@@ -2,7 +2,7 @@ import type en from './en'
 
 // `{'@'}` escapes "@", which vue-i18n otherwise treats as a linked message.
 const de: typeof en = {
-  app: { name: 'Time', personal: 'Persönlicher Bereich', local: 'Nur lokal' },
+  app: { name: 'Zeima', personal: 'Persönlicher Bereich', local: 'Nur lokal' },
   nav: {
     dashboard: 'Übersicht',
     timesheet: 'Zeiterfassung',
@@ -182,7 +182,7 @@ const de: typeof en = {
       exportHint: 'Alles, was du erfasst und eingerichtet hast, als eine JSON-Datei.',
       exportJson: 'Als JSON exportieren',
       backupsTitle: 'Sicherungen',
-      backupsHint: 'Time sichert die Datenbank einmal täglich und behält die letzten 14 Tage.',
+      backupsHint: 'Zeima sichert die Datenbank einmal täglich und behält die letzten 14 Tage.',
       backupNow: 'Jetzt sichern',
       backupDone: 'Sicherung gespeichert',
       openFolder: 'Ordner öffnen',
@@ -357,7 +357,7 @@ const de: typeof en = {
     custom: 'eigener',
   },
   prompt: {
-    title: 'Time',
+    title: 'Zeima',
     awayExcluded: 'Du warst {from}–{to} weg ({duration}). Die Zeit wurde aus {project} entfernt.',
     awayAsk: 'Keine Aktivität {from}–{to} ({duration}) während der Erfassung von {project}.',
     night: 'Der Timer für {project} lief noch. Er wurde bei deiner letzten Aktivität ({from}) gestoppt.',
@@ -373,7 +373,7 @@ const de: typeof en = {
   },
   onboarding: {
     title: 'Wo arbeitest du?',
-    description: 'Time verwendet die Regeln deines Landes für Pausen, Höchstgrenzen, Urlaub und Feiertage. Du kannst das später unter Einstellungen → Arbeitszeit ändern.',
+    description: 'Zeima verwendet die Regeln deines Landes für Pausen, Höchstgrenzen, Urlaub und Feiertage. Du kannst das später unter Einstellungen → Arbeitszeit ändern.',
     continue: 'Weiter',
   },
   costCenters: {

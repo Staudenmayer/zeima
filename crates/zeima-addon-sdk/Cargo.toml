@@ -1,6 +1,6 @@
 [package]
-name = "time-addon-sdk"
-description = "Build addons for Time: typed host API and hook payloads"
+name = "zeima-addon-sdk"
+description = "Build addons for Zeima: typed host API and hook payloads"
 edition.workspace = true
 version.workspace = true
 license.workspace = true

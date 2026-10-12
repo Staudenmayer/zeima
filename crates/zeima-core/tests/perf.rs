@@ -1,7 +1,7 @@
 #![cfg(feature = "db")]
 //! One year of seeded data: the dashboard and reports must stay fast
 //! (docs/SPEC.md §9: dashboard < 300 ms). Run with
-//! `cargo test -p time-core --features db --release --test perf -- --ignored --nocapture`.
+//! `cargo test -p zeima-core --features db --release --test perf -- --ignored --nocapture`.
 
 mod common;
 
@@ -9,11 +9,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Duration;
-use time_core::clock::ManualClock;
-use time_core::model::{BudgetPeriod, EntryInput, ProjectInput, ProjectStatus};
-use time_core::report::{ReportFilter, ReportGroup, ReportQuery};
-use time_core::summary::Range;
-use time_core::Core;
+use zeima_core::clock::ManualClock;
+use zeima_core::model::{BudgetPeriod, EntryInput, ProjectInput, ProjectStatus};
+use zeima_core::report::{ReportFilter, ReportGroup, ReportQuery};
+use zeima_core::summary::Range;
+use zeima_core::Core;
 
 const HOUR: i64 = 3_600_000;
 const DAY: i64 = 24 * HOUR;

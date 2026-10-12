@@ -4,10 +4,10 @@
 use chrono::Datelike;
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use time_core::locale::{
+use zeima_core::locale::{
     effective_zone, system_formats, DateFormat, Formats, NumberFormat, RegionalFormats, TimeFormat, WeekStart,
 };
-use time_core::Core;
+use zeima_core::Core;
 
 const KEY: &str = "settings";
 
@@ -79,7 +79,7 @@ impl AppSettings {
 pub fn system_timezone() -> String {
     iana_time_zone::get_timezone()
         .ok()
-        .filter(|tz| time_core::model::validate_tz(tz).is_ok())
+        .filter(|tz| zeima_core::model::validate_tz(tz).is_ok())
         .unwrap_or_else(|| "UTC".into())
 }
 
@@ -89,7 +89,7 @@ impl AppSettings {
         let base = self
             .timezone
             .clone()
-            .filter(|tz| time_core::model::validate_tz(tz).is_ok())
+            .filter(|tz| zeima_core::model::validate_tz(tz).is_ok())
             .unwrap_or_else(system_timezone);
         effective_zone(&base, self.daylight_saving, chrono::Utc::now().year())
     }
@@ -143,6 +143,6 @@ pub async fn load(core: &Core) -> AppSettings {
     }
 }
 
-pub async fn save(core: &Core, settings: &AppSettings) -> time_core::Result<()> {
+pub async fn save(core: &Core, settings: &AppSettings) -> zeima_core::Result<()> {
     core.set_meta(KEY, &serde_json::to_string(settings)?).await
 }

@@ -5,14 +5,14 @@ mod common;
 use std::sync::Arc;
 
 use chrono::{NaiveDate, TimeZone};
-use time_core::autopause::{AutoPauseConfig, AwayCause, AwayPeriod};
-use time_core::clock::ManualClock;
-use time_core::model::{
+use zeima_core::autopause::{AutoPauseConfig, AwayCause, AwayPeriod};
+use zeima_core::clock::ManualClock;
+use zeima_core::model::{
     BudgetPeriod, EntryInput, PauseKind, ProjectInput, ProjectStatus, StartTimer, TimerState,
 };
-use time_core::summary::Range;
-use time_core::worktime::parse_hhmm;
-use time_core::{AwayResolution, Core};
+use zeima_core::summary::Range;
+use zeima_core::worktime::parse_hhmm;
+use zeima_core::{AwayResolution, Core};
 
 fn at(day: &str, hhmm: &str) -> i64 {
     let local = day

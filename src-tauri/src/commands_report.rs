@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
-use time_core::export::{entries_table, summary_table, to_csv, Cell, Lookup, Table};
-use time_core::model::{CostCenter, CostCenterAssignment, CostCenterAssignmentInput, CostCenterInput};
-use time_core::report::{Report, ReportQuery};
-use time_core::BudgetStatus;
+use zeima_core::export::{entries_table, summary_table, to_csv, Cell, Lookup, Table};
+use zeima_core::model::{CostCenter, CostCenterAssignment, CostCenterAssignmentInput, CostCenterInput};
+use zeima_core::report::{Report, ReportQuery};
+use zeima_core::BudgetStatus;
 
 use crate::backup;
 use crate::commands::{changed, CmdError, CmdResult};
