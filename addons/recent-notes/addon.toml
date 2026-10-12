@@ -1,0 +1,23 @@
+# Example addon: reacts to events, keeps its own storage, adds quick-switch
+# options and sends notifications.
+id = "dev.time.recent-notes"
+name = "Recent notes"
+version = "1.0.0"
+author = "Time"
+description = "Offers your recent notes in the quick switch (\"Continue: …\") and sends a short summary of yesterday."
+min_app_version = "0.1.0"
+wasm = "recent_notes.wasm"
+permissions = ["projects:read", "notify"]
+hooks = ["entry.stopped", "quickswitch.suggest", "day.closed"]
+
+[[settings]]
+key = "keep"
+label = "Notes to remember"
+type = "number"
+default = "10"
+
+[[settings]]
+key = "daily_summary"
+label = "Daily summary notification"
+type = "boolean"
+default = "true"

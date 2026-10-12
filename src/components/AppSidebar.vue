@@ -1,113 +1,89 @@
 <script setup lang="ts">
 import type { SidebarProps } from '@/components/ui/sidebar'
 
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
-  AppWindow,
-  AudioWaveform,
-  Command,
-  Frame,
-  GalleryVerticalEnd,
-  Map,
-  PieChart,
-} from "@lucide/vue"
+  BarChart3,
+  Clock,
+  FolderKanban,
+  Landmark,
+  LayoutDashboard,
+  Palmtree,
+  Puzzle,
+  Settings,
+  Tags,
+  Timer,
+} from '@lucide/vue'
 import NavMain from '@/components/NavMain.vue'
-//import NavProjects from '@/components/NavProjects.vue'
-import NavUser from '@/components/NavUser.vue'
-import TeamSwitcher from '@/components/TeamSwitcher.vue'
-
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-
-import { useI18n } from 'vue-i18n';
-
-const { t } = useI18n();
+//import NavUser from '@/components/NavUser.vue'
 
 const props = withDefaults(defineProps<SidebarProps>(), {
-  collapsible: "icon",
+  collapsible: 'icon',
 })
 
-// This is sample data.
-const data = {
-  user: {
-    name: "shadcn",
-    email: "m@example.com",
-    avatar: "/avatars/shadcn.jpg",
-  },
-  teams: [
-    {
-      name: "Acme Inc",
-      logo: GalleryVerticalEnd,
-      plan: "Enterprise",
-    },
-    {
-      name: "Acme Corp.",
-      logo: AudioWaveform,
-      plan: "Startup",
-    },
-    {
-      name: "Evil Corp.",
-      logo: Command,
-      plan: "Free",
-    },
-  ],
-  navMain: [
-    {
-      title: t('views'),
-      url: "#",
-      icon: AppWindow,
-      isActive: false,
-      items: [
-        {
-          title: "History",
-          url: "/",
-        },
-        {
-          title: "Starred",
-          url: "/test",
-        },
-        {
-          title: "Settings",
-          url: "#",
-        },
-      ],
-    },
-  ],
-  projects: [
-    {
-      name: "Design Engineering",
-      url: "#",
-      icon: Frame,
-    },
-    {
-      name: "Sales & Marketing",
-      url: "#",
-      icon: PieChart,
-    },
-    {
-      name: "Travel",
-      url: "#",
-      icon: Map,
-    },
-  ],
-}
+const { t } = useI18n()
+
+const tracking = computed(() => [
+  { title: t('nav.dashboard'), url: '/', icon: LayoutDashboard },
+  { title: t('nav.timesheet'), url: '/timesheet', icon: Clock },
+  { title: t('nav.projects'), url: '/projects', icon: FolderKanban },
+  { title: t('nav.tags'), url: '/tags', icon: Tags },
+  { title: t('nav.costCenters'), url: '/cost-centers', icon: Landmark },
+  { title: t('nav.reports'), url: '/reports', icon: BarChart3 },
+  { title: t('nav.absences'), url: '/absences', icon: Palmtree },
+])
+
+const system = computed(() => [
+  { title: t('nav.addons'), url: '/addons', icon: Puzzle },
+  { title: t('nav.settings'), url: '/settings', icon: Settings },
+])
+
+/*
+const user = computed(() => ({
+  name: 'shadcn',
+  email: 'me@example.com',
+  avatar: '/avatars/shadcn.jpg'
+}))
+*/
 </script>
 
 <template>
   <Sidebar v-bind="props">
     <SidebarHeader>
-      <TeamSwitcher :teams="data.teams" />
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <SidebarMenuButton size="lg" as-child>
+            <RouterLink to="/">
+              <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                <Timer class="size-4" />
+              </div>
+              <div class="grid flex-1 text-left text-sm leading-tight">
+                <span class="truncate font-semibold">{{ $t('app.name') }}</span>
+                <span class="truncate text-xs text-muted-foreground">{{ $t('app.personal') }}</span>
+              </div>
+            </RouterLink>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      </SidebarMenu>
     </SidebarHeader>
     <SidebarContent>
-      <NavMain :items="data.navMain" />
-      <!--<NavProjects :projects="data.projects" />-->
+      <NavMain :items="tracking" />
     </SidebarContent>
     <SidebarFooter>
-      <NavUser :user="data.user" />
+      <!--<NavUser :user="user"></NavUser>-->
+      <NavMain :items="system" />
+      <p class="px-2 pb-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">{{ $t('app.local') }}</p>
     </SidebarFooter>
     <SidebarRail />
   </Sidebar>

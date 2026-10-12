@@ -1,0 +1,449 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProfileDef",
+  "description": "A profile file as written in TOML.",
+  "type": "object",
+  "properties": {
+    "breaks": {
+      "description": "Required breaks; the rule with the highest matching `after_minutes` applies.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BreakRule"
+      }
+    },
+    "default_locale": {
+      "type": "string"
+    },
+    "holidays": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/HolidayDef"
+      }
+    },
+    "id": {
+      "description": "ISO 3166-1 alpha-2 code.",
+      "type": "string"
+    },
+    "maintainer": {
+      "type": "string"
+    },
+    "name": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "regions": {
+      "description": "Regions by ISO 3166-2 code (e.g. `DE-BY`).",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/RegionDef"
+      },
+      "default": {}
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "sources": {
+      "description": "Links to the law texts the values come from.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "vacation": {
+      "$ref": "#/$defs/VacationRules"
+    },
+    "version": {
+      "description": "Bump when rules change; computed days record the version they used.",
+      "type": "string"
+    },
+    "week_start": {
+      "$ref": "#/$defs/Weekday"
+    },
+    "work_time": {
+      "$ref": "#/$defs/WorkTimeRules"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "version",
+    "name",
+    "maintainer",
+    "sources",
+    "default_locale",
+    "week_start",
+    "work_time",
+    "breaks",
+    "vacation",
+    "holidays"
+  ],
+  "$defs": {
+    "BreakRule": {
+      "type": "object",
+      "properties": {
+        "after_minutes": {
+          "description": "Applies when more than this was worked in a day.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "break_minutes": {
+          "description": "Total break required.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_part_minutes": {
+          "description": "Smallest gap that counts towards the break (the break may be split\ninto parts of at least this length).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "mode": {
+          "$ref": "#/$defs/RuleMode"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "after_minutes",
+        "break_minutes",
+        "min_part_minutes",
+        "mode"
+      ]
+    },
+    "HolidayDef": {
+      "type": "object",
+      "properties": {
+        "day_off": {
+          "description": "`false` = informational only, not a day off.",
+          "type": "boolean",
+          "default": true
+        },
+        "id": {
+          "description": "Stable id, used by regions to remove a holiday (e.g. `epiphany`).",
+          "type": "string"
+        },
+        "name": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "rule": {
+          "$ref": "#/$defs/HolidayRule"
+        },
+        "valid_from_year": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        },
+        "valid_to_year": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int32"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "rule"
+      ]
+    },
+    "HolidayRule": {
+      "description": "How a holiday's date is computed for a year. Written in TOML as e.g.\n`{ fixed = \"01-06\" }` or `{ easter_offset = 39 }`.",
+      "oneOf": [
+        {
+          "description": "Same date every year, `\"MM-DD\"`.",
+          "type": "object",
+          "properties": {
+            "fixed": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "fixed"
+          ]
+        },
+        {
+          "description": "Days after (or before, if negative) Western Easter Sunday.",
+          "type": "object",
+          "properties": {
+            "easter_offset": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "easter_offset"
+          ]
+        },
+        {
+          "description": "Days after Orthodox Easter Sunday.",
+          "type": "object",
+          "properties": {
+            "orthodox_easter_offset": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "orthodox_easter_offset"
+          ]
+        },
+        {
+          "description": "The n-th weekday of a month; negative `n` counts from the end\n(`-1` = last).",
+          "type": "object",
+          "properties": {
+            "nth_weekday": {
+              "type": "object",
+              "properties": {
+                "month": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "n": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "weekday": {
+                  "$ref": "#/$defs/Weekday"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "month",
+                "weekday",
+                "n"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "nth_weekday"
+          ]
+        },
+        {
+          "description": "The last `weekday` strictly before `month`-`day`\n(e.g. Buß- und Bettag: Wednesday before 23 November).",
+          "type": "object",
+          "properties": {
+            "weekday_before": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "month": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "weekday": {
+                  "$ref": "#/$defs/Weekday"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "month",
+                "day",
+                "weekday"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "weekday_before"
+          ]
+        },
+        {
+          "description": "The first `weekday` strictly after `month`-`day`.",
+          "type": "object",
+          "properties": {
+            "weekday_after": {
+              "type": "object",
+              "properties": {
+                "day": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "month": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "weekday": {
+                  "$ref": "#/$defs/Weekday"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "month",
+                "day",
+                "weekday"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "weekday_after"
+          ]
+        }
+      ]
+    },
+    "RegionDef": {
+      "type": "object",
+      "properties": {
+        "holidays": {
+          "description": "Holidays only in this region.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HolidayDef"
+          }
+        },
+        "name": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "remove_holidays": {
+          "description": "Ids of country-wide holidays that do not apply in this region.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "RuleMode": {
+      "oneOf": [
+        {
+          "description": "Legal requirement; users may only make it stricter.",
+          "type": "string",
+          "const": "required"
+        },
+        {
+          "description": "Recommendation; users may change it freely.",
+          "type": "string",
+          "const": "advisory"
+        }
+      ]
+    },
+    "VacationRules": {
+      "type": "object",
+      "properties": {
+        "default_days": {
+          "description": "Statutory minimum per year (full-time, 5-day week).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "unit": {
+          "$ref": "#/$defs/VacationUnit"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "default_days",
+        "unit"
+      ]
+    },
+    "VacationUnit": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "hours"
+          ]
+        },
+        {
+          "description": "Days based on a 5-day week.",
+          "type": "string",
+          "const": "workdays"
+        }
+      ]
+    },
+    "Weekday": {
+      "type": "string",
+      "enum": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ]
+    },
+    "WorkTimeRules": {
+      "description": "Legal limits. `None` = no limit in this jurisdiction.",
+      "type": "object",
+      "properties": {
+        "max_daily_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "max_weekly_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min_daily_rest_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "standard_weekly_minutes": {
+          "description": "Default full-time week for new schedules.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "standard_workdays": {
+          "description": "Default working days for new schedules.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Weekday"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "standard_weekly_minutes",
+        "standard_workdays"
+      ]
+    }
+  }
+}

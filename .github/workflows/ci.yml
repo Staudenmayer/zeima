@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bunx vite build
+
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # tauri::generate_context! needs the frontend dist folder to exist.
+      - run: mkdir -p dist
+        shell: bash
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: Clippy
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # The addon host tests load these; elsewhere they skip themselves.
+      - name: Build example addons
+        if: runner.os == 'Linux'
+        run: |
+          bash addons/build.sh csv-export
+          bash addons/build.sh recent-notes
+      - name: Test
+        run: cargo test --workspace --all-features
+      # The test suite regenerates src/bindings.ts; it must match the commit.
+      - name: Generated files are up to date
+        if: runner.os == 'Linux'
+        run: git diff --exit-code src/bindings.ts crates/time-core/jurisdictions/profile.schema.json crates/time-core/addon.schema.json
+      - name: time-core builds without the db feature (WASM-ready)
+        if: runner.os == 'Linux'
+        run: cargo check -p time-core --no-default-features
+      - name: Addon SDK builds for WASM
+        if: runner.os == 'Linux'
+        run: cargo check -p time-addon-sdk --target wasm32-unknown-unknown

@@ -1,0 +1,137 @@
+#:schema ./profile.schema.json
+# Austria. Best-effort defaults, not legal advice. See docs/country-profiles.md.
+
+schema_version = 1
+id = "AT"
+version = "2026.1"
+name = { de = "Österreich", en = "Austria" }
+maintainer = "Time core team"
+sources = [
+  "Arbeitszeitgesetz (AZG) §§ 3, 9, 11, 12, https://www.ris.bka.gv.at/",
+  "Arbeitsruhegesetz (ARG) § 7, https://www.ris.bka.gv.at/",
+  "Urlaubsgesetz (UrlG) § 2, https://www.ris.bka.gv.at/",
+]
+default_locale = "de-AT"
+week_start = "mon"
+
+[work_time]
+max_daily_minutes = 720        # AZG §9: 12 h including overtime
+max_weekly_minutes = 3600      # AZG §9: 60 h including overtime
+min_daily_rest_minutes = 660   # AZG §12: 11 h
+standard_weekly_minutes = 2400 # AZG §3: 40 h normal working time
+standard_workdays = ["mon", "tue", "wed", "thu", "fri"]
+
+# AZG §11: more than 6 h → 30 min break, splittable into 2 × 15 or 3 × 10 min.
+[[breaks]]
+after_minutes = 360
+break_minutes = 30
+min_part_minutes = 10
+mode = "required"
+
+[vacation]
+default_days = 25 # UrlG §2: 30 Werktage = 25 workdays on a 5-day week
+unit = "workdays"
+
+# Public holidays (Feiertagsruhegesetz / ARG §7). Easter and Whit Sunday are
+# Sundays and therefore not listed. Good Friday is no longer a public holiday
+# since 2019.
+[[holidays]]
+id = "new_year"
+name = { de = "Neujahr", en = "New Year's Day" }
+rule = { fixed = "01-01" }
+
+[[holidays]]
+id = "epiphany"
+name = { de = "Heilige Drei Könige", en = "Epiphany" }
+rule = { fixed = "01-06" }
+
+[[holidays]]
+id = "easter_monday"
+name = { de = "Ostermontag", en = "Easter Monday" }
+rule = { easter_offset = 1 }
+
+[[holidays]]
+id = "labour_day"
+name = { de = "Staatsfeiertag", en = "Labour Day" }
+rule = { fixed = "05-01" }
+
+[[holidays]]
+id = "ascension"
+name = { de = "Christi Himmelfahrt", en = "Ascension Day" }
+rule = { easter_offset = 39 }
+
+[[holidays]]
+id = "whit_monday"
+name = { de = "Pfingstmontag", en = "Whit Monday" }
+rule = { easter_offset = 50 }
+
+[[holidays]]
+id = "corpus_christi"
+name = { de = "Fronleichnam", en = "Corpus Christi" }
+rule = { easter_offset = 60 }
+
+[[holidays]]
+id = "assumption"
+name = { de = "Mariä Himmelfahrt", en = "Assumption Day" }
+rule = { fixed = "08-15" }
+
+[[holidays]]
+id = "national_day"
+name = { de = "Nationalfeiertag", en = "National Day" }
+rule = { fixed = "10-26" }
+
+[[holidays]]
+id = "all_saints"
+name = { de = "Allerheiligen", en = "All Saints' Day" }
+rule = { fixed = "11-01" }
+
+[[holidays]]
+id = "immaculate_conception"
+name = { de = "Mariä Empfängnis", en = "Immaculate Conception" }
+rule = { fixed = "12-08" }
+
+[[holidays]]
+id = "christmas"
+name = { de = "Christtag", en = "Christmas Day" }
+rule = { fixed = "12-25" }
+
+[[holidays]]
+id = "st_stephen"
+name = { de = "Stefanitag", en = "St. Stephen's Day" }
+rule = { fixed = "12-26" }
+
+# Christmas Eve and New Year's Eve are not public holidays, but many
+# collective agreements give the afternoon off. Shown for information.
+[[holidays]]
+id = "christmas_eve"
+name = { de = "Heiliger Abend", en = "Christmas Eve" }
+rule = { fixed = "12-24" }
+day_off = false
+
+[[holidays]]
+id = "new_years_eve"
+name = { de = "Silvester", en = "New Year's Eve" }
+rule = { fixed = "12-31" }
+day_off = false
+
+# Federal states. State patron days (e.g. St. Leopold in Vienna) are not
+# statutory holidays, so the states currently add nothing; they exist so
+# users and orgs can select their state for later additions.
+[regions."AT-1"]
+name = { de = "Burgenland", en = "Burgenland" }
+[regions."AT-2"]
+name = { de = "Kärnten", en = "Carinthia" }
+[regions."AT-3"]
+name = { de = "Niederösterreich", en = "Lower Austria" }
+[regions."AT-4"]
+name = { de = "Oberösterreich", en = "Upper Austria" }
+[regions."AT-5"]
+name = { de = "Salzburg", en = "Salzburg" }
+[regions."AT-6"]
+name = { de = "Steiermark", en = "Styria" }
+[regions."AT-7"]
+name = { de = "Tirol", en = "Tyrol" }
+[regions."AT-8"]
+name = { de = "Vorarlberg", en = "Vorarlberg" }
+[regions."AT-9"]
+name = { de = "Wien", en = "Vienna" }

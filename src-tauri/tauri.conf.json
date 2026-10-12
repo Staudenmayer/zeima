@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tray-app",
+  "productName": "Time",
   "version": "0.1.0",
-  "identifier": "com.sebi.tray-app",
+  "identifier": "com.sebi.time",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -13,16 +13,19 @@
     "windows": [
       {
         "label": "main",
-        "title": "My App",
-        "width": 900,
-        "height": 600,
+        "title": "Time",
+        "width": 1100,
+        "height": 720,
+        "minWidth": 720,
+        "minHeight": 480,
         "visible": false,
         "decorations": true,
         "devtools": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data:; connect-src ipc: http://ipc.localhost",
+      "dangerousDisableAssetCspModification": ["style-src"]
     }
   },
   "bundle": {

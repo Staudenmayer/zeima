@@ -38,6 +38,104 @@ declare module 'vue-router/auto-routes' {
       Record<never, never>,
       | never
     >,
+    '/absences/': RouteRecordInfo<
+      '/absences/',
+      '/absences',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/addons/': RouteRecordInfo<
+      '/addons/',
+      '/addons',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/cost-centers/': RouteRecordInfo<
+      '/cost-centers/',
+      '/cost-centers',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/projects/': RouteRecordInfo<
+      '/projects/',
+      '/projects',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/prompt': RouteRecordInfo<
+      '/prompt',
+      '/prompt',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/quickswitch': RouteRecordInfo<
+      '/quickswitch',
+      '/quickswitch',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/reports/': RouteRecordInfo<
+      '/reports/',
+      '/reports',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/reports/timesheet': RouteRecordInfo<
+      '/reports/timesheet',
+      '/reports/timesheet',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/settings/': RouteRecordInfo<
+      '/settings/',
+      '/settings',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/settings/auto-pause': RouteRecordInfo<
+      '/settings/auto-pause',
+      '/settings/auto-pause',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/settings/data': RouteRecordInfo<
+      '/settings/data',
+      '/settings/data',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/settings/work-hours': RouteRecordInfo<
+      '/settings/work-hours',
+      '/settings/work-hours',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/tags/': RouteRecordInfo<
+      '/tags/',
+      '/tags',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
+    '/timesheet/': RouteRecordInfo<
+      '/timesheet/',
+      '/timesheet',
+      Record<never, never>,
+      Record<never, never>,
+      | never
+    >,
   }
 
   /**
@@ -54,6 +152,118 @@ declare module 'vue-router/auto-routes' {
     'src/pages/index.vue': {
       routes:
         | '/'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/absences/index.vue': {
+      routes:
+        | '/absences/'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/addons/index.vue': {
+      routes:
+        | '/addons/'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/cost-centers/index.vue': {
+      routes:
+        | '/cost-centers/'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/projects/index.vue': {
+      routes:
+        | '/projects/'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/prompt.vue': {
+      routes:
+        | '/prompt'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/quickswitch.vue': {
+      routes:
+        | '/quickswitch'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/reports/index.vue': {
+      routes:
+        | '/reports/'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/reports/timesheet.vue': {
+      routes:
+        | '/reports/timesheet'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/settings/index.vue': {
+      routes:
+        | '/settings/'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/settings/auto-pause.vue': {
+      routes:
+        | '/settings/auto-pause'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/settings/data.vue': {
+      routes:
+        | '/settings/data'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/settings/work-hours.vue': {
+      routes:
+        | '/settings/work-hours'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/tags/index.vue': {
+      routes:
+        | '/tags/'
+      views:
+        | never
+      pathParamNames:
+        | never
+    }
+    'src/pages/timesheet/index.vue': {
+      routes:
+        | '/timesheet/'
       views:
         | never
       pathParamNames:

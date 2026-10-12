@@ -1,0 +1,23 @@
+[package]
+name = "recent-notes"
+description = "Time addon: continue recent notes from the quick switch, daily summary"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+# Built on its own for wasm32-unknown-unknown (see ../build.sh).
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+time-addon-sdk = { path = "../../crates/time-addon-sdk" }
+extism-pdk = "1.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

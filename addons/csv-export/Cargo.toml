@@ -1,0 +1,23 @@
+[package]
+name = "csv-export"
+description = "Time addon: CSV export with your own columns, delimiter and decimal separator"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+# Built on its own for wasm32-unknown-unknown (see ../build.sh), not as
+# part of the app's workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+time-addon-sdk = { path = "../../crates/time-addon-sdk" }
+extism-pdk = "1.4"
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

@@ -25,9 +25,14 @@ export default defineConfig(() => ({
       },
     }),
   ],
+  // Pre-bundle deps that are otherwise discovered late, which makes Vite
+  // reload the page during the first `tauri dev` start.
+  optimizeDeps: {
+    include: ['@unovis/vue', '@unovis/ts', 'vue-router/experimental'],
+  },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
+      '@': path.resolve(import.meta.dirname, './src')
     }
   },
 
