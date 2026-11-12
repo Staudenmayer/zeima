@@ -55,9 +55,10 @@ jobs:
           - os: macos-latest # Apple silicon
             args: '--target aarch64-apple-darwin'
             target: aarch64-apple-darwin
-          - os: macos-13 # Intel
-            args: '--target x86_64-apple-darwin'
-            target: x86_64-apple-darwin
+          # Intel Mac build disabled for now (the macos-13 runner is retired).
+          # - os: macos-13
+          #   args: '--target x86_64-apple-darwin'
+          #   target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +86,11 @@ jobs:
           args: ${{ matrix.args }}
 
   addons:
-    needs: verify
+    # Runs after the app builds: they create the release, which the addon
+    # zips are attached to. Waiting inside this job timed out, because the
+    # builds take longer than the wait. Still runs if one platform failed.
+    needs: [verify, build]
+    if: ${{ !cancelled() && needs.verify.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -105,9 +110,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # The app builds create the release; wait for it, then upload.
-          for i in $(seq 1 30); do
-            gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break
-            sleep 20
-          done
+          gh release view "$GITHUB_REF_NAME" >/dev/null
           gh release upload "$GITHUB_REF_NAME" addons/dist/*.zip --clobber
