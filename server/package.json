@@ -1,6 +1,6 @@
 {
   "name": "@zeima/server",
-  "version": "0.1.0",
+  "version": "1.0.0-alpha.0",
   "private": true,
   "description": "Zeima API: sync, organizations and licensing (SPEC §7)",
   "type": "module",
