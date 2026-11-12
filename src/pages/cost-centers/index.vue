@@ -2,11 +2,9 @@
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { Landmark, Pencil, Plus, Trash2 } from '@lucide/vue'
-import { commands, type CostCenter, type CostCenterAssignment } from '@/bindings'
+import { commands, type CostCenter } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import DateInput from '@/components/time/DateInput.vue'
-import { Label } from '@/components/ui/label'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import CostCenterDialog from '@/components/time/CostCenterDialog.vue'
 import CostCenterSelect from '@/components/time/CostCenterSelect.vue'
@@ -14,7 +12,7 @@ import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
 import { call, errorMessage } from '@/lib/ipc'
-import { parseDate, toDateInput } from '@/lib/time'
+import { parseDate, startOfDay, toDateInput } from '@/lib/time'
 import { costCenterLabel, useCostCentersStore } from '@/stores/costCenters'
 
 definePage({ meta: { titleKey: 'nav.costCenters' } })
@@ -70,25 +68,48 @@ async function confirmDelete() {
   }
 }
 
-// The user's default cost center over time.
-const newDefault = ref<string | null>(null)
-const newFrom = ref(toDateInput(Date.now()))
-async function addDefault() {
-  if (!newDefault.value) return
+// The user's default cost center: the assignment in effect today. Picking
+// another one applies from today on and keeps the older lines as history.
+const today = () => toDateInput(Date.now())
+const currentDefault = computed(() => {
+  const t = today()
+  return costCenters.assignments.find((a) => a.validFrom <= t && (!a.validTo || t <= a.validTo)) ?? null
+})
+const defaultId = computed({
+  get: () => currentDefault.value?.costCenterId ?? null,
+  set: (id: string | null) => void setDefault(id),
+})
+async function setDefault(id: string | null) {
+  const t = today()
+  const current = currentDefault.value
+  if (id === (current?.costCenterId ?? null)) return
   try {
-    await call(commands.costCenterAssignmentSave(null, { costCenterId: newDefault.value, validFrom: newFrom.value, validTo: null }))
-    newDefault.value = null
+    if (id === null) {
+      // Clearing: end the line today, or drop it when it only started today.
+      if (current && current.validFrom >= t) await call(commands.costCenterAssignmentDelete(current.id))
+      else if (current) {
+        const yesterday = toDateInput(startOfDay(Date.now()) - 1)
+        await call(commands.costCenterAssignmentSave(current.id, { costCenterId: current.costCenterId, validFrom: current.validFrom, validTo: yesterday }))
+      }
+    } else if (current && current.validFrom === t) {
+      await call(commands.costCenterAssignmentSave(current.id, { costCenterId: id, validFrom: t, validTo: current.validTo }))
+    } else {
+      await call(commands.costCenterAssignmentSave(null, { costCenterId: id, validFrom: t, validTo: null }))
+    }
   } catch (err) {
     toast.error(errorMessage(err))
   }
 }
-async function removeDefault(a: CostCenterAssignment) {
-  try {
-    await call(commands.costCenterAssignmentDelete(a.id))
-  } catch (err) {
-    toast.error(errorMessage(err))
-  }
-}
+
+// Long lists are paged.
+const PAGE_SIZE = 6
+const page = ref(0)
+const pageCount = computed(() => Math.max(1, Math.ceil(tree.value.length / PAGE_SIZE)))
+const pageRows = computed(() => {
+  const p = Math.min(page.value, pageCount.value - 1)
+  return tree.value.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE)
+})
+const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
 </script>
 
 <template>
@@ -100,10 +121,27 @@ async function removeDefault(a: CostCenterAssignment) {
     <Button variant="outline" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
   </EmptyState>
 
-  <div v-else class="grid gap-8">
+  <div v-else class="grid gap-6">
+    <section class="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3">
+      <div class="min-w-56 flex-1">
+        <h2 class="text-sm font-medium">{{ $t('costCenters.myDefault') }}</h2>
+        <p class="text-sm text-muted-foreground">
+          {{ $t('costCenters.myDefaultHint') }}
+          {{
+            currentDefault
+              ? $t('costCenters.since', { date: format.longDate(parseDate(currentDefault.validFrom)) })
+              : $t('costCenters.noneSet')
+          }}
+        </p>
+      </div>
+      <div class="w-72 max-w-full">
+        <CostCenterSelect v-model="defaultId" :empty-label="$t('costCenters.choose')" />
+      </div>
+    </section>
+
     <ul class="divide-y rounded-lg border">
       <li
-        v-for="{ cc, depth } in tree"
+        v-for="{ cc, depth } in pageRows"
         :key="cc.id"
         class="group flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted/40"
         :class="cc.active ? '' : 'text-muted-foreground'"
@@ -112,6 +150,7 @@ async function removeDefault(a: CostCenterAssignment) {
         <span class="w-24 shrink-0 font-mono text-xs" :style="{ paddingLeft: `${depth * 1}rem` }">{{ cc.code }}</span>
         <span class="flex-1 truncate">{{ cc.name }}</span>
         <span class="text-xs text-muted-foreground tabular-nums">{{ validity(cc) }}</span>
+        <Badge v-if="cc.id === currentDefault?.costCenterId" variant="outline">{{ $t('costCenters.default') }}</Badge>
         <Badge v-if="!cc.active" variant="secondary">{{ $t('costCenters.inactive') }}</Badge>
         <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(cc)"><Pencil /></Button>
@@ -120,32 +159,15 @@ async function removeDefault(a: CostCenterAssignment) {
       </li>
     </ul>
 
-    <section class="grid gap-3">
-      <div>
-        <h2 class="font-medium">{{ $t('costCenters.myDefault') }}</h2>
-        <p class="text-sm text-muted-foreground">{{ $t('costCenters.myDefaultHint') }}</p>
+    <div v-if="pageCount > 1" class="-mt-2 flex items-center justify-between gap-3 text-sm">
+      <span class="tabular-nums text-muted-foreground">
+        {{ $t('costCenters.pageOf', { page: pageNo + 1, pages: pageCount, count: tree.length }) }}
+      </span>
+      <div class="flex gap-2">
+        <Button size="sm" variant="outline" :disabled="pageNo === 0" @click="page = pageNo - 1">{{ $t('costCenters.previous') }}</Button>
+        <Button size="sm" variant="outline" :disabled="pageNo >= pageCount - 1" @click="page = pageNo + 1">{{ $t('costCenters.next') }}</Button>
       </div>
-      <ul v-if="costCenters.assignments.length" class="divide-y rounded-lg border">
-        <li v-for="a in costCenters.assignments" :key="a.id" class="group flex items-center gap-3 px-3 py-2 text-sm">
-          <span class="w-32 shrink-0 tabular-nums text-muted-foreground">
-            {{ $t('costCenters.from') }} {{ format.longDate(parseDate(a.validFrom)) }}
-          </span>
-          <span class="flex-1 truncate">{{ costCenterLabel(costCenters.byId.get(a.costCenterId)) }}</span>
-          <Button size="icon" variant="ghost" class="size-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100" :title="$t('common.delete')" @click="removeDefault(a)"><Trash2 /></Button>
-        </li>
-      </ul>
-      <form class="flex flex-wrap items-end gap-3" @submit.prevent="addDefault">
-        <div class="grid min-w-56 flex-1 gap-2">
-          <Label>{{ $t('costCenters.costCenter') }}</Label>
-          <CostCenterSelect v-model="newDefault" :empty-label="$t('costCenters.choose')" />
-        </div>
-        <div class="grid gap-2">
-          <Label for="cc-default-from">{{ $t('costCenters.validFrom') }}</Label>
-          <DateInput id="cc-default-from" v-model="newFrom" required />
-        </div>
-        <Button type="submit" variant="outline" :disabled="!newDefault"><Plus /> {{ $t('common.create') }}</Button>
-      </form>
-    </section>
+    </div>
   </div>
 
   <CostCenterDialog v-model:open="dialogOpen" :cost-center="editing" />

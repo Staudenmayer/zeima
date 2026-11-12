@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onScopeDispose, ref } from 'vue'
-import { useIntervalFn, useStorage } from '@vueuse/core'
-import { ArrowDown, ArrowUp, Check, Clock, Eye, EyeOff, Landmark, Settings2, Target } from '@lucide/vue'
+import { useIntervalFn } from '@vueuse/core'
+import { useI18n } from 'vue-i18n'
+import { Clock, Landmark, Target } from '@lucide/vue'
 import { commands, events, type BudgetStatus, type Report } from '@/bindings'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import DonutChart, { type DonutSlice } from '@/components/time/DonutChart.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
 import ProjectDot from '@/components/time/ProjectDot.vue'
 import WeekChart from '@/components/time/WeekChart.vue'
@@ -14,45 +15,27 @@ import { useFormat } from '@/composables/useFormat'
 import { call } from '@/lib/ipc'
 import { HOUR, dayRange, parseDate, presetRange, startOfDay, toDateInput, weekDays } from '@/lib/time'
 import { costCenterLabel, useCostCentersStore } from '@/stores/costCenters'
+import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
+import { useTagsStore } from '@/stores/tags'
 import { useTimerStore } from '@/stores/timer'
 import { useWorkStore } from '@/stores/work'
 
 definePage({ meta: { titleKey: 'nav.dashboard' } })
 
+const { t } = useI18n()
+const activities = useActivitiesStore()
 const projects = useProjectsStore()
 const settings = useSettingsStore()
+const tags = useTagsStore()
 const timer = useTimerStore()
 const work = useWorkStore()
 const costCenters = useCostCentersStore()
 const format = useFormat()
 
-// Widget order and visibility, remembered per device.
-type Widget = 'stats' | 'perDay' | 'projects' | 'budgets' | 'costCenters'
-const allWidgets: Widget[] = ['stats', 'perDay', 'projects', 'budgets', 'costCenters']
-const layout = useStorage('dashboard.layout', { order: allWidgets, hidden: [] as Widget[] }, undefined, {
-  mergeDefaults: true,
-})
-// Widgets added in later versions are appended.
-const order = computed(() => [
-  ...layout.value.order.filter((w) => allWidgets.includes(w)),
-  ...allWidgets.filter((w) => !layout.value.order.includes(w)),
-])
-const customizing = ref(false)
-const visible = computed(() => order.value.filter((w) => customizing.value || !layout.value.hidden.includes(w)))
-function move(w: Widget, by: -1 | 1) {
-  const list = [...order.value]
-  const i = list.indexOf(w)
-  const j = i + by
-  if (j < 0 || j >= list.length) return
-  ;[list[i], list[j]] = [list[j], list[i]]
-  layout.value.order = list
-}
-function toggleHidden(w: Widget) {
-  const hidden = layout.value.hidden
-  layout.value.hidden = hidden.includes(w) ? hidden.filter((x) => x !== w) : [...hidden, w]
-}
+type Widget = 'stats' | 'breakdown' | 'perDay' | 'projects' | 'budgets' | 'costCenters'
+const widgets: Widget[] = ['stats', 'breakdown', 'perDay', 'projects', 'budgets', 'costCenters']
 
 // Recomputed at midnight via the minute tick below.
 const today = ref(startOfDay(Date.now()))
@@ -60,7 +43,7 @@ const days = computed(() => weekDays(today.value))
 const week = computed(() => ({ from: days.value[0].from, to: days.value[6].to }))
 const ranges = computed(() => [...days.value, week.value])
 
-const { summaries, reload } = useEntries(week, ranges)
+const { entries, summaries, reload } = useEntries(week, ranges)
 const { byDate } = useWorkDays(week)
 const todayWork = computed(() => byDate(toDateInput(today.value)))
 const balanceMs = computed(() => (work.balance ? work.balance.untilYesterdayMs + work.balance.todayMs : 0))
@@ -130,6 +113,35 @@ const chartDays = computed(() =>
   }),
 )
 
+// This week's time split by activity, project and tag. An entry with several
+// tags counts in full for each of them.
+const breakdown = computed(() => {
+  const none = 'var(--muted-foreground)'
+  const maps = { activity: new Map<string, DonutSlice>(), project: new Map<string, DonutSlice>(), tag: new Map<string, DonutSlice>() }
+  const add = (m: Map<string, DonutSlice>, key: string, label: string, color: string, ms: number) => {
+    const slice = m.get(key) ?? { key, label, color, ms: 0 }
+    slice.ms += ms
+    m.set(key, slice)
+  }
+  for (const e of entries.value) {
+    const ms = Math.min(e.endAt ?? timer.now, week.value.to) - Math.max(e.startAt, week.value.from)
+    if (ms <= 0) continue
+    const a = e.activityId ? activities.byId.get(e.activityId) : null
+    const p = e.projectId ? projects.byId.get(e.projectId) : null
+    add(maps.activity, a?.id ?? '_', a?.name ?? t('activities.none'), a?.color ?? none, ms)
+    add(maps.project, p?.id ?? '_', p?.name ?? t('common.noProject'), p?.color ?? none, ms)
+    const own = e.tagIds.map((id) => tags.byId.get(id)).filter((x) => x !== undefined)
+    if (own.length === 0) add(maps.tag, '_', t('dashboard.untagged'), none, ms)
+    for (const tag of own) add(maps.tag, tag.id, `#${tag.name}`, tag.color, ms)
+  }
+  const sorted = (m: Map<string, DonutSlice>) => [...m.values()].sort((a, b) => b.ms - a.ms)
+  return [
+    { key: 'activities', title: t('nav.activities'), slices: sorted(maps.activity) },
+    { key: 'projects', title: t('nav.projects'), slices: sorted(maps.project) },
+    { key: 'tags', title: t('nav.tags'), slices: sorted(maps.tag) },
+  ]
+})
+
 const byProject = computed(() => {
   const list = weekSummary.value?.byProject ?? []
   const max = Math.max(1, ...list.map((p) => p.ms))
@@ -142,32 +154,13 @@ const byProject = computed(() => {
 </script>
 
 <template>
-  <div class="mb-4 flex justify-end">
-    <Button v-if="!customizing" size="sm" variant="ghost" @click="customizing = true">
-      <Settings2 /> {{ $t('dashboard.customize') }}
-    </Button>
-    <Button v-else size="sm" @click="customizing = false"><Check /> {{ $t('dashboard.done') }}</Button>
-  </div>
-
   <div class="grid gap-4 lg:grid-cols-2">
     <section
-      v-for="(w, i) in visible"
+      v-for="w in widgets"
       :key="w"
-      class="relative min-w-0"
-      :class="[w === 'stats' ? 'lg:col-span-2' : '', customizing && layout.hidden.includes(w) ? 'opacity-40' : '']"
+      class="min-w-0"
+      :class="w === 'stats' || w === 'breakdown' ? 'lg:col-span-2' : ''"
     >
-      <div
-        v-if="customizing"
-        class="absolute -top-3 right-3 z-10 flex items-center gap-0.5 rounded-md border bg-background p-0.5 shadow-sm"
-      >
-        <span class="px-2 text-xs text-muted-foreground">{{ $t(`dashboard.widgets.${w}`) }}</span>
-        <Button size="icon" variant="ghost" class="size-7" :title="$t('dashboard.moveUp')" :disabled="i === 0" @click="move(w, -1)"><ArrowUp /></Button>
-        <Button size="icon" variant="ghost" class="size-7" :title="$t('dashboard.moveDown')" :disabled="i === visible.length - 1" @click="move(w, 1)"><ArrowDown /></Button>
-        <Button size="icon" variant="ghost" class="size-7" :title="layout.hidden.includes(w) ? $t('dashboard.show') : $t('dashboard.hide')" @click="toggleHidden(w)">
-          <Eye v-if="layout.hidden.includes(w)" /><EyeOff v-else />
-        </Button>
-      </div>
-
       <template v-if="w === 'stats'">
         <div class="grid gap-4 md:grid-cols-1 xl:grid-cols-3">
           <Card>
@@ -202,6 +195,25 @@ const byProject = computed(() => {
             </CardHeader>
             <CardContent class="text-sm text-muted-foreground">
               {{ format.shortDate(week.from) }} – {{ format.shortDate(days[6].from) }}
+            </CardContent>
+          </Card>
+        </div>
+      </template>
+
+      <template v-else-if="w === 'breakdown'">
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <Card v-for="chart in breakdown" :key="chart.key">
+            <CardHeader>
+              <div class="flex items-baseline justify-between gap-2">
+                <CardTitle>{{ chart.title }}</CardTitle>
+                <span class="text-xs tabular-nums text-muted-foreground">
+                  {{ settings.formatDuration(chart.slices.reduce((sum, s) => sum + s.ms, 0)) }} h
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <EmptyState v-if="chart.slices.length === 0" :icon="Clock" :text="$t('dashboard.noData')" />
+              <DonutChart v-else :slices="chart.slices" :label="chart.title" :format-duration="settings.formatDuration" />
             </CardContent>
           </Card>
         </div>

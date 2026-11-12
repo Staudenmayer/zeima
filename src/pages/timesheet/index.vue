@@ -24,6 +24,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
 import ActivityLabel from '@/components/time/ActivityLabel.vue'
+import DayTimeline from '@/components/time/DayTimeline.vue'
 import EntryCalendar from '@/components/time/EntryCalendar.vue'
 import EntryDialog from '@/components/time/EntryDialog.vue'
 import EntryPopover from '@/components/time/EntryPopover.vue'
@@ -38,7 +39,7 @@ import DayStatus from '@/components/time/DayStatus.vue'
 import { useFormat } from '@/composables/useFormat'
 import type { Anchor } from '@/lib/anchor'
 import { call, errorMessage } from '@/lib/ipc'
-import { addDays, dayRange, daysBetween, fromInputs, startOfDay, toDateInput, toTimeInput, weekDays } from '@/lib/time'
+import { HOUR, addDays, dayRange, daysBetween, fromInputs, startOfDay, toDateInput, toTimeInput, weekDays } from '@/lib/time'
 import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -104,6 +105,13 @@ function openNew(day?: number) {
   editing.value = null
   draft.value = null
   newEntryDay.value = day ?? (mode.value === 'day' ? anchor.value : Date.now())
+  entryDialogOpen.value = true
+}
+
+/** A new one-hour entry starting at `at` (double-click in the day timeline). */
+function createAt(at: number) {
+  editing.value = null
+  draft.value = { startAt: at, endAt: at + HOUR, activityId: null, projectId: null, tagIds: [], note: '' }
   entryDialogOpen.value = true
 }
 
@@ -288,8 +296,21 @@ async function confirmSplit() {
     <Button @click="openNew()"><Plus /> {{ $t('timesheet.addEntry') }}</Button>
   </PageHeader>
 
+  <DayTimeline
+    v-if="view === 'calendar' && mode === 'day'"
+    class="flex-1"
+    :day="days[0]"
+    :entries="entries"
+    :total="summaries[0]?.totalMs ?? 0"
+    :now="timer.now"
+    :events="timeline"
+    @edit="openPopover"
+    @create="createAt"
+    @track="track"
+  />
+
   <EntryCalendar
-    v-if="view === 'calendar'"
+    v-else-if="view === 'calendar'"
     class="min-h-80 flex-1"
     :days="days"
     :entries="entries"

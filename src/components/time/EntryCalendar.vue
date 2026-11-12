@@ -6,6 +6,7 @@ import type { AddonTimelineItem, TimeEntry } from '@/bindings'
 import { useFormat } from '@/composables/useFormat'
 import { type Anchor, pointAnchor } from '@/lib/anchor'
 import { textOn } from '@/lib/colors'
+import { layoutLanes, type Lanes } from '@/lib/lanes'
 import { HOUR, fromInputs, toDateInput, type DayRange } from '@/lib/time'
 import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
@@ -201,45 +202,12 @@ function shownEntry(e: TimeEntry): TimeEntry {
   return preview.value?.id === e.id ? { ...e, startAt: preview.value.startAt, endAt: preview.value.endAt } : e
 }
 
-interface Lanes {
-  start: number
-  end: number
-  lane: number
-  lanes: number
-}
-
 interface Block extends Lanes {
   entry: TimeEntry
 }
 
 interface EventBlock extends Lanes {
   item: AddonTimelineItem
-}
-
-/** Greedy lanes within clusters of mutually overlapping segments. */
-function layoutLanes<T extends { start: number; end: number }>(segments: T[]): (T & Lanes)[] {
-  const sorted = segments.filter((s) => s.end > s.start).sort((a, b) => a.start - b.start || b.end - a.end)
-  const blocks: (T & Lanes)[] = []
-  let cluster: (T & Lanes)[] = []
-  let laneEnds: number[] = []
-  let clusterEnd = -Infinity
-  const closeCluster = () => {
-    for (const b of cluster) b.lanes = laneEnds.length
-    cluster = []
-    laneEnds = []
-  }
-  for (const s of sorted) {
-    if (s.start >= clusterEnd) closeCluster()
-    let lane = laneEnds.findIndex((end) => end <= s.start)
-    if (lane === -1) lane = laneEnds.push(s.end) - 1
-    else laneEnds[lane] = s.end
-    const block = { ...s, lane, lanes: 1 }
-    cluster.push(block)
-    blocks.push(block)
-    clusterEnd = Math.max(clusterEnd, s.end)
-  }
-  closeCluster()
-  return blocks
 }
 
 const columns = computed(() =>
