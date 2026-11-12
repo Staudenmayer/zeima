@@ -129,8 +129,10 @@
   html.opaque-window body {
     background: var(--popover);
   }
-  html.opaque-window .window-panel {
-    border-width: 0;
-    border-radius: 0;
-  }
+}
+
+/* Outside @layer so it beats the rounded utilities on the panel. Keep the
+   border, but square the corners to match the opaque window. */
+html.opaque-window .window-panel {
+  border-radius: 0;
 }

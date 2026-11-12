@@ -110,8 +110,8 @@ fn create_quickswitch(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .center();
     // Transparent so the page's rounded corners show. Not on Linux, where
     // WebKit runs without compositing (see main.rs) and cannot draw
-    // transparent windows, nor on macOS (needs the private-API feature).
-    #[cfg(target_os = "windows")]
+    // transparent windows. macOS needs the private-API feature (enabled).
+    #[cfg(not(target_os = "linux"))]
     let builder = builder.transparent(true);
     let window = builder.build()?;
     let handle = window.clone();
@@ -166,7 +166,7 @@ fn create_prompt(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .skip_taskbar(true)
         .focused(false)
         .visible(false);
-    #[cfg(target_os = "windows")]
+    #[cfg(not(target_os = "linux"))]
     {
         builder = builder.transparent(true);
     }
