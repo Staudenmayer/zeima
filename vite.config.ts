@@ -30,6 +30,10 @@ export default defineConfig(() => ({
   optimizeDeps: {
     include: ['@unovis/vue', '@unovis/ts', 'vue-router/experimental'],
   },
+  // The app's unit tests; server/ and packages/ run their own.
+  test: {
+    include: ['src/**/*.test.ts'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src')

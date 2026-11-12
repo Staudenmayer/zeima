@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { toast } from 'vue-sonner'
-import { AlertTriangle, Globe, ShieldCheck } from '@lucide/vue'
+import { AlertTriangle, Globe, KeyRound, ShieldCheck } from '@lucide/vue'
 import { commands, type AddonPackage } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,6 +15,14 @@ const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ installed: [] }>()
 
 const installing = ref(false)
+
+function hostOf(url: string) {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
 
 async function install() {
   if (!props.pkg) return
@@ -63,6 +71,16 @@ async function install() {
             <Globe class="size-3.5 text-muted-foreground" />
             <Badge v-for="h in (pkg.manifest.allowed_hosts ?? [])" :key="h" variant="secondary" class="font-mono">{{ h }}</Badge>
           </div>
+        </section>
+
+        <section v-if="(pkg.manifest.oauth ?? []).length" class="grid gap-2">
+          <h3 class="font-medium">{{ $t('addons.accountsTitle') }}</h3>
+          <ul class="grid gap-1.5">
+            <li v-for="p in (pkg.manifest.oauth ?? [])" :key="p.id" class="flex items-start gap-2">
+              <KeyRound class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <span>{{ p.name }} <span class="font-mono text-xs text-muted-foreground">({{ hostOf(p.auth_url) }})</span></span>
+            </li>
+          </ul>
         </section>
 
         <section v-if="(pkg.manifest.hooks ?? []).length" class="grid gap-2">

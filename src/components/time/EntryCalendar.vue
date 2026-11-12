@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useElementSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import type { TimeEntry } from '@/bindings'
+import type { AddonTimelineItem, TimeEntry } from '@/bindings'
 import { useFormat } from '@/composables/useFormat'
 import { type Anchor, pointAnchor } from '@/lib/anchor'
 import { textOn } from '@/lib/colors'
@@ -16,6 +16,8 @@ import { useTagsStore } from '@/stores/tags'
 // by time. Overlapping entries share the column side by side. It fills its
 // container and shows the whole day zoomed to VISIBLE_HOURS; scroll for more.
 // Blocks take the activity's color (the project's for entries without one).
+// Addon timeline items (calendar events) sit behind the entries as dashed
+// outlines, so tracked time covers them; clicking one tracks it.
 
 const props = defineProps<{
   days: DayRange[]
@@ -23,6 +25,8 @@ const props = defineProps<{
   /** Day totals in ms, same order as `days`. */
   totals: number[]
   now: number
+  /** Addon timeline items, e.g. calendar events. */
+  events?: AddonTimelineItem[]
   /** An edge was dragged: save the new start and end (end `null` while
    * running). Resolves to whether it was saved. Bound as `@resize`. */
   onResize?: (entry: TimeEntry, startAt: number, endAt: number | null) => Promise<boolean>
@@ -35,6 +39,8 @@ const emit = defineEmits<{
   create: [day: number]
   /** Times of the entry being dragged, live; `null` when the drag ends. */
   preview: [times: { id: string; startAt: number; endAt: number | null } | null]
+  /** Click on a timed timeline item: create an entry from it. */
+  track: [item: AddonTimelineItem]
 }>()
 
 const { t } = useI18n()
@@ -195,48 +201,65 @@ function shownEntry(e: TimeEntry): TimeEntry {
   return preview.value?.id === e.id ? { ...e, startAt: preview.value.startAt, endAt: preview.value.endAt } : e
 }
 
-interface Block {
-  entry: TimeEntry
+interface Lanes {
   start: number
   end: number
   lane: number
   lanes: number
 }
 
+interface Block extends Lanes {
+  entry: TimeEntry
+}
+
+interface EventBlock extends Lanes {
+  item: AddonTimelineItem
+}
+
+/** Greedy lanes within clusters of mutually overlapping segments. */
+function layoutLanes<T extends { start: number; end: number }>(segments: T[]): (T & Lanes)[] {
+  const sorted = segments.filter((s) => s.end > s.start).sort((a, b) => a.start - b.start || b.end - a.end)
+  const blocks: (T & Lanes)[] = []
+  let cluster: (T & Lanes)[] = []
+  let laneEnds: number[] = []
+  let clusterEnd = -Infinity
+  const closeCluster = () => {
+    for (const b of cluster) b.lanes = laneEnds.length
+    cluster = []
+    laneEnds = []
+  }
+  for (const s of sorted) {
+    if (s.start >= clusterEnd) closeCluster()
+    let lane = laneEnds.findIndex((end) => end <= s.start)
+    if (lane === -1) lane = laneEnds.push(s.end) - 1
+    else laneEnds[lane] = s.end
+    const block = { ...s, lane, lanes: 1 }
+    cluster.push(block)
+    blocks.push(block)
+    clusterEnd = Math.max(clusterEnd, s.end)
+  }
+  closeCluster()
+  return blocks
+}
+
 const columns = computed(() =>
   props.days.map((day) => {
-    const segments = props.entries
-      .map((e) => (preview.value?.id === e.id ? { ...e, startAt: preview.value.startAt, endAt: preview.value.endAt } : e))
-      .map((entry) => ({
-        entry,
-        start: Math.max(entry.startAt, day.from),
-        end: Math.min(entry.endAt ?? props.now, day.to),
-      }))
-      .filter((s) => s.end > s.start)
-      .sort((a, b) => a.start - b.start || b.end - a.end)
-
-    // Greedy lanes within clusters of mutually overlapping entries.
-    const blocks: Block[] = []
-    let cluster: Block[] = []
-    let laneEnds: number[] = []
-    let clusterEnd = -Infinity
-    const closeCluster = () => {
-      for (const b of cluster) b.lanes = laneEnds.length
-      cluster = []
-      laneEnds = []
-    }
-    for (const s of segments) {
-      if (s.start >= clusterEnd) closeCluster()
-      let lane = laneEnds.findIndex((end) => end <= s.start)
-      if (lane === -1) lane = laneEnds.push(s.end) - 1
-      else laneEnds[lane] = s.end
-      const block = { ...s, lane, lanes: 1 }
-      cluster.push(block)
-      blocks.push(block)
-      clusterEnd = Math.max(clusterEnd, s.end)
-    }
-    closeCluster()
-    return { day, blocks }
+    const blocks: Block[] = layoutLanes(
+      props.entries
+        .map((e) => (preview.value?.id === e.id ? { ...e, startAt: preview.value.startAt, endAt: preview.value.endAt } : e))
+        .map((entry) => ({
+          entry,
+          start: Math.max(entry.startAt, day.from),
+          end: Math.min(entry.endAt ?? props.now, day.to),
+        })),
+    )
+    const items = (props.events ?? []).filter((i) => i.startAt < day.to && i.endAt > day.from)
+    const events: EventBlock[] = layoutLanes(
+      items
+        .filter((i) => !i.allDay)
+        .map((item) => ({ item, start: Math.max(item.startAt, day.from), end: Math.min(item.endAt, day.to) })),
+    )
+    return { day, blocks, events, allDay: items.filter((i) => i.allDay) }
   }),
 )
 
@@ -283,7 +306,25 @@ function fill(color: string, fadeTop: boolean, fadeBottom: boolean): string {
   return `linear-gradient(to bottom, ${stops.join(', ')})`
 }
 
-function blockHeight(day: DayRange, b: Block) {
+function eventStyle(day: DayRange, b: EventBlock) {
+  const color = b.item.color ?? 'var(--muted-foreground)'
+  const top = y(day, b.start)
+  return {
+    top: `${top}px`,
+    height: `${Math.max(y(day, b.end) - top, MIN_BLOCK_PX)}px`,
+    left: `calc(${(b.lane / b.lanes) * 100}% + 2px)`,
+    width: `calc(${100 / b.lanes}% - 4px)`,
+    borderColor: color,
+    backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)`,
+  }
+}
+
+function eventTooltip(item: AddonTimelineItem) {
+  const time = item.allDay ? t('timesheet.allDay') : `${format.time(item.startAt)}–${format.time(item.endAt)}`
+  return [time, item.title, item.detail, item.allDay ? null : t('timesheet.trackEvent')].filter(Boolean).join('\n')
+}
+
+function blockHeight(day: DayRange, b: Lanes) {
   return y(day, b.end) - y(day, b.start)
 }
 
@@ -336,8 +377,8 @@ const visibleHours = computed(() => (viewHeight.value - headerHeight.value) / ho
  */
 function bestStartHour(): number {
   const span = Math.min(24, Math.max(1, visibleHours.value))
-  const spans = columns.value.flatMap(({ day, blocks }) =>
-    blocks.map((b) => [(b.start - day.from) / HOUR, (b.end - day.from) / HOUR] as const),
+  const spans = columns.value.flatMap(({ day, blocks, events }) =>
+    [...blocks, ...events].map((b) => [(b.start - day.from) / HOUR, (b.end - day.from) / HOUR] as const),
   )
   const today = columns.value.find(({ day }) => props.now >= day.from && props.now < day.to)
   const nowHour = today ? (props.now - today.day.from) / HOUR : null
@@ -393,7 +434,7 @@ watch(
   },
 )
 watch(
-  () => props.entries,
+  () => [props.entries, props.events],
   () => {
     if (aimPending.value) void scrollToStart()
   },
@@ -422,13 +463,24 @@ function hourLabel(h: number) {
         <div
           v-for="(col, i) in columns"
           :key="col.day.from"
-          class="flex min-w-0 flex-1 items-baseline justify-between gap-1 border-l px-2 py-1.5 text-xs"
-          :class="now >= col.day.from && now < col.day.to ? 'text-primary' : ''"
+          class="min-w-0 flex-1 border-l px-2 py-1.5 text-xs"
         >
-          <span class="truncate font-medium">
-            {{ days.length > 1 ? `${format.weekday(col.day.from)} ${format.shortDate(col.day.from)}` : format.day(col.day.from) }}
-          </span>
-          <span class="tabular-nums text-muted-foreground">{{ settings.formatDuration(totals[i] ?? 0) }}</span>
+          <div class="flex items-baseline justify-between gap-1" :class="now >= col.day.from && now < col.day.to ? 'text-primary' : ''">
+            <span class="truncate font-medium">
+              {{ days.length > 1 ? `${format.weekday(col.day.from)} ${format.shortDate(col.day.from)}` : format.day(col.day.from) }}
+            </span>
+            <span class="tabular-nums text-muted-foreground">{{ settings.formatDuration(totals[i] ?? 0) }}</span>
+          </div>
+          <!-- All-day timeline items (e.g. holidays, out of office): shown, not tracked. -->
+          <ul v-if="col.allDay.length" class="mt-1 grid gap-0.5">
+            <li
+              v-for="item in col.allDay"
+              :key="`${item.addonId}/${item.id}`"
+              class="truncate rounded-sm border border-dashed px-1 text-[10px] leading-4"
+              :style="{ borderColor: item.color ?? 'var(--border)' }"
+              :title="eventTooltip(item)"
+            >{{ item.title }}</li>
+          </ul>
         </div>
       </div>
 
@@ -458,6 +510,20 @@ function hourLabel(h: number) {
             class="pointer-events-none absolute inset-x-0 border-t border-dashed border-border/70"
             :style="{ top: `${(h - hours.first) * hourPx}px` }"
           />
+          <!-- Timeline items behind the entries -->
+          <button
+            v-for="ev in col.events"
+            :key="`${ev.item.addonId}/${ev.item.id}`"
+            type="button"
+            class="absolute flex flex-col overflow-hidden rounded-md border border-dashed px-1.5 py-0.5 text-left text-[11px] leading-tight text-foreground transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:brightness-125"
+            :style="eventStyle(col.day, ev)"
+            :title="eventTooltip(ev.item)"
+            :aria-label="`${$t('timesheet.trackEvent')}: ${ev.item.title}`"
+            @click="emit('track', ev.item)"
+          >
+            <span class="truncate font-medium">{{ ev.item.title }}</span>
+            <span v-if="ev.item.detail && blockHeight(col.day, ev) >= 30" class="truncate text-muted-foreground">{{ ev.item.detail }}</span>
+          </button>
           <button
             v-for="b in col.blocks"
             :key="b.entry.id"

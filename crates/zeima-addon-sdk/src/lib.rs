@@ -9,6 +9,7 @@
 //! | `schedule.tick` | `on_schedule_tick` | [`Tick`] | – |
 //! | `report.export` | `export_report` | [`ExportRequest`] | [`ExportResult`] |
 //! | `quickswitch.suggest` | `quickswitch_suggest` | [`SuggestRequest`] | `Vec<`[`Suggestion`]`>` |
+//! | `timeline.events` | `timeline_events` | [`TimelineRequest`] | `Vec<`[`TimelineEvent`]`>` |
 //!
 //! Inside those functions the addon can call the host API in [`host`]
 //! (with the `guest` feature), limited to the manifest's permissions.
@@ -202,6 +203,39 @@ pub struct Suggestion {
     pub note: String,
 }
 
+/// Input of `timeline_events`: the days the timesheet shows.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TimelineRequest {
+    pub range: Range,
+    /// IANA zone the days are in.
+    pub timezone: String,
+}
+
+/// An item in the timesheet calendar, e.g. a calendar event. "Track this
+/// event" opens a new entry with its times and the entry fields below.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TimelineEvent {
+    /// Unique within the addon (e.g. the calendar's event id).
+    pub id: String,
+    pub title: String,
+    /// Unix ms.
+    pub start_at: i64,
+    pub end_at: i64,
+    /// All-day items are listed in the day header, not on the grid.
+    pub all_day: bool,
+    /// Second line, e.g. the location.
+    pub detail: Option<String>,
+    /// `#rrggbb`; the app's neutral color if `None`.
+    pub color: Option<String>,
+    pub activity_id: Option<String>,
+    pub project_id: Option<String>,
+    pub tag_ids: Vec<String>,
+    /// Note of the new entry; the title if `None`.
+    pub note: Option<String>,
+}
+
 /// Input of [`host::create_entry`]. `cost_center_id: None` resolves it as
 /// for manual entries (project, then the user's default).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -234,6 +268,14 @@ pub struct KvWrite {
     pub value: Option<String>,
 }
 
+/// Value of a secret write; `value: None` deletes the secret.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SecretWrite {
+    pub key: String,
+    pub value: Option<String>,
+}
+
 /// Names of the host functions (module `extism:host/user`). Every input
 /// and output is JSON.
 pub mod host_fns {
@@ -246,11 +288,14 @@ pub mod host_fns {
     pub const KV_GET: &str = "zeima_kv_get";
     pub const KV_SET: &str = "zeima_kv_set";
     pub const KV_KEYS: &str = "zeima_kv_keys";
+    pub const SECRET_GET: &str = "zeima_secret_get";
+    pub const SECRET_SET: &str = "zeima_secret_set";
+    pub const OAUTH_TOKEN: &str = "zeima_oauth_token";
 }
 
 /// The host API. Each call fails (and the hook with it) if the manifest
 /// lacks the permission named in its docs.
-#[cfg(feature = "guest")]
+#[cfg(all(feature = "guest", target_arch = "wasm32"))]
 pub mod host {
     use extism_pdk::{host_fn, FnResult, Json};
 
@@ -267,6 +312,9 @@ pub mod host {
         fn zeima_kv_get(key: Json<String>) -> Json<Option<String>>;
         fn zeima_kv_set(write: Json<KvWrite>) -> Json<()>;
         fn zeima_kv_keys(prefix: Json<String>) -> Json<Vec<String>>;
+        fn zeima_secret_get(key: Json<String>) -> Json<Option<String>>;
+        fn zeima_secret_set(write: Json<SecretWrite>) -> Json<()>;
+        fn zeima_oauth_token(provider: Json<String>) -> Json<Option<String>>;
     }
 
     /// Entries overlapping `range` (`entries:read`).
@@ -334,9 +382,44 @@ pub mod host {
     pub fn kv_keys(prefix: &str) -> FnResult<Vec<String>> {
         Ok(unsafe { zeima_kv_keys(Json(prefix.to_string())) }?.0)
     }
+
+    /// A secret from the OS keychain (API keys, tokens); only this addon
+    /// can read it. No permission needed.
+    pub fn secret_get(key: &str) -> FnResult<Option<String>> {
+        Ok(unsafe { zeima_secret_get(Json(key.to_string())) }?.0)
+    }
+
+    /// Stores a secret in the OS keychain (at most 8 KB).
+    pub fn secret_set(key: &str, value: &str) -> FnResult<()> {
+        unsafe {
+            zeima_secret_set(Json(SecretWrite {
+                key: key.into(),
+                value: Some(value.into()),
+            }))
+        }?;
+        Ok(())
+    }
+
+    pub fn secret_delete(key: &str) -> FnResult<()> {
+        unsafe {
+            zeima_secret_set(Json(SecretWrite {
+                key: key.into(),
+                value: None,
+            }))
+        }?;
+        Ok(())
+    }
+
+    /// A valid access token for the manifest's `[[oauth]]` provider, for an
+    /// `Authorization: Bearer …` header; refreshed by the app when needed.
+    /// `None` while the user has not connected the account (or the
+    /// provider revoked it).
+    pub fn oauth_token(provider_id: &str) -> FnResult<Option<String>> {
+        Ok(unsafe { zeima_oauth_token(Json(provider_id.to_string())) }?.0)
+    }
 }
 
 /// The Extism PDK. Addons also add `extism-pdk` to their own
 /// dependencies: its `#[plugin_fn]` macro refers to the crate by name.
-#[cfg(feature = "guest")]
+#[cfg(all(feature = "guest", target_arch = "wasm32"))]
 pub use extism_pdk as pdk;

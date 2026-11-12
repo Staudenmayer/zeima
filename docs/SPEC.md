@@ -78,18 +78,18 @@ It runs fully offline for one person. A paid tier adds sync and organization fea
                     │                        │
 ┌───────────────────▼──────────┐   ┌─────────▼──────────────────────────────────────┐
 │  Keycloak                    │   │  Zeima API (Node 24 · Fastify · TypeScript)     │
-│   realm "time"               │   │   OpenAPI 3.1 via @fastify/swagger → /docs     │
+│   realm "zeima"               │   │   OpenAPI 3.1 via @fastify/swagger → /docs     │
 │   users · credentials · MFA  │◄──┤   JWT verify (JWKS) · authz policy layer       │
 │   organizations · groups     │   │   sync · org data · presence (WS) · meetings   │
 │   roles (realm + org groups) │──►│   calendar sync · licensing · billing webhooks │
 │   SSO brokering (Entra,      │   │   Keycloak Admin API client (service account)  │
-│   Google, SAML, LDAP)        │   │   @time/core-wasm (zeima-core compiled to WASM) │
+│   Google, SAML, LDAP)        │   │   @zeima/core-wasm (zeima-core compiled to WASM) │
 │   events ──► webhook ────────┼──►│                                                │
 └──────────────┬───────────────┘   └──────────────┬─────────────────────────────────┘
                │ own DB                           │ Drizzle ORM
         ┌──────▼──────┐                    ┌──────▼──────┐
         │ Postgres    │                    │ Postgres    │   (same server, separate
-        │ "keycloak"  │                    │ "time"      │    databases when self-hosted)
+        │ "keycloak"  │                    │ "zeima"     │    databases when self-hosted)
         └─────────────┘                    └─────────────┘
 ```
 
@@ -100,7 +100,7 @@ It runs fully offline for one person. A paid tier adds sync and organization fea
 | Local store | **SQLite** (WAL mode) in the app data dir | Embedded, robust, single file and easy backup. The current `tauri-plugin-sql` `postgres` feature is not suitable for local-first use. |
 | Data access | **Rust owns the DB** (`sqlx` with the sqlite feature). The frontend calls typed commands and never sends raw SQL. | The timer, auto-pause and sync all run in Rust even when the window is hidden. One write path means one place for validation, change logging and permissions. `tauri-plugin-sql` will be removed. |
 | IPC typing | **tauri-specta** generates `src/bindings.ts` | End-to-end types with no hand-written `invoke` strings. |
-| Domain code | Separate crate **`crates/zeima-core`** with no Tauri dependency | Unit-testable. It is also compiled to **WASM** (`@time/core-wasm`) so the Node server uses exactly the same work-time math, country profiles and holiday rules as the desktop. That requires pure logic to stay I/O-free, with SQLite repositories behind a `db` cargo feature. |
+| Domain code | Separate crate **`crates/zeima-core`** with no Tauri dependency | Unit-testable. It is also compiled to **WASM** (`@zeima/core-wasm`) so the Node server uses exactly the same work-time math, country profiles and holiday rules as the desktop. That requires pure logic to stay I/O-free, with SQLite repositories behind a `db` cargo feature. |
 | Server | **Fastify** (TypeScript, Node 24 LTS) + TypeBox schemas | Fast, schema-first. Every route schema produces the OpenAPI document, request validation and response serialization from a single definition. |
 | API docs / contract | **@fastify/swagger** (OpenAPI 3.1) + **@fastify/swagger-ui** at `/docs` | The generated `openapi.json` is the contract. The desktop Rust sync client and the Vue API types are generated from it. |
 | Identity & access | **Keycloak** (OIDC) | Handles login, MFA, password reset, social login, enterprise SSO (Entra ID, Google, SAML, LDAP/AD) and org/role assignment without us building it. It is self-hostable, which matches §7.1. |
@@ -129,8 +129,8 @@ time/
 ├─ crates/
 │  ├─ zeima-core/             domain models, repos, timer, work-time calc, rules
 │  │  └─ jurisdictions/      country profiles: AT.toml, DE.toml, CH.toml + fixtures
-│  ├─ zeima-core-wasm/        wasm-bindgen wrapper → npm package @time/core-wasm
-│  ├─ time-api-client/       Rust client generated from openapi.json (progenitor)
+│  ├─ zeima-core-wasm/        wasm-bindgen wrapper → npm package @zeima/core-wasm
+│  ├─ zeima-api-client/       Rust client generated from openapi.json (progenitor)
 │  └─ zeima-addon-sdk/        Rust SDK for WASM addons
 ├─ server/                   (Phase 5) Fastify API (cloud + self-hosted, one image)
 ├─ packages/
@@ -138,7 +138,7 @@ time/
 │  └─ shared-fixtures/       JSON test vectors shared by Rust and TS (sync merge, permissions)
 ├─ deploy/
 │  ├─ docker-compose.yml     api + keycloak + postgres + caddy
-│  ├─ keycloak/              realm-time.json (realm import), login theme
+│  ├─ keycloak/              realm-zeima.json (realm import), login theme
 │  └─ helm/                  (later)
 ├─ Cargo.toml                Rust workspace
 └─ package.json              bun workspaces: root app, server, packages/*
@@ -451,11 +451,11 @@ default = ["csv", "xlsx"]         # suggested export formats; addons can registe
 |---|---|
 | Runtime | Node.js 24 LTS (production image); `bun` only as package manager/dev runner |
 | Framework | **Fastify 5** + `@fastify/type-provider-typebox` |
-| API docs | `@fastify/swagger` (OpenAPI 3.1, generated from route schemas) + `@fastify/swagger-ui` at `/docs`. Swagger UI has an OAuth2 "Authorize" button against Keycloak (public client `time-swagger`, PKCE). It can be turned off in production with `DOCS_ENABLED=false`. |
-| Auth | `jose`: verify Keycloak access tokens with JWKS (`createRemoteJWKSet`), checking `iss`, `aud=time-api`, `exp` and `azp` |
+| API docs | `@fastify/swagger` (OpenAPI 3.1, generated from route schemas) + `@fastify/swagger-ui` at `/docs`. Swagger UI has an OAuth2 "Authorize" button against Keycloak (public client `zeima-swagger`, PKCE). It can be turned off in production with `DOCS_ENABLED=false`. |
+| Auth | `jose`: verify Keycloak access tokens with JWKS (`createRemoteJWKSet`), checking `iss`, `aud=zeima-api`, `exp` and `azp` |
 | DB | Postgres 17, **Drizzle ORM**, drizzle-kit SQL migrations, RLS as a second layer (`SET LOCAL app.workspace_id`) |
 | Realtime | `@fastify/websocket` (presence, "changes available"); token checked on connect and re-checked when it expires |
-| Domain logic | `@time/core-wasm` for work-time, balance, holiday and country-profile logic |
+| Domain logic | `@zeima/core-wasm` for work-time, balance, holiday and country-profile logic |
 | Hardening | `@fastify/helmet`, `@fastify/cors`, `@fastify/rate-limit`, `@fastify/under-pressure` |
 | Config | `@fastify/env` with a TypeBox schema; fails fast on invalid config |
 | Observability | Pino (built in) JSON logs, OpenTelemetry (`@opentelemetry/sdk-node`), Prometheus `/metrics` |
@@ -485,7 +485,7 @@ server/
 - Errors use `application/problem+json` (RFC 9457) with a stable `code`.
 - Pagination is cursor-based (`?cursor=&limit=`); IDs are UUIDv7.
 - **Code generation from `openapi.json`**:
-  - Desktop Rust client: `progenitor` → `crates/time-api-client`.
+  - Desktop Rust client: `progenitor` → `crates/zeima-api-client`.
   - Vue: `openapi-typescript` + `openapi-fetch`.
 
 **How the desktop talks to the API**
@@ -495,15 +495,15 @@ server/
 
 ### 7.2 Authentication & Authorization (Keycloak)
 
-**Realm `time`, clients**
+**Realm `zeima`, clients**
 
 | Client | Type | Purpose |
 |---|---|---|
-| `time-desktop` | public, Auth Code + PKCE | Desktop login in the system browser. Redirect via loopback `http://127.0.0.1:<port>/callback` (RFC 8252), with `time://auth/callback` (tauri deep-link) as fallback. Scopes `openid profile email offline_access` so users stay signed in for weeks; sessions can be revoked in Keycloak. |
-| `time-api` | confidential, bearer-only (audience) | Audience mapper adds `aud: time-api` to desktop tokens |
-| `time-api-admin` | confidential, service account | API → Keycloak Admin REST API (manage users, groups, orgs, invitations). Only scoped `realm-management` roles: `manage-users`, `view-users`, `query-groups`, `manage-organizations`. |
-| `time-swagger` | public, PKCE | Swagger UI "Authorize" (dev/staging; optional in prod) |
-| `time-web` | public, PKCE | Future web app / admin console |
+| `zeima-desktop` | public, Auth Code + PKCE | Desktop login in the system browser. Redirect via loopback `http://127.0.0.1:<port>/callback` (RFC 8252), with `time://auth/callback` (tauri deep-link) as fallback. Scopes `openid profile email offline_access` so users stay signed in for weeks; sessions can be revoked in Keycloak. |
+| `zeima-api` | confidential, bearer-only (audience) | Audience mapper adds `aud: zeima-api` to desktop tokens |
+| `zeima-api-admin` | confidential, service account | API → Keycloak Admin REST API (manage users, groups, orgs, invitations). Only scoped `realm-management` roles: `manage-users`, `view-users`, `query-groups`, `manage-organizations`. |
+| `zeima-swagger` | public, PKCE | Swagger UI "Authorize" (dev/staging; optional in prod) |
+| `zeima-web` | public, PKCE | Future web app / admin console |
 
 **Tenancy model**
 - One realm. Each customer org is a **Keycloak Organization**, which provides email-domain routing to the org's own IdP (SSO) and invitations.
@@ -519,15 +519,15 @@ server/
 
 We **do not use Keycloak Authorization Services (UMA/policies)** for per-record checks. They would add a network round-trip per decision and spread record-level logic across two systems.
 
-**Token claims** (custom protocol mapper):
+**Token claims** (built-in mappers only: audience, and group membership with full paths):
 ```json
 {
-  "sub": "…", "email": "…", "locale": "de",
-  "orgs": { "<orgId>": { "role": "manager", "groups": ["<groupId>", "…"] } },
+  "sub": "…", "email": "…", "locale": "de", "azp": "zeima-desktop", "aud": ["zeima-api", "…"],
+  "groups": ["/orgs/<orgId>/roles/manager", "/orgs/<orgId>/groups/dev/backend"],
   "realm_access": { "roles": ["user"] }
 }
 ```
-The active org is chosen by the client with the `X-Org-Id` header and checked against the `orgs` claim.
+The API derives each org's role and departments from the group paths (`/orgs/<orgId>/roles/{owner|admin|manager|member}`, `/orgs/<orgId>/groups/…`), so no custom Keycloak extension is needed for claims. The active org is chosen by the client with the `X-Org-Id` header and checked against those memberships.
 
 **Mirroring into the API database**
 App tables need foreign keys to users and groups (entries, schedules, cost-center defaults). The API keeps read-only mirror tables `kc_user`, `kc_group`, `kc_group_member` and `kc_org_member`, kept current by:
@@ -539,9 +539,9 @@ Writes always go to Keycloak first (through the API's admin endpoints), then the
 
 **Pro (personal) users** register through Keycloak self-registration or Google/Microsoft social login. They have no organization; their data lives in their personal workspace.
 
-**Login theme**: a custom Keycloak login theme in app branding, translated de/en (Keycloakify or FreeMarker), in `deploy/keycloak/themes/time`.
+**Login theme**: a custom Keycloak login theme in app branding, translated de/en (Keycloakify or FreeMarker), in `deploy/keycloak/themes/zeima`.
 
-**Realm as code**: `deploy/keycloak/realm-time.json` is versioned and imported on start (`--import-realm`). Changes are applied with `keycloak-config-cli` in CI/CD so cloud and self-hosted stay identical.
+**Realm as code**: `deploy/keycloak/realm-zeima.json` is versioned and imported on start (`--import-realm`). Changes are applied with `keycloak-config-cli` in CI/CD so cloud and self-hosted stay identical.
 
 ### 7.1 Deployment: Cloud-first, Self-hostable
 The **cloud** (EU region, GDPR) is the primary product and gets features first. The **self-hosted** edition runs the **same container images** (Zeima API + Keycloak + realm config) with a different configuration; there is no fork. Rules that keep this possible:
@@ -553,10 +553,10 @@ The **cloud** (EU region, GDPR) is the primary product and gets features first. 
 | Mode flag | `deployment_mode = "cloud" \| "self_hosted"`. Cloud-only modules (billing, signup, multi-org admin, usage telemetry) are compiled in but disabled in self-hosted mode. |
 | Licensing | Cloud: entitlements come from billing. Self-hosted: an **offline license file** (same signed entitlement format: org, seats, features, expiry) is uploaded in the admin UI. No phone-home required; an optional online check gives automatic renewal. |
 | Tenancy | Cloud is multi-tenant (RLS). Self-hosted usually runs a single org, but uses the same schema. |
-| Client | The desktop app has a **server URL** setting (default: cloud). Discovery via `https://<company-domain>/.well-known/time-server` (returns API URL + Keycloak issuer) lets users type only their email or domain. Admins can preset the URL through an MDM/installer config file. |
-| Packaging | `docker-compose.yml`: `api`, `keycloak` (with realm import + theme), `postgres` (databases `time` and `keycloak`), optional `caddy` for TLS. Available from the first org release. Helm chart and air-gapped install bundle later. |
+| Client | The desktop app has a **server URL** setting (default: cloud). Discovery via `https://<company-domain>/.well-known/zeima-server` (returns API URL + Keycloak issuer) lets users type only their email or domain. Admins can preset the URL through an MDM/installer config file. |
+| Packaging | `docker-compose.yml`: `api`, `keycloak` (with realm import + theme), `postgres` (databases `zeima` and `keycloak`), optional `caddy` for TLS. Available from the first org release. Helm chart and air-gapped install bundle later. |
 | Upgrades | Versioned DB migrations that run automatically on start; realm changes applied by `keycloak-config-cli`; supported Keycloak version range documented; documented upgrade path; server ↔ client protocol versioned with a compatibility range (clients warn when the server is too old). |
-| Operations | `/healthz`, `/readyz` (checks DB + Keycloak JWKS), Prometheus `/metrics`, structured JSON logs, `time-api backup` / `restore` CLI (app DB; the Keycloak DB is backed up with standard Postgres tools). |
+| Operations | `/healthz`, `/readyz` (checks DB + Keycloak JWKS), Prometheus `/metrics`, structured JSON logs, `zeima-api backup` / `restore` CLI (app DB; the Keycloak DB is backed up with standard Postgres tools). |
 | Country profiles | Self-hosters can mount extra/overriding profiles from a directory. |
 | Telemetry | Off by default in self-hosted mode. |
 
@@ -621,7 +621,7 @@ German and English from day one (both exist). Dates and numbers use the user loc
 | Cost center / Kostenstelle | Accounting unit for cost allocation |
 | Workspace | Data ownership boundary (personal or org) |
 | HLC | Hybrid logical clock, used to order changes across devices |
-| Realm | Keycloak's top-level container for users, clients and roles (we use one: `time`) |
+| Realm | Keycloak's top-level container for users, clients and roles (we use one: `zeima`) |
 | Keycloak Organization | Keycloak's tenant concept; one per customer org |
 
 ## 14. Open Questions

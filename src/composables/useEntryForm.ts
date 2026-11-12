@@ -7,14 +7,29 @@ import { HOUR, addDays, daysBetween, fromInputs, parseDate, rangeFromDates, toDa
 import { useProjectsStore } from '@/stores/projects'
 import { useTagsStore } from '@/stores/tags'
 
+/** Prefilled values of a new entry. */
+export interface EntryDraft {
+  startAt: number
+  endAt: number
+  activityId: string | null
+  projectId: string | null
+  tagIds: string[]
+  note: string
+}
+
 /**
  * Form state for creating or editing an entry, shared by the entry dialog
  * and the calendar's edit popover.
  *
  * @param entry  the entry to edit; `null` creates a new one
  * @param day    day preselected for new entries (unix ms)
+ * @param draft  values for a new entry (e.g. from a calendar event)
  */
-export function useEntryForm(entry: () => TimeEntry | null, day: () => number | undefined = () => undefined) {
+export function useEntryForm(
+  entry: () => TimeEntry | null,
+  day: () => number | undefined = () => undefined,
+  draft: () => EntryDraft | null = () => null,
+) {
   const { t } = useI18n()
   const projects = useProjectsStore()
   const tags = useTagsStore()
@@ -85,6 +100,19 @@ export function useEntryForm(entry: () => TimeEntry | null, day: () => number | 
       note.value = ''
       billable.value = false
       costCenterId.value = null
+      const preset = draft()
+      if (preset) {
+        activityId.value = preset.activityId
+        projectId.value = preset.projectId
+        tagIds.value = [...preset.tagIds]
+        date.value = toDateInput(preset.startAt)
+        endDate.value = toDateInput(preset.endAt)
+        start.value = toTimeInput(preset.startAt)
+        end.value = toTimeInput(preset.endAt)
+        note.value = preset.note
+        // The project's default, as when picking it by hand.
+        billable.value = preset.projectId ? (projects.byId.get(preset.projectId)?.billableDefault ?? false) : false
+      }
     }
     costCenterTouched.value = false
   }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onScopeDispose, ref } from 'vue'
 import { useIntervalFn, useStorage } from '@vueuse/core'
-import { ArrowDown, ArrowUp, Check, Clock, Eye, EyeOff, Landmark, Play, Settings2, Target } from '@lucide/vue'
+import { ArrowDown, ArrowUp, Check, Clock, Eye, EyeOff, Landmark, Settings2, Target } from '@lucide/vue'
 import { commands, events, type BudgetStatus, type Report } from '@/bindings'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'

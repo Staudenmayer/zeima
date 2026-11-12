@@ -8,7 +8,7 @@ import DateInput from '@/components/time/DateInput.vue'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { useEntryForm } from '@/composables/useEntryForm'
+import { type EntryDraft, useEntryForm } from '@/composables/useEntryForm'
 import { useActivitiesStore } from '@/stores/activities'
 import { useCostCentersStore } from '@/stores/costCenters'
 import ActivitySelect from './ActivitySelect.vue'
@@ -21,6 +21,8 @@ const props = defineProps<{
   entry: TimeEntry | null
   /** Day preselected for new entries (unix ms). */
   day?: number
+  /** Values for a new entry, e.g. from a calendar event. */
+  draft?: EntryDraft | null
 }>()
 const open = defineModel<boolean>('open', { required: true })
 
@@ -28,7 +30,7 @@ const activities = useActivitiesStore()
 const costCenters = useCostCentersStore()
 
 const { activityId, activityMissing, projectId, tagIds, date, endDate, start, end, note, billable, costCenterId, saving, running, reset, setCostCenter, save: saveForm } =
-  useEntryForm(() => props.entry, () => props.day)
+  useEntryForm(() => props.entry, () => props.day, () => props.draft ?? null)
 
 watch(open, (isOpen) => {
   if (isOpen) reset()

@@ -1,4 +1,5 @@
-//! Installed addons and their key-value storage (device-local, not synced).
+//! Installed addons, their key-value storage and the names of their
+//! keychain entries (device-local, not synced).
 
 use std::collections::BTreeMap;
 
@@ -167,6 +168,31 @@ impl Core {
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    /// Names of the keychain entries the addon owns, sorted.
+    pub async fn addon_secret_names(&self, addon_id: &str) -> Result<Vec<String>> {
+        Ok(
+            sqlx::query_scalar("SELECT name FROM addon_secret WHERE addon_id = ? ORDER BY name")
+                .bind(addon_id)
+                .fetch_all(self.pool())
+                .await?,
+        )
+    }
+
+    /// Records whether the keychain holds the entry `name` for the addon.
+    pub async fn set_addon_secret_name(&self, addon_id: &str, name: &str, present: bool) -> Result<()> {
+        let sql = if present {
+            "INSERT OR IGNORE INTO addon_secret (addon_id, name) VALUES (?, ?)"
+        } else {
+            "DELETE FROM addon_secret WHERE addon_id = ? AND name = ?"
+        };
+        sqlx::query(sql)
+            .bind(addon_id)
+            .bind(name)
+            .execute(self.pool())
+            .await?;
         Ok(())
     }
 

@@ -128,12 +128,30 @@ export const commands = {
 	addonSetEnabled: (id: string, enabled: boolean) => typedError<AddonInfo, CmdError>(__TAURI_INVOKE("addon_set_enabled", { id, enabled })),
 	/**  Saves the settings form; the addon is reloaded with the new values. */
 	addonSaveSettings: (id: string, settings: { [key in string]: string }) => typedError<AddonInfo, CmdError>(__TAURI_INVOKE("addon_save_settings", { id, settings })),
-	/**  Removes the addon, its files and its storage. */
+	/**  Removes the addon, its files, its storage and its keychain entries. */
 	addonUninstall: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("addon_uninstall", { id })),
 	addonExportFormats: () => typedError<AddonExportFormat[], CmdError>(__TAURI_INVOKE("addon_export_formats")),
 	/**  Exports the report with an addon's format to a file the user picks. */
 	reportExportAddon: (query: ReportQuery, addonId: string, formatId: string, fileStem: string) => typedError<string | null, CmdError>(__TAURI_INVOKE("report_export_addon", { query, addonId, formatId, fileStem })),
 	addonSuggest: (query: string) => typedError<AddonSuggestion[], CmdError>(__TAURI_INVOKE("addon_suggest", { query })),
+	/**
+	 *  Signs in to an addon's account in the system browser. Resolves when the
+	 *  sign-in is done, failed, timed out (5 minutes) or was cancelled (error
+	 *  code `cancelled`).
+	 */
+	addonOauthConnect: (id: string, providerId: string) => typedError<AddonInfo, CmdError>(__TAURI_INVOKE("addon_oauth_connect", { id, providerId })),
+	/**  Stops waiting for a sign-in started with `addon_oauth_connect`. */
+	addonOauthCancel: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("addon_oauth_cancel", { id })),
+	/**
+	 *  Forgets a connected account (the provider may still list the app as
+	 *  authorized until the user removes it there).
+	 */
+	addonOauthDisconnect: (id: string, providerId: string) => typedError<AddonInfo, CmdError>(__TAURI_INVOKE("addon_oauth_disconnect", { id, providerId })),
+	/**
+	 *  Items of all addons overlapping `[from, to)` (unix ms; `f64` because
+	 *  IPC numbers are JS numbers).
+	 */
+	addonTimeline: (from: number | null, to: number | null) => typedError<AddonTimelineItem[], CmdError>(__TAURI_INVOKE("addon_timeline", { from, to })),
 };
 
 /** Events */
@@ -225,6 +243,8 @@ export type AddonInfo = {
 	manifest: AddonManifest | null,
 	loaded: boolean,
 	error: string | null,
+	/**  `[[oauth]]` providers with a connected account. */
+	connected: string[],
 };
 
 export type AddonManifest = {
@@ -253,6 +273,8 @@ export type AddonManifest = {
 	export_formats?: ExportFormatDef[],
 	/**  Settings form, in display order. */
 	settings?: SettingField[],
+	/**  Accounts the user can connect (needs `network`). */
+	oauth?: OAuthProvider[],
 };
 
 /**  A package the user picked, before installing. */
@@ -280,6 +302,22 @@ export type AddonSuggestion = {
 	addonId: string,
 	label: string,
 	detail: string | null,
+	activityId: string | null,
+	projectId: string | null,
+	tagIds: string[],
+	note: string,
+};
+
+/**  An addon item in the timesheet calendar (`timeline.events`). */
+export type AddonTimelineItem = {
+	addonId: string,
+	id: string,
+	title: string,
+	startAt: number,
+	endAt: number,
+	allDay: boolean,
+	detail: string | null,
+	color: string | null,
 	activityId: string | null,
 	projectId: string | null,
 	tagIds: string[],
@@ -479,7 +517,9 @@ export type DataKind = "activity" | "project" | "tag" | "entry" | "settings" | "
 /**  Schedules, absences, holidays, balance corrections, work settings. */
 "work" | 
 /**  Auto-pause items or the morning check-in. */
-"away";
+"away" | 
+/**  Addon timeline items (e.g. a calendar addon synced). */
+"timeline";
 
 export type DateFormat = 
 /**  From the operating system's regional settings. */
@@ -581,7 +621,9 @@ export type Hook = "entry.started" | "entry.stopped" | "entry.created" | "entry.
 /**  Extra options in the quick switch. */
 "quickswitch.suggest" | 
 /**  Called every `schedule_minutes`. */
-"schedule.tick";
+"schedule.tick" | 
+/**  Items shown in the timesheet calendar, e.g. calendar events. */
+"timeline.events";
 
 export type JurisdictionSelection = {
 	profileId: string,
@@ -600,6 +642,41 @@ export type NumberFormat =
 "point" | 
 /**  `7,5` */
 "comma";
+
+/**
+ *  An account the user can connect on the Addons page (OAuth 2
+ *  authorization code flow with PKCE in the system browser). The app keeps
+ *  the refresh token in the OS keychain; the addon only gets access tokens
+ *  (`host::oauth_token`).
+ */
+export type OAuthProvider = {
+	/**  Unique within the addon; letters, digits and `_`. */
+	id: string,
+	/**  Shown to users, e.g. `Microsoft 365`. */
+	name: string,
+	/**  `https://` authorization endpoint. */
+	auth_url: string,
+	/**  `https://` token endpoint. */
+	token_url: string,
+	client_id: string,
+	/**
+	 *  Only for providers that require one for desktop apps (Google);
+	 *  it is not secret in an app that users install.
+	 */
+	client_secret?: string | null,
+	scopes?: string[],
+	/**
+	 *  Extra query parameters for the authorization URL, e.g.
+	 *  `{ access_type = "offline", prompt = "consent" }` for Google.
+	 */
+	auth_params?: { [key in string]: string },
+	/**
+	 *  Host of the loopback redirect, `127.0.0.1` (default) or `localhost`,
+	 *  as registered with the provider. The redirect URI is
+	 *  `http://<host>:<port>` with a free port.
+	 */
+	redirect_host?: string | null,
+};
 
 export type Pause = {
 	id: string,

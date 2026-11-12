@@ -1,0 +1,21 @@
+# Test fixture for the addon host tests (src-tauri/src/addons.rs): uses
+# secrets, an OAuth account and timeline items. Not meant for users.
+id = "dev.zeima.host-test"
+name = "Host test"
+version = "1.0.0"
+author = "Zeima"
+description = "Test fixture for secrets, OAuth tokens and timeline items."
+min_app_version = "0.1.0"
+wasm = "host_test.wasm"
+permissions = ["network"]
+allowed_hosts = ["api.example.com"]
+hooks = ["schedule.tick", "timeline.events"]
+schedule_minutes = 5
+
+[[oauth]]
+id = "demo"
+name = "Demo account"
+auth_url = "https://login.example.com/authorize"
+token_url = "https://login.example.com/token"
+client_id = "host-test"
+scopes = ["offline_access", "events.read"]

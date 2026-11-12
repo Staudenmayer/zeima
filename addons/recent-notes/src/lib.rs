@@ -75,6 +75,7 @@ pub fn quickswitch_suggest(Json(req): Json<SuggestRequest>) -> FnResult<Json<Vec
             let project = r.project_id.as_deref().and_then(|id| projects.iter().find(|p| p.id == id));
             Suggestion {
                 label: format!("Continue: {}", r.note),
+                activity_id: None,
                 detail: project.map(|p| p.name.clone()),
                 project_id: r.project_id,
                 tag_ids: r.tag_ids,

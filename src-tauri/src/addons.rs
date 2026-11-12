@@ -5,7 +5,8 @@
 //! cap. HTTP is Extism's built-in client, limited to the manifest's
 //! `allowed_hosts` and only with the `network` permission. Host functions
 //! read and write through `zeima-core`, so addon writes are validated and
-//! change-logged like any other write.
+//! change-logged like any other write. Secrets and OAuth refresh tokens go
+//! to the OS keychain (`secrets`, `oauth`).
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -19,19 +20,27 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 use zeima_addon_sdk as sdk;
-use zeima_core::addon::{AddonManifest, Hook, Permission, SettingType};
+use zeima_core::addon::{AddonManifest, Hook, OAuthProvider, Permission, SettingType};
 use zeima_core::events::DomainEvent;
 use zeima_core::model::{EntryInput, EntrySource};
 use zeima_core::summary::Range;
 use zeima_core::AddonRecord;
 
 use crate::events::DataKind;
+use crate::oauth::{PostForm, TokenCache};
+use crate::secrets::{entry_name, Keychain, Secrets};
 use crate::state::AppState;
 
 /// Longest a single hook call may run.
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 /// Quick-switch suggestions must not hold up typing.
 const SUGGEST_TIMEOUT: Duration = Duration::from_millis(800);
+/// Timeline items are read while the timesheet loads.
+const TIMELINE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Most timeline items taken from one addon per request.
+const MAX_TIMELINE_ITEMS: usize = 500;
+/// Longest secret key.
+const MAX_SECRET_KEY_BYTES: usize = 256;
 /// 64 KiB pages: 1024 = 64 MiB per plugin.
 const MEMORY_PAGES: u32 = 1024;
 
@@ -50,6 +59,10 @@ pub struct Addons {
     errors: Mutex<HashMap<String, String>>,
     /// Last `schedule.tick` per addon (unix ms).
     last_tick: Mutex<HashMap<String, i64>>,
+    /// OAuth access tokens (refresh tokens are in the keychain).
+    pub tokens: Arc<TokenCache>,
+    /// Running account sign-ins by addon id; sending cancels.
+    sign_ins: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
 }
 
 /// Folder with one sub-folder per installed addon.
@@ -85,14 +98,21 @@ pub struct HostServices {
     pub notify: NotifyFn,
     /// Called after an addon created an entry, so windows reload.
     pub entries_changed: Arc<dyn Fn() + Send + Sync>,
+    pub secrets: Secrets,
+    /// HTTP for OAuth token requests.
+    pub post_form: PostForm,
+    pub tokens: Arc<TokenCache>,
 }
 
 impl HostServices {
-    fn for_app(app: &AppHandle) -> Self {
+    pub fn for_app(app: &AppHandle) -> Self {
         let notify_app = app.clone();
         let changed_app = app.clone();
         Self {
             core: app.state::<AppState>().core.clone(),
+            secrets: Arc::new(Keychain),
+            post_form: crate::oauth::http_post_form(),
+            tokens: app.state::<Addons>().tokens.clone(),
             notify: Arc::new(move |title, body| {
                 let _ = notify_app.notification().builder().title(title).body(body).show();
             }),
@@ -112,6 +132,7 @@ struct HostCtx {
     addon_id: String,
     addon_name: String,
     granted: Vec<Permission>,
+    oauth: Vec<OAuthProvider>,
 }
 
 impl HostCtx {
@@ -299,6 +320,73 @@ fn zeima_kv_keys(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<Ho
     })
 }
 
+fn secret_entry(ctx: &HostCtx, key: &str) -> Result<(String, String), extism::Error> {
+    if key.is_empty() || key.len() > MAX_SECRET_KEY_BYTES {
+        return Err(extism::Error::msg(format!(
+            "secret keys have 1–{MAX_SECRET_KEY_BYTES} bytes"
+        )));
+    }
+    let name = format!("secret:{key}");
+    Ok((entry_name(&ctx.addon_id, &name), name))
+}
+
+fn zeima_secret_get(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+    host(p, i, o, u, None, |ctx, key: String| {
+        let (entry, _) = secret_entry(ctx, &key)?;
+        ctx.services.secrets.get(&entry).map_err(extism::Error::msg)
+    })
+}
+
+fn zeima_secret_set(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+    host(p, i, o, u, None, |ctx, w: sdk::SecretWrite| {
+        let (entry, name) = secret_entry(ctx, &w.key)?;
+        match &w.value {
+            Some(value) => ctx.services.secrets.set(&entry, value),
+            None => ctx.services.secrets.delete(&entry),
+        }
+        .map_err(extism::Error::msg)?;
+        // The name, so uninstalling can delete the entry.
+        block_on(
+            ctx.core()
+                .set_addon_secret_name(&ctx.addon_id, &name, w.value.is_some()),
+        )?;
+        Ok(())
+    })
+}
+
+fn zeima_oauth_token(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+    host(
+        p,
+        i,
+        o,
+        u,
+        Some(Permission::Network),
+        |ctx, provider_id: String| {
+            let provider = ctx
+                .oauth
+                .iter()
+                .find(|p| p.id == provider_id)
+                .ok_or_else(|| extism::Error::msg(format!("no [[oauth]] provider '{provider_id}'")))?;
+            let s = &ctx.services;
+            let token = crate::oauth::access_token(
+                &ctx.addon_id,
+                provider,
+                s.secrets.as_ref(),
+                &s.post_form,
+                &s.tokens,
+                s.core.now_ms(),
+            )
+            .map_err(extism::Error::msg)?;
+            if token.is_none() {
+                // Not connected (any more): the Addons page shows it.
+                let name = crate::oauth::secret_name(&provider.id);
+                block_on(ctx.core().set_addon_secret_name(&ctx.addon_id, &name, false))?;
+            }
+            Ok(token)
+        },
+    )
+}
+
 // --------------------------------------------------------------------------
 // Loading and calling
 // --------------------------------------------------------------------------
@@ -337,6 +425,7 @@ fn build_plugin(
         addon_id: manifest.id.clone(),
         addon_name: manifest.name.clone(),
         granted: record.granted.clone(),
+        oauth: manifest.oauth.clone(),
     });
     PluginBuilder::new(wasm_manifest)
         .with_wasi(false)
@@ -378,7 +467,22 @@ fn build_plugin(
         .with_function(sdk::host_fns::NOTIFY, [PTR], [PTR], data.clone(), zeima_notify)
         .with_function(sdk::host_fns::KV_GET, [PTR], [PTR], data.clone(), zeima_kv_get)
         .with_function(sdk::host_fns::KV_SET, [PTR], [PTR], data.clone(), zeima_kv_set)
-        .with_function(sdk::host_fns::KV_KEYS, [PTR], [PTR], data, zeima_kv_keys)
+        .with_function(sdk::host_fns::KV_KEYS, [PTR], [PTR], data.clone(), zeima_kv_keys)
+        .with_function(
+            sdk::host_fns::SECRET_GET,
+            [PTR],
+            [PTR],
+            data.clone(),
+            zeima_secret_get,
+        )
+        .with_function(
+            sdk::host_fns::SECRET_SET,
+            [PTR],
+            [PTR],
+            data.clone(),
+            zeima_secret_set,
+        )
+        .with_function(sdk::host_fns::OAUTH_TOKEN, [PTR], [PTR], data, zeima_oauth_token)
         .build()
         .map_err(|e| format!("could not load {}: {e}", manifest.wasm))
 }
@@ -520,8 +624,55 @@ impl Addons {
         }
     }
 
-    /// `schedule.tick` for addons whose interval has passed.
-    pub async fn tick(&self, now: i64) {
+    /// Manifest of a loaded addon.
+    pub fn manifest(&self, id: &str) -> Option<AddonManifest> {
+        self.loaded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .map(|a| a.manifest.clone())
+    }
+
+    /// The next `tick` calls the addon's `schedule.tick` (e.g. right after
+    /// an account was connected).
+    pub fn tick_soon(&self, id: &str) {
+        self.last_tick
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+    }
+
+    /// Registers a sign-in for the addon, cancelling one still running.
+    pub fn begin_sign_in(&self, id: &str) -> tokio::sync::oneshot::Receiver<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let old = self
+            .sign_ins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id.to_string(), tx);
+        if let Some(old) = old {
+            let _ = old.send(());
+        }
+        rx
+    }
+
+    /// Cancels the addon's running sign-in; `false` if there is none.
+    pub fn cancel_sign_in(&self, id: &str) -> bool {
+        let tx = self.sign_ins.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+        tx.is_some_and(|tx| tx.send(()).is_ok())
+    }
+
+    pub fn end_sign_in(&self, id: &str) {
+        let mut map = self.sign_ins.lock().unwrap_or_else(|e| e.into_inner());
+        if map.get(id).is_some_and(|tx| tx.is_closed()) {
+            map.remove(id);
+        }
+    }
+
+    /// `schedule.tick` for addons whose interval has passed; returns
+    /// whether any ran (their timeline items may have changed).
+    pub async fn tick(&self, now: i64) -> bool {
+        let mut ran = false;
         for addon in self.loaded() {
             let Some(minutes) = addon.manifest.schedule_minutes else {
                 continue;
@@ -541,8 +692,41 @@ impl Addons {
             if due {
                 let input = serde_json::to_string(&sdk::Tick { now }).unwrap_or_default();
                 self.call(&addon, "on_schedule_tick", input, CALL_TIMEOUT).await;
+                ran = true;
             }
         }
+        ran
+    }
+
+    /// Timeline items of all addons for `range`: (addon id, item).
+    pub async fn timeline(&self, request: &sdk::TimelineRequest) -> Vec<(String, sdk::TimelineEvent)> {
+        let input = serde_json::to_string(request).unwrap_or_default();
+        let mut out = Vec::new();
+        for addon in self.loaded() {
+            if !addon.manifest.hooks.contains(&Hook::TimelineEvents) {
+                continue;
+            }
+            let Some(json) = self
+                .call(&addon, "timeline_events", input.clone(), TIMELINE_TIMEOUT)
+                .await
+            else {
+                continue;
+            };
+            match serde_json::from_str::<Vec<sdk::TimelineEvent>>(&json) {
+                Ok(list) => out.extend(
+                    list.into_iter()
+                        .filter(|e| {
+                            e.end_at > e.start_at
+                                && e.start_at < request.range.to
+                                && e.end_at > request.range.from
+                        })
+                        .take(MAX_TIMELINE_ITEMS)
+                        .map(|e| (addon.manifest.id.clone(), e)),
+                ),
+                Err(e) => self.set_error(&addon.manifest.id, Some(format!("timeline_events: {e}"))),
+            }
+        }
+        out
     }
 
     /// Export formats of enabled addons: (addon id, addon name, format).
@@ -636,6 +820,8 @@ mod tests {
     use zeima_core::clock::ManualClock;
     use zeima_core::model::ProjectInput;
 
+    use crate::secrets::SecretStore;
+
     use super::*;
 
     const HOUR: i64 = 3_600_000;
@@ -646,6 +832,7 @@ mod tests {
         addons: Addons,
         core: Arc<zeima_core::Core>,
         notifications: Arc<Mutex<Vec<(String, String)>>>,
+        secrets: Arc<crate::secrets::MemorySecrets>,
         _dir: PathBuf,
     }
 
@@ -675,10 +862,18 @@ mod tests {
         let record = core.set_addon_enabled(&manifest.id, true).await.unwrap();
         let notifications = Arc::new(Mutex::new(Vec::new()));
         let sink = notifications.clone();
+        let secrets = Arc::new(crate::secrets::MemorySecrets::default());
         let services = HostServices {
             core: core.clone(),
             notify: Arc::new(move |t, b| sink.lock().unwrap().push((t.to_string(), b.to_string()))),
             entries_changed: Arc::new(|| {}),
+            secrets: secrets.clone(),
+            // Every refresh succeeds.
+            post_form: Arc::new(|_, form| {
+                assert!(form.contains(&("grant_type".into(), "refresh_token".into())));
+                Ok((200, r#"{"access_token":"at-1","expires_in":3600}"#.into()))
+            }),
+            tokens: Arc::new(TokenCache::default()),
         };
         let plugin = build_plugin(&services, &dir, &manifest, &record).unwrap();
         let addons = Addons::default();
@@ -693,8 +888,89 @@ mod tests {
             addons,
             core,
             notifications,
+            secrets,
             _dir: dir,
         })
+    }
+
+    /// Built test fixture from `addons/host-test`.
+    const HOST_TEST: &str = "dev.zeima.host-test-1.0.0.zip";
+
+    #[tokio::test]
+    async fn addon_secrets_live_in_the_keychain_under_the_addon_id() {
+        let Some(f) = load(HOST_TEST, &[Permission::Network]).await else {
+            return;
+        };
+        let id = "dev.zeima.host-test";
+        assert!(f.addons.tick(T0).await);
+        assert_eq!(f.addons.error(id), None);
+        let stored = f.secrets.0.lock().unwrap().clone();
+        assert_eq!(
+            stored.into_iter().collect::<Vec<_>>(),
+            vec![(
+                "addon:dev.zeima.host-test:secret:api_key".to_string(),
+                format!("key-{T0}")
+            )]
+        );
+        // Only names are recorded in the database, for uninstalling.
+        assert_eq!(
+            f.core.addon_secret_names(id).await.unwrap(),
+            vec!["secret:api_key"]
+        );
+        assert_eq!(f.core.addon_kv_keys(id, "").await.unwrap(), Vec::<String>::new());
+        // Not due again within the interval.
+        assert!(!f.addons.tick(T0 + 60_000).await);
+    }
+
+    #[tokio::test]
+    async fn timeline_items_carry_the_oauth_token_once_connected() {
+        let Some(f) = load(HOST_TEST, &[Permission::Network]).await else {
+            return;
+        };
+        let id = "dev.zeima.host-test";
+        let request = sdk::TimelineRequest {
+            range: sdk::Range {
+                from: T0,
+                to: T0 + 24 * HOUR,
+            },
+            timezone: "Europe/Vienna".into(),
+        };
+        // Not connected: no token. The broken item is dropped.
+        let items = f.addons.timeline(&request).await;
+        assert_eq!(f.addons.error(id), None);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].0, id);
+        assert_eq!(items[0].1.title, "token= key=");
+        assert_eq!(items[0].1.start_at, T0 + 9 * HOUR);
+        assert_eq!(items[0].1.detail.as_deref(), Some("Europe/Vienna"));
+
+        // Connected (refresh token in the keychain): the host refreshes.
+        f.secrets
+            .set("addon:dev.zeima.host-test:oauth:demo", "rt-1")
+            .unwrap();
+        f.addons.tick(T0).await;
+        let items = f.addons.timeline(&request).await;
+        assert_eq!(items[0].1.title, format!("token=at-1 key=key-{T0}"));
+    }
+
+    #[tokio::test]
+    async fn oauth_tokens_need_the_network_permission() {
+        let Some(f) = load(HOST_TEST, &[]).await else {
+            return;
+        };
+        f.secrets
+            .set("addon:dev.zeima.host-test:oauth:demo", "rt-1")
+            .unwrap();
+        let request = sdk::TimelineRequest {
+            range: sdk::Range {
+                from: T0,
+                to: T0 + HOUR * 24,
+            },
+            timezone: "UTC".into(),
+        };
+        assert!(f.addons.timeline(&request).await.is_empty());
+        let error = f.addons.error("dev.zeima.host-test").unwrap();
+        assert!(error.contains("permission 'network'"), "{error}");
     }
 
     async fn project(core: &zeima_core::Core) -> String {

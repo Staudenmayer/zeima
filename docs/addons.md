@@ -1,11 +1,13 @@
 # Writing addons for Zeima
 
-Addons add features to Zeima without changing the app: export formats, quick-switch options, reactions to tracked time, and integrations with other services. An addon is a WebAssembly (WASM) module plus a manifest, `addon.toml`. Zeima runs it in a sandbox, so it can only use what the user granted when installing it.
+Addons add features to Zeima without changing the app: export formats, quick-switch options, reactions to tracked time, items in the timesheet calendar, and integrations with other services. An addon is a WebAssembly (WASM) module plus a manifest, `addon.toml`. Zeima runs it in a sandbox, so it can only use what the user granted when installing it.
 
 This guide walks through a complete export-format addon, then documents everything an addon can use. The two addons in [`addons/`](../addons) are working examples:
 
 - [`csv-export`](../addons/csv-export): a report export format with settings.
 - [`recent-notes`](../addons/recent-notes): events, storage, quick-switch options and notifications.
+
+[`host-test`](../addons/host-test) is a test fixture for secrets, accounts and timeline items; it is short enough to read as an example too.
 
 ## Quick start: an export format
 
@@ -125,6 +127,7 @@ While developing, you can pick the `addon.toml` itself instead of a zip; Zeima t
 | `schedule_minutes` | with `schedule.tick` | Interval for `schedule.tick`, at least 1. |
 | `[[export_formats]]` | with `report.export` | `id`, `name` (menu label), `extension` (without dot). |
 | `[[settings]]` | | Fields of the addon's settings form (see [Settings](#settings)). |
+| `[[oauth]]` | | Accounts the user can connect, such as Microsoft 365 or Google (see [Accounts](#accounts-oauth)). Needs `network`. |
 
 Zeima validates the manifest when installing and refuses inconsistent ones, for example `network` without `allowed_hosts`. The JSON Schema is [`crates/zeima-core/addon.schema.json`](../crates/zeima-core/addon.schema.json); editors with TOML schema support can use it for completion.
 
@@ -143,6 +146,7 @@ Each hook calls one exported function. Declare only the hooks you implement: Zei
 | `schedule.tick` | `on_schedule_tick` | `Tick { now }` | – |
 | `report.export` | `export_report` | `ExportRequest` | `ExportResult { content }` |
 | `quickswitch.suggest` | `quickswitch_suggest` | `SuggestRequest { query }` | `Vec<Suggestion>` |
+| `timeline.events` | `timeline_events` | `TimelineRequest { range, timezone }` | `Vec<TimelineEvent>` |
 
 All inputs and outputs are JSON with camelCase fields; the SDK types handle the conversion. Unknown fields are ignored, so addons keep working when Zeima adds fields.
 
@@ -161,6 +165,10 @@ Return the whole file as `content`; Zeima asks the user where to save it.
 
 **Quick switch.** `quickswitch_suggest` is called while the user types, with what they typed. Return up to 20 options. Choosing one starts the timer with its `activityId`, `projectId`, `tagIds` and `note`; without `activityId` the user picks the activity first. Answer fast: suggestions that take longer than 0.8 s are dropped.
 
+**Timeline.** `timeline_events` is called when the timesheet shows a day or week, with the shown `range` and the user's `timezone`. Return the items in that range, such as calendar events, as `TimelineEvent`s: `id`, `title`, `startAt`, `endAt`, and optionally `allDay`, `detail` (a second line, such as the location), `color` (`#rrggbb`) and the values for a new entry (`activityId`, `projectId`, `tagIds`, `note`). Timed items appear as dashed outlines behind the entries in the calendar view. Clicking one opens a new entry with the item's times and values ("Track this event"); the note defaults to the title. All-day items are listed in the day header and cannot be tracked.
+
+Read the items from your own storage, not from the network: the call has 2 seconds, and the timesheet waits for it. Fetch and cache them in `schedule.tick` instead. After each tick the timesheet reloads the items, so new events show up without the user doing anything. At most 500 items per call are used; items that end before they start are dropped.
+
 ## Host API
 
 The SDK's `host` module calls back into Zeima. Each call fails, and the hook with it, if the permission named here was not granted.
@@ -174,6 +182,8 @@ The SDK's `host` module calls back into Zeima. Each call fails, and the hook wit
 | `host::create_entry(new_entry)` | `entries:write` | The created entry |
 | `host::notify(title, body)` | `notify` | – (the title is prefixed with your addon's name) |
 | `host::kv_get(key)` / `kv_set` / `kv_delete` / `kv_keys(prefix)` | none | The addon's own storage |
+| `host::secret_get(key)` / `secret_set` / `secret_delete` | none | The addon's own secrets, in the OS keychain |
+| `host::oauth_token(provider_id)` | `network` | An access token for a connected `[[oauth]]` account, or `None` |
 
 **Times and time zones.** Times are unix milliseconds (UTC). Addons have no time zone database, so entries from `list_entries` and in exports also carry `localStart` and `localEnd` in the user's zone, like `2026-10-05T09:30`.
 
@@ -181,7 +191,50 @@ The SDK's `host` module calls back into Zeima. Each call fails, and the hook wit
 
 **Storage.** Each addon has its own key-value store: up to 10,000 keys of 256 bytes, values up to 1 MB. Store JSON for anything structured. Uninstalling the addon deletes its storage.
 
+**Secrets.** API keys and tokens belong in the OS keychain (macOS Keychain, Windows Credential Manager, Secret Service on Linux), not in key-value storage. `host::secret_set(key, value)` stores up to 8 KB under the addon's id; no other addon can read it. Uninstalling the addon deletes its secrets. Keychain access can be slow or show an unlock prompt the first time, so read secrets when you need them rather than on every call.
+
 **HTTP.** With the `network` permission, use `extism_pdk::http::request`. Requests only reach the manifest's `allowed_hosts`; everything else fails.
+
+## Accounts (OAuth)
+
+For services with OAuth 2, such as Microsoft 365 and Google, Zeima handles the sign-in. You declare the provider, the user clicks **Connect** on the Addons page, and you ask for an access token when you need one:
+
+```toml
+permissions = ["network"]
+allowed_hosts = ["graph.microsoft.com"]
+
+[[oauth]]
+id = "microsoft"                     # letters, digits, _
+name = "Microsoft 365"               # shown on the Addons page
+auth_url = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+client_id = "00000000-0000-0000-0000-000000000000"
+scopes = ["offline_access", "Calendars.Read"]
+```
+
+```rust
+let Some(token) = host::oauth_token("microsoft")? else {
+    return Ok(()); // not connected yet
+};
+let req = HttpRequest::new("https://graph.microsoft.com/v1.0/me/calendarView?…")
+    .with_header("Authorization", format!("Bearer {token}"));
+```
+
+How it works:
+
+- **Connect** opens the provider's sign-in page in the system browser (authorization code flow with PKCE). The provider redirects to `http://127.0.0.1:<port>` on a free port, where Zeima receives the code and exchanges it for tokens. The user can cancel; the sign-in times out after 5 minutes.
+- The refresh token is stored in the OS keychain. Access tokens are kept in memory only and renewed shortly before they expire. Your addon never sees the refresh token.
+- `host::oauth_token` returns `None` while the account is not connected. If the provider rejects the refresh token (`invalid_grant`, for example after a password change), Zeima deletes it and the Addons page shows the account as not connected again. Treat `None` as "do nothing until the user connects".
+- After connecting, the addon's next `schedule.tick` runs within 30 seconds instead of waiting for the full interval, so the first sync starts right away.
+- Uninstalling the addon or clicking **Disconnect** deletes the refresh token. The provider may still list Zeima as an authorized app until the user removes it there.
+
+Register Zeima as a **public client** (desktop/mobile app) with the provider:
+
+- **Redirect URI**: `http://127.0.0.1` (the provider must accept any port on loopback addresses, as Microsoft and Google do). If the provider only accepts `http://localhost`, set `redirect_host = "localhost"`.
+- **Microsoft**: "Mobile and desktop applications" platform. Include `offline_access` in `scopes`, or no refresh token is issued.
+- **Google**: "Desktop app" client. Google requires its `client_secret` even for desktop apps (it is not secret in an app users install); add it as `client_secret`, and set `auth_params = { access_type = "offline", prompt = "consent" }` so that Google issues a refresh token.
+
+`auth_url` and `token_url` must be `https://`. Zeima talks to them itself, so they do not need to be in `allowed_hosts`; the hosts of the API you call with the token do.
 
 ## Settings
 
@@ -210,13 +263,13 @@ Values reach the addon as Extism config strings. Read them with `extism_pdk::con
 | `tags:read` | `host::list_tags` |
 | `cost-centers:read` | `host::list_cost_centers` |
 | `notify` | `host::notify` |
-| `network` | HTTP to `allowed_hosts` |
+| `network` | HTTP to `allowed_hosts`; `host::oauth_token` |
 
 Ask for as little as you need: the install dialog lists every permission in plain words. Data passed to a hook, such as the entries in an `ExportRequest`, needs no permission.
 
 ## Limits
 
-- One call may run for 10 seconds; quick-switch suggestions for 0.8 seconds.
+- One call may run for 10 seconds; quick-switch suggestions for 0.8 seconds, timeline items for 2 seconds.
 - Each addon gets up to 64 MB of memory.
 - The module may be at most 50 MB.
 - Addons have no file system or clock access (no WASI). The current time arrives as `Tick.now`, or take it from the event you are handling.

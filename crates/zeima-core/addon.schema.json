@@ -55,6 +55,14 @@
     "name": {
       "type": "string"
     },
+    "oauth": {
+      "description": "Accounts the user can connect (needs `network`).",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/OAuthProvider"
+      }
+    },
     "permissions": {
       "type": "array",
       "default": [],
@@ -148,7 +156,76 @@
           "description": "Called every `schedule_minutes`.",
           "type": "string",
           "const": "schedule.tick"
+        },
+        {
+          "description": "Items shown in the timesheet calendar, e.g. calendar events.",
+          "type": "string",
+          "const": "timeline.events"
         }
+      ]
+    },
+    "OAuthProvider": {
+      "description": "An account the user can connect on the Addons page (OAuth 2\nauthorization code flow with PKCE in the system browser). The app keeps\nthe refresh token in the OS keychain; the addon only gets access tokens\n(`host::oauth_token`).",
+      "type": "object",
+      "properties": {
+        "auth_params": {
+          "description": "Extra query parameters for the authorization URL, e.g.\n`{ access_type = \"offline\", prompt = \"consent\" }` for Google.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "auth_url": {
+          "description": "`https://` authorization endpoint.",
+          "type": "string"
+        },
+        "client_id": {
+          "type": "string"
+        },
+        "client_secret": {
+          "description": "Only for providers that require one for desktop apps (Google);\nit is not secret in an app that users install.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "id": {
+          "description": "Unique within the addon; letters, digits and `_`.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Shown to users, e.g. `Microsoft 365`.",
+          "type": "string"
+        },
+        "redirect_host": {
+          "description": "Host of the loopback redirect, `127.0.0.1` (default) or `localhost`,\nas registered with the provider. The redirect URI is\n`http://<host>:<port>` with a free port.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "scopes": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "token_url": {
+          "description": "`https://` token endpoint.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "auth_url",
+        "token_url",
+        "client_id"
       ]
     },
     "Permission": {

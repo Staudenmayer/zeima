@@ -58,6 +58,9 @@ pub enum Hook {
     /// Called every `schedule_minutes`.
     #[serde(rename = "schedule.tick")]
     ScheduleTick,
+    /// Items shown in the timesheet calendar, e.g. calendar events.
+    #[serde(rename = "timeline.events")]
+    TimelineEvents,
 }
 
 impl Hook {
@@ -72,6 +75,7 @@ impl Hook {
             Self::ReportExport => "report.export",
             Self::QuickswitchSuggest => "quickswitch.suggest",
             Self::ScheduleTick => "schedule.tick",
+            Self::TimelineEvents => "timeline.events",
         }
     }
 
@@ -79,7 +83,7 @@ impl Hook {
     pub fn is_event(self) -> bool {
         !matches!(
             self,
-            Self::ReportExport | Self::QuickswitchSuggest | Self::ScheduleTick
+            Self::ReportExport | Self::QuickswitchSuggest | Self::ScheduleTick | Self::TimelineEvents
         )
     }
 }
@@ -115,6 +119,40 @@ pub enum SettingType {
 pub struct SettingOption {
     pub value: String,
     pub label: String,
+}
+
+/// An account the user can connect on the Addons page (OAuth 2
+/// authorization code flow with PKCE in the system browser). The app keeps
+/// the refresh token in the OS keychain; the addon only gets access tokens
+/// (`host::oauth_token`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct OAuthProvider {
+    /// Unique within the addon; letters, digits and `_`.
+    pub id: String,
+    /// Shown to users, e.g. `Microsoft 365`.
+    pub name: String,
+    /// `https://` authorization endpoint.
+    pub auth_url: String,
+    /// `https://` token endpoint.
+    pub token_url: String,
+    pub client_id: String,
+    /// Only for providers that require one for desktop apps (Google);
+    /// it is not secret in an app that users install.
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    /// Extra query parameters for the authorization URL, e.g.
+    /// `{ access_type = "offline", prompt = "consent" }` for Google.
+    #[serde(default)]
+    pub auth_params: std::collections::BTreeMap<String, String>,
+    /// Host of the loopback redirect, `127.0.0.1` (default) or `localhost`,
+    /// as registered with the provider. The redirect URI is
+    /// `http://<host>:<port>` with a free port.
+    #[serde(default)]
+    pub redirect_host: Option<String>,
 }
 
 /// One field of the addon's settings form. Values reach the addon as
@@ -176,6 +214,9 @@ pub struct AddonManifest {
     /// Settings form, in display order.
     #[serde(default)]
     pub settings: Vec<SettingField>,
+    /// Accounts the user can connect (needs `network`).
+    #[serde(default)]
+    pub oauth: Vec<OAuthProvider>,
 }
 
 fn default_wasm() -> String {
@@ -297,6 +338,46 @@ impl AddonManifest {
             }
             (false, None) => {}
         }
+        let mut provider_ids = std::collections::HashSet::new();
+        for p in &self.oauth {
+            let id_ok = !p.id.is_empty()
+                && p.id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && provider_ids.insert(&p.id);
+            if !id_ok {
+                return Err(Error::validation(
+                    "oauth",
+                    format!("bad or duplicate id '{}'", p.id),
+                ));
+            }
+            if !network {
+                return Err(Error::validation("oauth", "needs the network permission"));
+            }
+            if p.name.trim().is_empty() || p.client_id.trim().is_empty() {
+                return Err(Error::validation(
+                    "oauth",
+                    format!("'{}': name and client_id must not be empty", p.id),
+                ));
+            }
+            for url in [&p.auth_url, &p.token_url] {
+                let host = url
+                    .strip_prefix("https://")
+                    .and_then(|rest| rest.split(['/', '?']).next());
+                if host.is_none_or(|h| h.is_empty() || h.contains('@')) {
+                    return Err(Error::validation(
+                        "oauth",
+                        format!("'{}': '{url}' is not an https:// URL", p.id),
+                    ));
+                }
+            }
+            if let Some(host) = &p.redirect_host {
+                if host != "127.0.0.1" && host != "localhost" {
+                    return Err(Error::validation(
+                        "oauth",
+                        format!("'{}': redirect_host must be 127.0.0.1 or localhost", p.id),
+                    ));
+                }
+            }
+        }
         let mut keys = std::collections::HashSet::new();
         for field in &self.settings {
             let key_ok = !field.key.is_empty()
@@ -359,6 +440,15 @@ label = "Delimiter"
 type = "select"
 default = ";"
 options = [{ value = ";", label = "Semicolon" }, { value = ",", label = "Comma" }]
+
+[[oauth]]
+id = "google"
+name = "Google"
+auth_url = "https://accounts.google.com/o/oauth2/v2/auth"
+token_url = "https://oauth2.googleapis.com/token"
+client_id = "123.apps.googleusercontent.com"
+scopes = ["https://www.googleapis.com/auth/calendar.readonly"]
+auth_params = { access_type = "offline", prompt = "consent" }
 "#;
 
     #[test]
@@ -367,6 +457,7 @@ options = [{ value = ";", label = "Semicolon" }, { value = ",", label = "Comma" 
         assert_eq!(m.wasm, "plugin.wasm");
         assert_eq!(m.hooks[0], Hook::ReportExport);
         assert_eq!(m.settings[0].kind, SettingType::Select);
+        assert_eq!(m.oauth[0].auth_params["access_type"], "offline");
         assert!(m.supports_app("0.1.0"));
         assert!(!m.supports_app("0.0.9"));
     }
@@ -389,6 +480,20 @@ options = [{ value = ";", label = "Semicolon" }, { value = ",", label = "Comma" 
             "id = \"com.example.csv-export\"\nwasm = \"../evil.wasm\"",
         );
         bad("author = \"Example\"", "author = \"Example\"\nunknown = 1");
+        bad(
+            "https://oauth2.googleapis.com/token",
+            "http://oauth2.googleapis.com/token",
+        );
+        bad("id = \"google\"", "id = \"google-cal\"");
+        bad(
+            "client_id = \"123",
+            "redirect_host = \"example.com\"\nclient_id = \"123",
+        );
+        // Accounts are useless without network access.
+        bad(
+            "\"entries:read\", \"network\"]\nallowed_hosts = [\"api.example.com\", \"*.example.org\"]",
+            "\"entries:read\"]",
+        );
     }
 
     #[test]

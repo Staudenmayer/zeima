@@ -22,6 +22,8 @@ pub enum DataKind {
     Work,
     /// Auto-pause items or the morning check-in.
     Away,
+    /// Addon timeline items (e.g. a calendar addon synced).
+    Timeline,
 }
 
 /// Stored data changed; listeners reload what they show.

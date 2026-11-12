@@ -1,0 +1,88 @@
+# Development stack for the server: Postgres, Keycloak with the `zeima`
+# realm, and Mailpit for Keycloak's emails (verification, password reset).
+#
+#   docker compose -f deploy/compose.dev.yml up -d
+#
+# Keycloak admin console: http://localhost:8080/admin (admin / admin)
+# Realm issuer:           http://localhost:8080/realms/zeima
+# Mailpit inbox:          http://localhost:8025
+# API database:           postgres://zeima:zeima@localhost:5432/zeima
+# API (bun run --cwd server dev, or --profile api): http://localhost:3000/docs
+#
+# The realm is imported on the first start only. After changing
+# keycloak/realm-zeima.json, start fresh:  docker compose -f deploy/compose.dev.yml down -v
+#
+# Not for production: Keycloak runs in dev mode (HTTP, no caching
+# cluster). The self-hosted stack is deploy/docker-compose.yml (Phase 5f).
+
+name: zeima-dev
+
+services:
+  postgres:
+    image: docker.io/library/postgres:17
+    environment:
+      POSTGRES_USER: zeima
+      POSTGRES_PASSWORD: zeima
+      POSTGRES_DB: zeima
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./dev/postgres-init.sql:/docker-entrypoint-initdb.d/10-keycloak.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeima -d zeima"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+      KC_HOSTNAME: http://localhost:8080
+      KC_HEALTH_ENABLED: "true"
+      # Placeholders in realm-zeima.json
+      ZEIMA_API_ADMIN_SECRET: dev-admin-secret
+      ZEIMA_API_URL: http://localhost:3000
+      ZEIMA_WEB_URL: http://localhost:5173
+      ZEIMA_SMTP_HOST: mailpit
+      ZEIMA_SMTP_PORT: "1025"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keycloak/realm-zeima.json:/opt/keycloak/data/import/realm-zeima.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # The API as a container (optional; usually `bun run --cwd server dev`):
+  #   docker compose -f deploy/compose.dev.yml --profile api up -d --build
+  api:
+    profiles: ["api"]
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    environment:
+      LOG_LEVEL: debug
+      PUBLIC_URL: http://localhost:3000
+      KEYCLOAK_URL: http://localhost:8080
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - keycloak
+
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.31.5
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+volumes:
+  postgres:

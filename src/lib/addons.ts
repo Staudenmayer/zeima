@@ -24,4 +24,5 @@ export const HOOK_KEYS: Record<Hook, string> = {
   'report.export': 'reportExport',
   'quickswitch.suggest': 'quickswitchSuggest',
   'schedule.tick': 'scheduleTick',
+  'timeline.events': 'timelineEvents',
 }

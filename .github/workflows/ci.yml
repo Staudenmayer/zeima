@@ -23,6 +23,28 @@ jobs:
       - run: bun run test
       - run: bunx vite build
 
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+        working-directory: server
+      # Includes the contract check: packages/api-contract/openapi.json must
+      # match the routes (bun run --cwd server openapi:export).
+      - name: Test
+        run: bun run test
+        working-directory: server
+      - name: Keycloak realm is valid JSON
+        run: python3 -m json.tool deploy/keycloak/realm-zeima.json > /dev/null
+      - name: Docker image builds
+        run: docker build -f server/Dockerfile -t zeima-api:ci .
+
   rust:
     strategy:
       fail-fast: false
@@ -56,6 +78,7 @@ jobs:
         run: |
           bash addons/build.sh csv-export
           bash addons/build.sh recent-notes
+          bash addons/build.sh host-test
       - name: Test
         run: cargo test --workspace --all-features
       # The test suite regenerates src/bindings.ts; it must match the commit.

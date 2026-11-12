@@ -5,7 +5,7 @@
 
 ## Current State
 
-Phases 0–2 are implemented (2026-10-04), Phase 3 on 2026-10-10; Phase 4 is in progress (addon system done, calendar addons next). Notes on where the implementation differs from the original checklist are in *italics*.
+Phases 0–2 are implemented (2026-10-04), Phase 3 on 2026-10-10; Phase 4 is in progress (addon system and the calendar host APIs done 2026-10-13; the calendar addons are postponed to the end). Phase 5 started 2026-10-13: Keycloak realm, dev stack and the API skeleton with authentication. Notes on where the implementation differs from the original checklist are in *italics*.
 
 ---
 
@@ -16,7 +16,7 @@ Goal: the project skeleton every later phase builds on.
 - [x] `git init`, first commit of the current state; add `.editorconfig`, rustfmt and clippy config
 - [x] Rename the product: `productName` (Zeima), `identifier` (`com.zeima.zeima`), window title, `package.json` name, Cargo package (`zeima`)
 - [x] Convert to a **Cargo workspace** (root `Cargo.toml` with members `src-tauri`, `crates/zeima-core`)
-- [ ] **bun workspaces**: *deferred to Phase 5, when `server/` and `packages/*` exist*
+- [x] **bun workspaces**: *done in Phase 5 (2026-10-13): root app, `server`, `packages/*`*
 - [x] `crates/zeima-core`: `sqlx` 0.9 (sqlite, bundled), `uuid` (v7), `chrono` + `chrono-tz`, `thiserror`, `serde`
   - [x] Pure logic free of I/O; `sqlx`/tokio behind the `db` feature (CI checks the crate builds without it)
   - [x] DB bootstrap: `app_data_dir/zeima.db`, WAL mode, `foreign_keys=ON`, `sqlx::migrate!`
@@ -101,7 +101,7 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 - [x] Hooks: `entry.*`, `day.closed`, `report.export`, `quickswitch.suggest`, `schedule.tick`
 - [x] Declarative settings form. *A field list in `addon.toml` (text, number, boolean, select, password) instead of full JSON Schema: ordered, simpler to write, enough for v1.*
 - [x] Page: `addons/` (install from file — `.zip` or `addon.toml` while developing — permissions consent dialog, enable/disable, settings, uninstall); addon formats in the Reports export menu; addon options in the quick switch
-- [ ] Host APIs the calendar addons need: secret store (`keyring`), OAuth 2 PKCE helper with loopback redirect, scheduled sync (`schedule.tick` ✅), addon-owned storage for cached events (KV ✅), and a timeline contribution (events shown in the timesheet day/week view with "track this event")
+- [x] Host APIs the calendar addons need: secret store (`keyring`), OAuth 2 PKCE helper with loopback redirect, scheduled sync (`schedule.tick`), addon-owned storage for cached events (KV), and a timeline contribution (events shown in the timesheet day/week view with "track this event"). *Secrets live in the OS keychain under the addon's id (`addon_secret` holds only the names, migration `0007`). OAuth is a manifest section (`[[oauth]]`): the app signs in, keeps the refresh token and hands out access tokens (`host::oauth_token`), so addons never see refresh tokens. Timeline items come from the `timeline.events` hook and show in the calendar view only, not the table view; all-day items are shown in the day header but not trackable. Tested with the `addons/host-test` fixture; a real Microsoft/Google sign-in is still to be tried with registered client ids.*
 - [ ] **First addons: calendars** (previously planned as a built-in phase). Microsoft 365 / Outlook (Graph, `delta`), Google Calendar (`syncToken`), ICS URL and CalDAV (read-only); incremental sync every 5 min + on focus; mapping rules → entries (opt-in); absence → OOF event (opt-in)
 - [x] First-party example addons: **configurable CSV export format** (`addons/csv-export`, proves `report.export`) and **Recent notes** (`addons/recent-notes`: events, storage, quick switch, notifications). *Both run in the host tests.* GitHub/Jira issue linker still open.
 - [x] `docs/addons.md` developer guide. *Its quick-start addon was built from the guide alone and run through the host.*
@@ -117,30 +117,31 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 > Optional early spike (in parallel with Phase 2–3): steps 5a + 5b only, to validate the desktop OIDC login flow early.
 
 **5a. Keycloak setup**
-- [ ] `deploy/keycloak/realm-time.json`: realm `time`, clients `time-desktop`, `time-api`, `time-api-admin`, `time-swagger` (SPEC §7.2), audience mapper, `orgs` claim mapper, password/MFA/brute-force policy, Organizations feature on
-- [ ] Self-registration + Google/Microsoft social login (cloud)
+- [x] `deploy/keycloak/realm-zeima.json`: realm `zeima`, clients `zeima-desktop`, `zeima-api`, `zeima-api-admin`, `zeima-swagger`, `zeima-web` (SPEC §7.2), audience mapper, password/MFA/brute-force policy, Organizations on, self-registration, de/en. *Org roles come from the built-in group mapper with full paths (`/orgs/<orgId>/roles/<role>`) instead of a custom `orgs` claim mapper, so no Java extension is needed. Environment-specific values (secrets, URLs, SMTP) are `${VAR:default}` placeholders resolved at import. The names were `time-*` before the rename to Zeima.*
+- [x] Development stack `deploy/compose.dev.yml`: Postgres 17 (databases `zeima` and `keycloak`), Keycloak 26.8 with realm import, Mailpit, and the API as an optional profile. *Not yet started here: the realm import, the loopback redirect with any port (`http://127.0.0.1/callback`) and the `${VAR}` placeholders for boolean fields still need a first run.*
+- [ ] Google/Microsoft social login (cloud; needs client ids registered with each provider)
 - [ ] Event-listener extension → HMAC-signed webhook to the API
 - [ ] Login theme (de/en, app branding)
 - [ ] `keycloak-config-cli` step in CI/CD to apply realm changes
 
 **5b. Fastify API skeleton**
-- [ ] `server/` package: Fastify 5, TypeBox type provider, `@fastify/env` config, helmet/cors/rate-limit/under-pressure, Pino, problem+json error handler
-- [ ] `@fastify/swagger` + `@fastify/swagger-ui` at `/docs` with the Keycloak OAuth2 security scheme; `bun run openapi:export` writes `packages/api-contract/openapi.json`
-- [ ] Auth plugin: `jose` JWKS verification (`iss`, `aud`, `exp`), `request.user` with `orgs` claim, `X-Org-Id` handling
+- [x] `server/` package: Fastify 5, TypeBox type provider, config, helmet/cors/rate-limit/under-pressure, Pino (authorization header redacted), problem+json error handler. *Config is a TypeBox schema checked by `loadConfig()` (every problem listed at once) instead of `@fastify/env`, so `buildApp(config)` takes a plain object in tests. Node 24 runs the TypeScript directly (type stripping): no build step.*
+- [x] `@fastify/swagger` + `@fastify/swagger-ui` at `/docs` with the Keycloak OAuth2 security scheme (PKCE, client `zeima-swagger`); `bun run --cwd server openapi:export` writes `packages/api-contract/openapi.json`. *A test fails when the committed file differs, and checks that every route has tags, a summary, a 2xx schema, and 401/403 when protected.*
+- [x] Auth plugin: `jose` JWKS verification (`iss`, `aud`, `exp`, `typ: Bearer`, allowed `azp`), `request.user` with org memberships, `X-Org-Id` handling. *A route is protected by declaring `security` in its schema, so docs and enforcement cannot disagree. `KEYCLOAK_INTERNAL_URL` fetches keys from inside Docker while the issuer stays public.*
 - [ ] Authz plugin: `can()` driven by `packages/shared-fixtures/permissions.yaml` + a matrix test
 - [ ] Drizzle schema + migrations mirroring the client schema + `organization`, `device`, `entitlement`, `kc_user`, `kc_group`, `kc_group_member`, `kc_org_member`, `audit_log`; RLS policies
-- [ ] `/healthz`, `/readyz`, `/metrics`; Dockerfile (Node 24 slim, non-root)
-- [ ] CI: lint, typecheck, Vitest, Testcontainers (Postgres + Keycloak), `oasdiff breaking`, route schema lint
+- [x] `/healthz`, `/readyz` (*Keycloak JWKS; the database check comes with Drizzle*), `/metrics`; Dockerfile (Node 24 slim, non-root). *Image built and run here.*
+- [ ] CI: lint, typecheck, Vitest, Testcontainers (Postgres + Keycloak), `oasdiff breaking`, route schema lint. *Done: typecheck, Vitest (incl. contract check and route lint), image build. Open: Testcontainers, `oasdiff` (needs a released contract to compare with), a linter.*
 
 **5c. Shared logic & contracts**
-- [ ] `crates/zeima-core-wasm` (wasm-bindgen, `--target nodejs`) → `@time/core-wasm`: work-time calc, balances, holidays, country profiles
+- [ ] `crates/zeima-core-wasm` (wasm-bindgen, `--target nodejs`) → `@zeima/core-wasm`: work-time calc, balances, holidays, country profiles
 - [ ] `packages/shared-fixtures/sync/*.json` test vectors; Rust and TS merge implementations both pass them
-- [ ] `crates/time-api-client` generated with `progenitor`; Vue types via `openapi-typescript` + `openapi-fetch` (fetch = `@tauri-apps/plugin-http`)
+- [ ] `crates/zeima-api-client` generated with `progenitor`; Vue types via `openapi-typescript` + `openapi-fetch` (fetch = `@tauri-apps/plugin-http`)
 
 **5d. Desktop auth**
 - [ ] OIDC Auth Code + PKCE in the system browser, loopback redirect (deep-link fallback); `offline_access` refresh token stored in the keychain
 - [ ] `auth_login`, `auth_logout`, `auth_access_token` commands; silent refresh; "Signed in as…" in `NavUser.vue`
-- [ ] Server URL setting + `.well-known/time-server` discovery (API URL + issuer) + installer preset
+- [ ] Server URL setting + `.well-known/zeima-server` discovery (API URL + issuer) + installer preset
 
 **5e. Sync**
 - [ ] `/v1/sync/push`, `/v1/sync/pull` (cursor), field-level LWW by HLC, server rule overrides
@@ -220,4 +221,5 @@ Order is by dependency:
 1. Answer the open questions in SPEC §14 (the missing feature bullet).
 2. Manual end-to-end test of Phase 1 on Linux, Windows and macOS (tray behaviour differs per platform).
 3. Review the AT/DE/CH profile values with someone who knows each country's law.
-4. Phase 4: host APIs for the calendar addons (secret store, OAuth helper, timeline contribution), then the calendar addons.
+4. Phase 5: start `deploy/compose.dev.yml` and check the realm (import, desktop loopback redirect), then 5b's database part (Drizzle schema, RLS) and `can()`, then 5d desktop sign-in.
+5. Later: the calendar addons (ICS first: no account needed; then Microsoft 365 and Google).

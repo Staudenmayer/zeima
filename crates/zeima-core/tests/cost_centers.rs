@@ -307,6 +307,23 @@ async fn addon_records_and_storage() {
     core.addon_kv_set("com.example.a", "other", None).await.unwrap();
     assert_eq!(core.addon_kv_get("com.example.a", "other").await.unwrap(), None);
 
+    core.set_addon_secret_name("com.example.a", "secret:token", true)
+        .await
+        .unwrap();
+    core.set_addon_secret_name("com.example.a", "oauth:google", true)
+        .await
+        .unwrap();
+    core.set_addon_secret_name("com.example.a", "oauth:google", true)
+        .await
+        .unwrap();
+    assert_eq!(
+        core.addon_secret_names("com.example.a").await.unwrap(),
+        vec!["oauth:google", "secret:token"]
+    );
+    core.set_addon_secret_name("com.example.a", "secret:token", false)
+        .await
+        .unwrap();
+
     // Uninstalling removes the storage too.
     core.delete_addon("com.example.a").await.unwrap();
     assert!(core.list_addons().await.unwrap().is_empty());
@@ -314,4 +331,5 @@ async fn addon_records_and_storage() {
         core.addon_kv_get("com.example.a", "sync/token").await.unwrap(),
         None
     );
+    assert!(core.addon_secret_names("com.example.a").await.unwrap().is_empty());
 }

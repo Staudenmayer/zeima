@@ -29,3 +29,6 @@ dist-ssr
 # Built addon packages
 addons/dist/
 addons/*/target/
+
+# Server environment
+.env

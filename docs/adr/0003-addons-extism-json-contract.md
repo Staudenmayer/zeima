@@ -29,6 +29,17 @@ the whole machine or all their data.
   the write transaction and they are published after commit.
 - Installed addons, their settings and key-value storage are device-local
   tables, not synced: the modules live on disk on one machine.
+- Secrets go to the OS keychain (`keyring`), never SQLite: each addon gets
+  its own namespace (`addon:<id>:secret:<key>`). The table `addon_secret`
+  records only the entry names, to show connections and to delete the
+  entries on uninstall. Values over Windows' 2,560-byte limit are split
+  over several entries.
+- OAuth sign-in is a host service, not addon code: the manifest declares
+  providers (`[[oauth]]`), the app runs the authorization code flow with
+  PKCE and a loopback redirect (RFC 8252), keeps the refresh token in the
+  keychain and gives the addon only short-lived access tokens. The addon
+  cannot leak a refresh token it never sees, and providers are visible in
+  the install dialog.
 
 ## Consequences
 
@@ -36,5 +47,6 @@ the whole machine or all their data.
   helpers from the SDK.
 - wasmtime adds about 1.5 minutes to a clean build and several MB to the app.
 - Settings and secrets of addons stay on the device; syncing them (and a
-  signed addon registry) are later decisions.
+  signed addon registry) are later decisions. A connected account has to
+  be connected again on each device.
 - Changing a payload incompatibly needs a new major SDK version.

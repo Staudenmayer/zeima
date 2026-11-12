@@ -1,0 +1,224 @@
+{
+  "realm": "zeima",
+  "displayName": "Zeima",
+  "enabled": true,
+  "sslRequired": "${ZEIMA_SSL_REQUIRED:external}",
+
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "verifyEmail": "${ZEIMA_VERIFY_EMAIL:true}",
+  "editUsernameAllowed": false,
+
+  "internationalizationEnabled": true,
+  "supportedLocales": ["de", "en"],
+  "defaultLocale": "en",
+
+  "organizationsEnabled": true,
+
+  "passwordPolicy": "length(10) and maxLength(128) and notUsername and notEmail and passwordHistory(3)",
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 10,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespanEnabled": false,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+
+  "smtpServer": {
+    "host": "${ZEIMA_SMTP_HOST:localhost}",
+    "port": "${ZEIMA_SMTP_PORT:1025}",
+    "from": "${ZEIMA_SMTP_FROM:no-reply@zeima.local}",
+    "fromDisplayName": "Zeima",
+    "ssl": "${ZEIMA_SMTP_SSL:false}",
+    "starttls": "${ZEIMA_SMTP_STARTTLS:false}",
+    "auth": "${ZEIMA_SMTP_AUTH:false}",
+    "user": "${ZEIMA_SMTP_USER:}",
+    "password": "${ZEIMA_SMTP_PASSWORD:}"
+  },
+
+  "roles": {
+    "realm": [
+      { "name": "user", "description": "Every signed-up user." },
+      { "name": "platform-admin", "description": "Cloud staff: operates the platform." },
+      { "name": "support", "description": "Cloud staff: read access for support cases." }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-zeima",
+    "composite": true,
+    "composites": { "realm": ["user", "offline_access"] }
+  },
+
+  "groups": [
+    {
+      "name": "orgs",
+      "path": "/orgs",
+      "attributes": {
+        "description": ["One subgroup per organization: /orgs/<orgId>/roles/{owner,admin,manager,member} and /orgs/<orgId>/groups/… (departments). Managed by the API."]
+      }
+    }
+  ],
+
+  "clients": [
+    {
+      "clientId": "zeima-desktop",
+      "name": "Zeima desktop app",
+      "description": "Sign-in from the desktop app in the system browser (RFC 8252 loopback redirect, any port).",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "redirectUris": ["http://127.0.0.1/callback", "zeima://auth/callback"],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1/*##zeima://auth/*",
+        "use.refresh.tokens": "true",
+        "client.offline.session.idle.timeout": "2592000"
+      },
+      "optionalClientScopes": ["offline_access", "organization"],
+      "protocolMappers": [
+        {
+          "name": "audience zeima-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "zeima-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "zeima-api",
+      "name": "Zeima API",
+      "description": "Audience of access tokens for the API. No sign-in of its own.",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "zeima-api-admin",
+      "name": "Zeima API (Keycloak admin)",
+      "description": "Service account the API uses to manage users, groups and organizations.",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${ZEIMA_API_ADMIN_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    },
+    {
+      "clientId": "zeima-swagger",
+      "name": "Zeima API docs",
+      "description": "\"Authorize\" button of the Swagger UI at /docs.",
+      "enabled": "${ZEIMA_SWAGGER_ENABLED:true}",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["${ZEIMA_API_URL:http://localhost:3000}/docs/static/oauth2-redirect.html"],
+      "webOrigins": ["+"],
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "protocolMappers": [
+        {
+          "name": "audience zeima-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.client.audience": "zeima-api", "access.token.claim": "true", "id.token.claim": "false" }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": { "claim.name": "groups", "full.path": "true", "access.token.claim": "true", "id.token.claim": "false", "userinfo.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "clientId": "zeima-web",
+      "name": "Zeima web",
+      "description": "Future web app and admin console.",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["${ZEIMA_WEB_URL:http://localhost:5173}/*"],
+      "webOrigins": ["+"],
+      "attributes": { "pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "+" },
+      "protocolMappers": [
+        {
+          "name": "audience zeima-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.client.audience": "zeima-api", "access.token.claim": "true", "id.token.claim": "false" }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": { "claim.name": "groups", "full.path": "true", "access.token.claim": "true", "id.token.claim": "false", "userinfo.token.claim": "true" }
+        }
+      ]
+    }
+  ],
+
+  "users": [
+    {
+      "username": "service-account-zeima-api-admin",
+      "enabled": true,
+      "serviceAccountClientId": "zeima-api-admin",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "query-users", "query-groups"]
+      }
+    }
+  ]
+}

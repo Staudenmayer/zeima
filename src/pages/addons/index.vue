@@ -2,8 +2,8 @@
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { AlertTriangle, Globe, PackagePlus, Puzzle, Settings2, Trash2 } from '@lucide/vue'
-import { commands, type AddonInfo, type AddonPackage } from '@/bindings'
+import { AlertTriangle, CircleCheck, Globe, KeyRound, Loader2, PackagePlus, Puzzle, Settings2, Trash2 } from '@lucide/vue'
+import { commands, type AddonInfo, type AddonPackage, type OAuthProvider } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -13,7 +13,7 @@ import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import { PERMISSION_KEYS } from '@/lib/addons'
-import { call, errorMessage } from '@/lib/ipc'
+import { AppError, call, errorMessage } from '@/lib/ipc'
 
 definePage({ meta: { titleKey: 'nav.addons' } })
 
@@ -50,7 +50,7 @@ async function installed() {
 async function setEnabled(addon: AddonInfo, enabled: boolean) {
   try {
     const next = await call(commands.addonSetEnabled(addon.record.id, enabled))
-    addons.value = addons.value.map((a) => (a.record.id === next.record.id ? next : a))
+    replace(next)
     if (next.error) toast.error(next.error)
   } catch (err) {
     toast.error(errorMessage(err))
@@ -62,6 +62,44 @@ const settingsOpen = ref(false)
 function openSettings(addon: AddonInfo) {
   settingsFor.value = addon
   settingsOpen.value = true
+}
+
+function replace(next: AddonInfo) {
+  addons.value = addons.value.map((a) => (a.record.id === next.record.id ? next : a))
+}
+
+// Accounts: sign-in runs in the browser; the call resolves when it is done.
+/** `addonId/providerId` of the sign-in in progress. */
+const signingIn = ref<string | null>(null)
+async function connect(addon: AddonInfo, provider: OAuthProvider) {
+  signingIn.value = `${addon.record.id}/${provider.id}`
+  try {
+    replace(await call(commands.addonOauthConnect(addon.record.id, provider.id)))
+    toast.success(t('addons.connectedToast', { name: provider.name }))
+  } catch (err) {
+    if (!(err instanceof AppError && err.code === 'cancelled')) toast.error(errorMessage(err))
+  } finally {
+    signingIn.value = null
+  }
+}
+function cancelSignIn(addon: AddonInfo) {
+  void call(commands.addonOauthCancel(addon.record.id)).catch(() => {})
+}
+
+const disconnecting = ref<{ addon: AddonInfo; provider: OAuthProvider } | null>(null)
+const disconnectOpen = ref(false)
+function askDisconnect(addon: AddonInfo, provider: OAuthProvider) {
+  disconnecting.value = { addon, provider }
+  disconnectOpen.value = true
+}
+async function disconnect() {
+  const d = disconnecting.value
+  if (!d) return
+  try {
+    replace(await call(commands.addonOauthDisconnect(d.addon.record.id, d.provider.id)))
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
 }
 
 const removing = ref<AddonInfo | null>(null)
@@ -130,6 +168,39 @@ async function remove() {
         </template>
       </div>
 
+      <section v-if="(addon.manifest?.oauth ?? []).length" class="grid gap-1.5" :aria-label="$t('addons.accounts')">
+        <div
+          v-for="provider in addon.manifest?.oauth ?? []"
+          :key="provider.id"
+          class="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 px-3 py-2 text-sm"
+        >
+          <KeyRound class="size-4 shrink-0 text-muted-foreground" />
+          <span class="font-medium">{{ provider.name }}</span>
+          <template v-if="signingIn === `${addon.record.id}/${provider.id}`">
+            <span class="flex items-center gap-1.5 text-muted-foreground">
+              <Loader2 class="size-3.5 animate-spin" /> {{ $t('addons.waitingForSignIn') }}
+            </span>
+            <Button size="sm" variant="ghost" class="ml-auto" @click="cancelSignIn(addon)">{{ $t('common.cancel') }}</Button>
+          </template>
+          <template v-else-if="addon.connected.includes(provider.id)">
+            <span class="flex items-center gap-1 text-green-700 dark:text-green-400">
+              <CircleCheck class="size-3.5" /> {{ $t('addons.connected') }}
+            </span>
+            <Button size="sm" variant="ghost" class="ml-auto" @click="askDisconnect(addon, provider)">{{ $t('addons.disconnect') }}</Button>
+          </template>
+          <template v-else>
+            <span class="text-muted-foreground">{{ $t('addons.notConnected') }}</span>
+            <Button
+              size="sm"
+              variant="outline"
+              class="ml-auto"
+              :disabled="!addon.loaded || signingIn !== null"
+              @click="connect(addon, provider)"
+            >{{ $t('addons.connect') }}</Button>
+          </template>
+        </div>
+      </section>
+
       <p v-if="addon.error" class="flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-sm text-destructive">
         <AlertTriangle class="mt-0.5 size-4 shrink-0" />
         <span class="break-all">{{ addon.error }}</span>
@@ -140,6 +211,12 @@ async function remove() {
 
   <AddonConsentDialog v-model:open="consentOpen" :pkg="pkg" @installed="installed" />
   <AddonSettingsDialog v-model:open="settingsOpen" :addon="settingsFor" @saved="load" />
+  <ConfirmDialog
+    v-model:open="disconnectOpen"
+    :title="$t('addons.disconnectConfirm', { name: disconnecting?.provider.name ?? '' })"
+    :confirm-label="$t('addons.disconnect')"
+    @confirm="disconnect"
+  />
   <ConfirmDialog
     v-model:open="confirmOpen"
     :title="$t('addons.uninstallConfirm', { name: removing?.manifest?.name ?? removing?.record.id ?? '' })"

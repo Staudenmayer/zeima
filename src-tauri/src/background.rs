@@ -6,9 +6,11 @@ use std::time::Duration;
 
 use chrono::{Duration as Days, NaiveDate};
 use tauri::{AppHandle, Manager};
+use tauri_specta::Event;
 use zeima_core::events::DomainEvent;
 use zeima_core::model::TimerState;
 
+use crate::events::{DataChanged, DataKind};
 use crate::state::AppState;
 use crate::{addons, backup, budget, tray};
 
@@ -31,7 +33,9 @@ pub fn spawn(app: AppHandle) {
             }
             let state = app.state::<AppState>();
             close_days(&app).await;
-            app.state::<addons::Addons>().tick(state.core.now_ms()).await;
+            if app.state::<addons::Addons>().tick(state.core.now_ms()).await {
+                timeline_changed(&app);
+            }
             if let Ok(TimerState::Running { .. }) = state.core.timer_state().await {
                 if let Err(err) = state.core.heartbeat().await {
                     eprintln!("heartbeat failed: {err}");
@@ -41,6 +45,14 @@ pub fn spawn(app: AppHandle) {
             }
         }
     });
+}
+
+/// Addon timeline items may have changed; the timesheet reloads them.
+pub fn timeline_changed(app: &AppHandle) {
+    let _ = DataChanged {
+        kinds: vec![DataKind::Timeline],
+    }
+    .emit(app);
 }
 
 /// `local_meta` key: the last date `day.closed` was published for.

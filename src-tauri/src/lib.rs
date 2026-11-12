@@ -8,7 +8,9 @@ mod commands_addons;
 mod commands_report;
 mod commands_work;
 mod events;
+mod oauth;
 mod os;
+mod secrets;
 mod settings;
 mod shortcuts;
 mod state;
@@ -119,6 +121,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands_addons::addon_export_formats,
             commands_addons::report_export_addon,
             commands_addons::addon_suggest,
+            commands_addons::addon_oauth_connect,
+            commands_addons::addon_oauth_cancel,
+            commands_addons::addon_oauth_disconnect,
+            commands_addons::addon_timeline,
         ])
         .events(tauri_specta::collect_events![
             events::TimerChanged,
@@ -172,8 +178,10 @@ pub fn run() {
 
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            let core =
-                tauri::async_runtime::block_on(Core::open(&data_dir.join("zeima.db"), Arc::new(SystemClock)))?;
+            let core = tauri::async_runtime::block_on(Core::open(
+                &data_dir.join("zeima.db"),
+                Arc::new(SystemClock),
+            ))?;
             let settings = tauri::async_runtime::block_on(settings::load(&core));
             // Before anything computes days: zone and week start from the settings.
             tauri::async_runtime::block_on(settings::apply_regional(&core, &settings));

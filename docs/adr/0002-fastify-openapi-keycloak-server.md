@@ -18,6 +18,10 @@ documented APIs.
   owns authentication, org membership, roles and groups. Record-level
   authorization stays in the API (`can()`), not in Keycloak Authorization
   Services.
+- Org roles and departments reach the API as Keycloak group paths in the
+  `groups` claim (`/orgs/<orgId>/roles/<role>`, `/orgs/<orgId>/groups/…`)
+  from the built-in group mapper; the API derives memberships from them. No
+  custom Keycloak extension is needed for tokens. (Amended 2026-10-13.)
 - Domain math is shared by compiling `zeima-core` to WASM.
 - Cloud and self-hosted run the same images; only Postgres and Keycloak are
   required.

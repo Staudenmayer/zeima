@@ -1,4 +1,5 @@
-//! Addon management, addon report exports and quick-switch suggestions.
+//! Addon management, connected accounts, addon report exports, timeline
+//! items and quick-switch suggestions.
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -6,16 +7,19 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 use zeima_addon_sdk as sdk;
 use zeima_core::addon::{AddonManifest, SettingType};
 use zeima_core::report::ReportQuery;
 use zeima_core::AddonRecord;
 
-use crate::addons::{addons_dir, read_manifest, Addons, MANIFEST_FILE};
+use crate::addons::{addons_dir, read_manifest, Addons, HostServices, MANIFEST_FILE};
 use crate::commands::{CmdError, CmdResult};
 use crate::commands_report::{ask_save_path, write_file};
+use crate::oauth;
+use crate::secrets::{entry_name, Keychain, SecretStore};
 use crate::state::AppState;
 
 /// Largest accepted WASM module.
@@ -29,6 +33,8 @@ pub struct AddonInfo {
     pub manifest: Option<AddonManifest>,
     pub loaded: bool,
     pub error: Option<String>,
+    /// `[[oauth]]` providers with a connected account.
+    pub connected: Vec<String>,
 }
 
 /// A package the user picked, before installing.
@@ -59,7 +65,16 @@ async fn info(app: &AppHandle, addons: &Addons, record: AddonRecord) -> AddonInf
     let manifest = addons_dir(app)
         .ok()
         .and_then(|d| read_manifest(&d.join(&record.id)).ok());
+    let core = &app.state::<AppState>().core;
+    let connected = core
+        .addon_secret_names(&record.id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|n| n.strip_prefix("oauth:").map(str::to_string))
+        .collect();
     AddonInfo {
+        connected,
         loaded: addons.is_loaded(&record.id),
         error: addons.error(&record.id),
         manifest,
@@ -268,7 +283,7 @@ pub async fn addon_save_settings(
     Ok(info(&app, &addons, record).await)
 }
 
-/// Removes the addon, its files and its storage.
+/// Removes the addon, its files, its storage and its keychain entries.
 #[tauri::command]
 #[specta::specta]
 pub async fn addon_uninstall(
@@ -278,12 +293,228 @@ pub async fn addon_uninstall(
     id: String,
 ) -> CmdResult<()> {
     addons.unload(&id);
+    addons.cancel_sign_in(&id);
+    addons.tokens.forget(&id, None);
+    let entries: Vec<String> = state
+        .core
+        .addon_secret_names(&id)
+        .await?
+        .iter()
+        .map(|name| entry_name(&id, name))
+        .collect();
+    tauri::async_runtime::spawn_blocking(move || {
+        for entry in entries {
+            if let Err(e) = Keychain.delete(&entry) {
+                eprintln!("{e}");
+            }
+        }
+    })
+    .await
+    .map_err(io_err)?;
     state.core.delete_addon(&id).await?;
     // The id is validated at install, but never let it escape the folder.
     if !id.is_empty() && !id.contains(['/', '\\']) && id != "." && id != ".." {
         let _ = std::fs::remove_dir_all(addons_dir(&app).map_err(io_err)?.join(&id));
     }
     Ok(())
+}
+
+// --------------------------------------------------------------------------
+// Connected accounts (`[[oauth]]`)
+// --------------------------------------------------------------------------
+
+fn find_provider(
+    addons: &Addons,
+    id: &str,
+    provider_id: &str,
+) -> Result<zeima_core::addon::OAuthProvider, CmdError> {
+    addons
+        .manifest(id)
+        .ok_or_else(|| invalid("the addon is not enabled"))?
+        .oauth
+        .into_iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| invalid(format!("unknown account type '{provider_id}'")))
+}
+
+/// What the browser shows after the redirect.
+fn sign_in_pages(language: &str) -> oauth::Pages {
+    let (title, ok, failed) = if language == "de" {
+        (
+            "Zeima",
+            "Angemeldet. Du kannst dieses Fenster schließen.",
+            "Die Anmeldung ist fehlgeschlagen. Du kannst dieses Fenster schließen.",
+        )
+    } else {
+        (
+            "Zeima",
+            "Signed in. You can close this window.",
+            "The sign-in failed. You can close this window.",
+        )
+    };
+    let page = |text: &str| {
+        format!(
+            "<!doctype html><html lang=\"{language}\"><meta charset=\"utf-8\"><title>{title}</title>\
+             <body style=\"font-family:system-ui,sans-serif;display:grid;place-items:center;height:90vh;margin:0\">\
+             <p>{text}</p></body></html>"
+        )
+    };
+    oauth::Pages {
+        success: page(ok),
+        failure: page(failed),
+    }
+}
+
+/// Signs in to an addon's account in the system browser. Resolves when the
+/// sign-in is done, failed, timed out (5 minutes) or was cancelled (error
+/// code `cancelled`).
+#[tauri::command]
+#[specta::specta]
+pub async fn addon_oauth_connect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    addons: State<'_, Addons>,
+    id: String,
+    provider_id: String,
+) -> CmdResult<AddonInfo> {
+    let provider = find_provider(&addons, &id, &provider_id)?;
+    let services = HostServices::for_app(&app);
+    let cancel = addons.begin_sign_in(&id);
+    let pages = sign_in_pages(state.settings().language());
+    let opener = app.clone();
+    let result = oauth::connect(
+        &id,
+        &provider,
+        services.secrets.clone(),
+        services.post_form.clone(),
+        &services.tokens,
+        state.core.now_ms(),
+        move |url| {
+            opener
+                .opener()
+                .open_url(url, None::<&str>)
+                .map_err(|e| format!("could not open the browser: {e}"))
+        },
+        cancel,
+        &pages,
+    )
+    .await;
+    addons.end_sign_in(&id);
+    match result {
+        Ok(()) => {}
+        Err(e) if e == "cancelled" => return Err(CmdError::other("cancelled", e)),
+        Err(e) => return Err(CmdError::other("oauth", format!("{}: {e}", provider.name))),
+    }
+    state
+        .core
+        .set_addon_secret_name(&id, &oauth::secret_name(&provider.id), true)
+        .await?;
+    // Sync right away instead of at the next interval.
+    addons.tick_soon(&id);
+    let record = state.core.get_addon(&id).await?;
+    Ok(info(&app, &addons, record).await)
+}
+
+/// Stops waiting for a sign-in started with `addon_oauth_connect`.
+#[tauri::command]
+#[specta::specta]
+pub async fn addon_oauth_cancel(addons: State<'_, Addons>, id: String) -> CmdResult<()> {
+    addons.cancel_sign_in(&id);
+    Ok(())
+}
+
+/// Forgets a connected account (the provider may still list the app as
+/// authorized until the user removes it there).
+#[tauri::command]
+#[specta::specta]
+pub async fn addon_oauth_disconnect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    addons: State<'_, Addons>,
+    id: String,
+    provider_id: String,
+) -> CmdResult<AddonInfo> {
+    let name = oauth::secret_name(&provider_id);
+    let entry = entry_name(&id, &name);
+    tauri::async_runtime::spawn_blocking(move || Keychain.delete(&entry))
+        .await
+        .map_err(io_err)?
+        .map_err(|e| CmdError::other("keychain", e))?;
+    addons.tokens.forget(&id, Some(&provider_id));
+    state.core.set_addon_secret_name(&id, &name, false).await?;
+    let record = state.core.get_addon(&id).await?;
+    crate::background::timeline_changed(&app);
+    Ok(info(&app, &addons, record).await)
+}
+
+// --------------------------------------------------------------------------
+// Timeline
+// --------------------------------------------------------------------------
+
+/// An addon item in the timesheet calendar (`timeline.events`).
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonTimelineItem {
+    pub addon_id: String,
+    pub id: String,
+    pub title: String,
+    #[specta(type = specta_typescript::Number)]
+    pub start_at: i64,
+    #[specta(type = specta_typescript::Number)]
+    pub end_at: i64,
+    pub all_day: bool,
+    pub detail: Option<String>,
+    pub color: Option<String>,
+    pub activity_id: Option<String>,
+    pub project_id: Option<String>,
+    pub tag_ids: Vec<String>,
+    pub note: String,
+}
+
+/// Items of all addons overlapping `[from, to)` (unix ms; `f64` because
+/// IPC numbers are JS numbers).
+#[tauri::command]
+#[specta::specta]
+pub async fn addon_timeline(
+    state: State<'_, AppState>,
+    addons: State<'_, Addons>,
+    from: f64,
+    to: f64,
+) -> CmdResult<Vec<AddonTimelineItem>> {
+    let request = sdk::TimelineRequest {
+        range: sdk::Range {
+            from: from.round() as i64,
+            to: to.round() as i64,
+        },
+        timezone: state.core.default_tz(),
+    };
+    let mut items: Vec<_> = addons
+        .timeline(&request)
+        .await
+        .into_iter()
+        .map(|(addon_id, e)| AddonTimelineItem {
+            addon_id,
+            note: e.note.unwrap_or_else(|| e.title.clone()),
+            id: e.id,
+            title: e.title,
+            start_at: e.start_at,
+            end_at: e.end_at,
+            all_day: e.all_day,
+            detail: e.detail,
+            color: e.color.filter(|c| is_hex_color(c)),
+            activity_id: e.activity_id,
+            project_id: e.project_id,
+            tag_ids: e.tag_ids,
+        })
+        .collect();
+    items.sort_by_key(|i| (i.start_at, i.end_at));
+    Ok(items)
+}
+
+/// `#rgb` or `#rrggbb`; anything else could inject CSS.
+fn is_hex_color(c: &str) -> bool {
+    c.strip_prefix('#')
+        .is_some_and(|h| matches!(h.len(), 3 | 6) && h.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 // --------------------------------------------------------------------------

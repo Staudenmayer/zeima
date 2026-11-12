@@ -1,0 +1,11 @@
+# Only what server/Dockerfile copies is needed; keep the context small.
+**/node_modules
+target
+src-tauri
+crates
+addons
+dist
+src
+docs
+.git
+**/.env

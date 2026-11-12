@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { useStorage } from '@vueuse/core'
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, List, Pencil, Play, Plus, Scissors, Trash2, X } from '@lucide/vue'
-import { commands, type EntryPatch, type TimeEntry } from '@/bindings'
+import { commands, type AddonTimelineItem, type EntryPatch, type TimeEntry } from '@/bindings'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -31,6 +31,8 @@ import PageHeader from '@/components/time/PageHeader.vue'
 import ProjectDot from '@/components/time/ProjectDot.vue'
 import TagList from '@/components/time/TagList.vue'
 import { useEntries } from '@/composables/useEntries'
+import type { EntryDraft } from '@/composables/useEntryForm'
+import { useTimeline } from '@/composables/useTimeline'
 import { useWorkDays } from '@/composables/useWorkDays'
 import DayStatus from '@/components/time/DayStatus.vue'
 import { useFormat } from '@/composables/useFormat'
@@ -63,6 +65,7 @@ const days = computed(() => (mode.value === 'day' ? [dayRange(anchor.value)] : w
 const range = computed(() => ({ from: days.value[0].from, to: days.value[days.value.length - 1].to }))
 const { entries, summaries } = useEntries(range, days)
 const { byDate, holidayName } = useWorkDays(range)
+const { items: timeline } = useTimeline(range)
 
 const title = computed(() =>
   mode.value === 'day'
@@ -95,10 +98,26 @@ function durationMs(e: TimeEntry) {
 const entryDialogOpen = ref(false)
 const editing = ref<TimeEntry | null>(null)
 const newEntryDay = ref<number>(Date.now())
+const draft = ref<EntryDraft | null>(null)
 
 function openNew(day?: number) {
   editing.value = null
+  draft.value = null
   newEntryDay.value = day ?? (mode.value === 'day' ? anchor.value : Date.now())
+  entryDialogOpen.value = true
+}
+
+/** "Track this event": a new entry with the item's times and values. */
+function track(item: AddonTimelineItem) {
+  editing.value = null
+  draft.value = {
+    startAt: item.startAt,
+    endAt: item.endAt,
+    activityId: item.activityId,
+    projectId: item.projectId,
+    tagIds: item.tagIds,
+    note: item.note,
+  }
   entryDialogOpen.value = true
 }
 
@@ -276,10 +295,12 @@ async function confirmSplit() {
     :entries="entries"
     :totals="days.map((_, i) => summaries[i]?.totalMs ?? 0)"
     :now="timer.now"
+    :events="timeline"
     @edit="openPopover"
     @create="openNew"
     @resize="resizeEntry"
     @preview="dragTimes = $event"
+    @track="track"
   />
 
   <EmptyState v-else-if="groups.every((g) => g.entries.length === 0)" :icon="Clock" :text="$t('timesheet.empty')">
@@ -482,7 +503,7 @@ async function confirmSplit() {
     @delete="askDelete"
     @more="openEdit"
   />
-  <EntryDialog v-model:open="entryDialogOpen" :entry="editing" :day="newEntryDay" />
+  <EntryDialog v-model:open="entryDialogOpen" :entry="editing" :day="newEntryDay" :draft="draft" />
   <ConfirmDialog v-model:open="confirmOpen" :title="$t('timesheet.deleteConfirm')" @confirm="confirmDelete" />
   <ConfirmDialog
     v-model:open="bulkDeleteOpen"
