@@ -14,8 +14,8 @@ import {
   Settings,
   Shapes,
   Tags,
-  Timer,
 } from '@lucide/vue'
+import LogoMark from '@/components/LogoMark.vue'
 import NavMain from '@/components/NavMain.vue'
 import {
   Sidebar,
@@ -67,8 +67,8 @@ const user = computed(() => ({
         <SidebarMenuItem>
           <SidebarMenuButton size="lg" as-child>
             <RouterLink to="/">
-              <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                <Timer class="size-4" />
+              <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-blue-600">
+                <LogoMark on-blue class="size-5" />
               </div>
               <div class="grid flex-1 text-left text-sm leading-tight">
                 <span class="truncate font-semibold">{{ $t('app.name') }}</span>
