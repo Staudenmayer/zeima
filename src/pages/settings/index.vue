@@ -15,11 +15,13 @@ import SettingsNav from '@/components/time/SettingsNav.vue'
 import TimezonePicker from '@/components/time/TimezonePicker.vue'
 import { errorMessage } from '@/lib/ipc'
 import { useSettingsStore } from '@/stores/settings'
+import { useSetupStore } from '@/stores/setup'
 
 definePage({ meta: { titleKey: 'nav.settings' } })
 
 const { t } = useI18n()
 const store = useSettingsStore()
+const setup = useSetupStore()
 
 const form = ref<AppSettings | null>(null)
 watch(
@@ -222,6 +224,18 @@ async function save() {
           <Input :id="s.key" v-model="form[s.key]" class="font-mono" spellcheck="false" />
         </div>
       </CardContent>
+    </Card>
+
+    <Card>
+      <CardHeader>
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <CardTitle>{{ $t('setup.run.title') }}</CardTitle>
+            <CardDescription>{{ $t('setup.run.description') }}</CardDescription>
+          </div>
+          <Button variant="outline" @click="setup.run()">{{ $t('setup.run.button') }}</Button>
+        </div>
+      </CardHeader>
     </Card>
 
     <Card v-if="store.info">

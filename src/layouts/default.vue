@@ -13,7 +13,7 @@
       <main :class="route.meta.fill ? 'flex min-h-0 flex-1 flex-col overflow-y-auto p-6' : 'p-6'">
         <slot />
       </main>
-      <OnboardingDialog />
+      <SetupWizard />
     </SidebarInset>
   </SidebarProvider>
 </template>
@@ -21,7 +21,7 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import AppSidebar from '@/components/AppSidebar.vue'
-import OnboardingDialog from '@/components/time/OnboardingDialog.vue'
+import SetupWizard from '@/components/time/SetupWizard.vue'
 import TimerPill from '@/components/time/TimerPill.vue'
 import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'

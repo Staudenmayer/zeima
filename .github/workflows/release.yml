@@ -85,6 +85,23 @@ jobs:
           prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
           args: ${{ matrix.args }}
 
+      # Flatpak bundle from the .deb the Linux build just produced.
+      - name: Build Flatpak
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          deb=$(find target/release/bundle/deb -name '*.deb' | head -n 1)
+          cp "$deb" packaging/flatpak/zeima.deb
+          flatpak-builder --user --force-clean --install-deps-from=flathub \
+            --repo=flatpak-repo flatpak-build packaging/flatpak/com.zeima.zeima.yml
+          flatpak build-bundle flatpak-repo "Zeima_${GITHUB_REF_NAME#v}_x86_64.flatpak" com.zeima.zeima
+      - name: Attach Flatpak to the release
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" Zeima_*.flatpak --clobber
+
   addons:
     # Runs after the app builds: they create the release, which the addon
     # zips are attached to. Waiting inside this job timed out, because the
