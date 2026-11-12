@@ -1,0 +1,113 @@
+name: Release
+
+# Push a semver tag (v1.2.3, v1.2.3-rc.1) to build installers for every
+# platform and attach them to a GitHub release. Bump the version first:
+#   node scripts/version.mjs set 1.2.3 && git commit -am "chore: release 1.2.3"
+#   git tag v1.2.3 && git push --follow-tags
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: v
+        name: Tag is semver and matches the app version
+        run: |
+          node scripts/version.mjs check "$GITHUB_REF_NAME"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            args: ''
+          - os: windows-latest
+            # WiX (msi) rejects non-numeric prerelease tags such as -rc.1.
+            args: '--bundles nsis'
+          - os: macos-latest # Apple silicon
+            args: '--target aarch64-apple-darwin'
+            target: aarch64-apple-darwin
+          - os: macos-13 # Intel
+            args: '--target x86_64-apple-darwin'
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: bun install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: bunx tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: Zeima ${{ github.ref_name }}
+          releaseBody: See the assets below to download and install.
+          releaseDraft: false
+          prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
+          args: ${{ matrix.args }}
+
+  addons:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            addons/csv-export
+            addons/recent-notes
+      - name: Build example addons
+        run: |
+          bash addons/build.sh csv-export
+          bash addons/build.sh recent-notes
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The app builds create the release; wait for it, then upload.
+          for i in $(seq 1 30); do
+            gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 && break
+            sleep 20
+          done
+          gh release upload "$GITHUB_REF_NAME" addons/dist/*.zip --clobber

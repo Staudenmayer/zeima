@@ -18,6 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Cargo.toml and the package.json files must carry the same version.
+      - run: node scripts/version.mjs check
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test
@@ -79,8 +84,15 @@ jobs:
           bash addons/build.sh csv-export
           bash addons/build.sh recent-notes
           bash addons/build.sh host-test
+      # The zeima (src-tauri) lib test exe has no application manifest on
+      # Windows and dies with STATUS_ENTRYPOINT_NOT_FOUND (Common Controls v6
+      # via rfd), so it is tested on Linux and macOS only.
       - name: Test
+        if: runner.os != 'Windows'
         run: cargo test --workspace --all-features
+      - name: Test (Windows, without the Tauri crate)
+        if: runner.os == 'Windows'
+        run: cargo test --workspace --exclude zeima --all-features
       # The test suite regenerates src/bindings.ts; it must match the commit.
       - name: Generated files are up to date
         if: runner.os == 'Linux'

@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Zeima",
-  "version": "0.1.0",
   "identifier": "com.zeima.zeima",
   "build": {
     "beforeDevCommand": "bun run dev",
