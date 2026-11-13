@@ -226,6 +226,11 @@ async fn pull_all(app: &AppHandle, api: &str, token: &str, workspace_id: &str) -
 
 /// Rows changed under the windows: have them reload.
 async fn reload_windows(app: &AppHandle) {
+    // The auto-pause rules are read from this copy of the work settings.
+    let state = app.state::<AppState>();
+    if let Ok(settings) = state.core.work_settings().await {
+        state.set_work_settings(settings);
+    }
     let _ = DataChanged {
         kinds: vec![
             DataKind::Activity,
@@ -233,6 +238,8 @@ async fn reload_windows(app: &AppHandle) {
             DataKind::Tag,
             DataKind::Entry,
             DataKind::CostCenter,
+            // Schedules, absences and their types, holidays, corrections, work settings.
+            DataKind::Work,
         ],
     }
     .emit(app);

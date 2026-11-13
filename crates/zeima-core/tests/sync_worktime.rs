@@ -321,3 +321,140 @@ async fn a_device_that_takes_the_accounts_data_gets_the_same_set() {
     assert_eq!(b.list_absence_types().await.unwrap().len(), 5);
     assert_eq!(b.list_schedules().await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn an_absence_from_the_other_device_changes_the_days_already_computed() {
+    let (a, _) = device(T0).await;
+    let (b, _) = device(T0).await;
+    a.set_jurisdiction("AT", Some("AT-9")).await.unwrap();
+    b.set_jurisdiction("AT", Some("AT-9")).await.unwrap();
+    // A schedule that covers the day, with the same start date on both devices.
+    for core in [&a, &b] {
+        let schedule = core.list_schedules().await.unwrap().remove(0);
+        core.save_schedule(
+            Some(&schedule.id),
+            WorkScheduleInput {
+                valid_from: date("2026-10-01"),
+                model: schedule.model,
+                days: schedule.days,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    let mut server = Server::default();
+    server.sync(&a, &b).await;
+
+    // b computes a past day, which caches the result (today is the 26th).
+    let day = date("2026-10-14"); // a Wednesday
+    let before = b.work_days(day, day).await.unwrap();
+    assert!(before[0].target_ms > 0 && before[0].absence_type_ids.is_empty());
+
+    a.save_absence(
+        None,
+        AbsenceInput {
+            type_id: type_id(&a, "vacation").await,
+            start_date: day,
+            end_date: day,
+            half_day: None,
+            note: String::new(),
+        },
+    )
+    .await
+    .unwrap();
+    server.sync(&a, &b).await;
+
+    // The cached result must not survive the new absence.
+    let after = b.work_days(day, day).await.unwrap();
+    assert_eq!(after[0].absence_type_ids, vec![type_id(&b, "vacation").await]);
+    assert_eq!(after[0].target_ms, 0, "a vacation day has no target");
+}
+
+#[tokio::test]
+async fn absence_types_sync_when_added_edited_and_removed() {
+    use zeima_core::model::AbsenceTypeInput;
+    let (a, clock_a) = device(T0).await;
+    let (b, clock_b) = device(T0).await;
+    let mut server = Server::default();
+    server.sync(&a, &b).await;
+
+    // A custom type made on a reaches b, with the same id.
+    let conference = a
+        .save_absence_type(
+            None,
+            AbsenceTypeInput {
+                name: "Conference".into(),
+                color: "#112233".into(),
+                reduces_target: true,
+                affects_vacation: false,
+            },
+        )
+        .await
+        .unwrap();
+    server.sync(&a, &b).await;
+    let on_b = b.list_absence_types().await.unwrap();
+    assert_eq!(on_b.len(), 6);
+    let seen = on_b.iter().find(|t| t.id == conference.id).expect("same id on b");
+    assert_eq!(
+        (seen.name.as_str(), seen.color.as_str(), seen.key.as_deref()),
+        ("Conference", "#112233", None)
+    );
+
+    // Edits travel: a recolors the built-in "sick" type, b renames the custom one.
+    clock_a.advance(10_000);
+    let sick_a = a
+        .list_absence_types()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.key.as_deref() == Some("sick"))
+        .unwrap();
+    a.save_absence_type(
+        Some(&sick_a.id),
+        AbsenceTypeInput {
+            name: sick_a.name.clone(),
+            color: "#ff0000".into(),
+            reduces_target: sick_a.reduces_target,
+            affects_vacation: sick_a.affects_vacation,
+        },
+    )
+    .await
+    .unwrap();
+    clock_b.advance(20_000);
+    b.save_absence_type(
+        Some(&conference.id),
+        AbsenceTypeInput {
+            name: "Training day".into(),
+            color: "#112233".into(),
+            reduces_target: true,
+            affects_vacation: false,
+        },
+    )
+    .await
+    .unwrap();
+    server.sync(&a, &b).await;
+    let sick_b = b
+        .list_absence_types()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.key.as_deref() == Some("sick"))
+        .unwrap();
+    assert_eq!(
+        sick_b.color, "#ff0000",
+        "a built-in type's edit reaches the other device's own row"
+    );
+    let renamed = a
+        .list_absence_types()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.id == conference.id)
+        .unwrap();
+    assert_eq!(renamed.name, "Training day");
+
+    // Removing a custom type removes it everywhere.
+    a.delete_absence_type(&conference.id).await.unwrap();
+    server.sync(&a, &b).await;
+    assert_eq!(b.list_absence_types().await.unwrap().len(), 5);
+}

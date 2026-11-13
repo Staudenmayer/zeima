@@ -433,26 +433,30 @@ impl Core {
         if input.name.trim().is_empty() {
             return Err(Error::validation("name", "must not be empty"));
         }
-        let mut tx = self.begin().await?;
-        let (t, insert) = match id {
-            Some(id) => {
-                let existing = self
-                    .list_absence_types()
+        // Read before the write transaction takes its connection: a pool with
+        // one connection (the in-memory database) would otherwise wait for itself.
+        let existing = match id {
+            Some(id) => Some(
+                self.list_absence_types()
                     .await?
                     .into_iter()
                     .find(|t| t.id == id)
-                    .ok_or_else(|| not_found("absence type", id))?;
-                (
-                    AbsenceType {
-                        name: input.name.trim().into(),
-                        color: input.color,
-                        reduces_target: input.reduces_target,
-                        affects_vacation: input.affects_vacation,
-                        ..existing
-                    },
-                    false,
-                )
-            }
+                    .ok_or_else(|| not_found("absence type", id))?,
+            ),
+            None => None,
+        };
+        let mut tx = self.begin().await?;
+        let (t, insert) = match existing {
+            Some(existing) => (
+                AbsenceType {
+                    name: input.name.trim().into(),
+                    color: input.color,
+                    reduces_target: input.reduces_target,
+                    affects_vacation: input.affects_vacation,
+                    ..existing
+                },
+                false,
+            ),
             None => (
                 AbsenceType {
                     id: crate::ids::new_id(),

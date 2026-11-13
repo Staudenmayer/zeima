@@ -358,7 +358,19 @@ impl Core {
                         .await?;
                     if written.changed {
                         report.applied += 1;
-                        days_changed |= matches!(row.table.as_str(), "time_entry" | "pause");
+                        // Everything a day's work-time result is computed from.
+                        days_changed |= matches!(
+                            row.table.as_str(),
+                            "time_entry"
+                                | "pause"
+                                | "absence"
+                                | "absence_type"
+                                | "work_schedule"
+                                | "work_settings"
+                                | "jurisdiction_selection"
+                                | "custom_holiday"
+                                | "balance_adjustment"
+                        );
                     }
                 }
                 Err(err) => {
