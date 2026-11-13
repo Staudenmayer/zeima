@@ -17,7 +17,7 @@ use crate::{Core, Result};
 
 /// Tables the server accepts (`server/src/modules/sync/routes.ts`). Changes
 /// to other tables stay in the log until the server learns them.
-pub const SYNCED_TABLES: [&str; 14] = [
+pub const SYNCED_TABLES: [&str; 15] = [
     "project",
     "tag",
     "time_entry",
@@ -32,7 +32,18 @@ pub const SYNCED_TABLES: [&str; 14] = [
     "absence",
     "custom_holiday",
     "balance_adjustment",
+    "display_settings",
 ];
+
+/// The synced tables as an SQL list. sqlx wants literal SQL, so the list is a
+/// macro; a test keeps it equal to `SYNCED_TABLES`.
+macro_rules! synced_tables_sql {
+    () => {
+        "'project', 'tag', 'time_entry', 'pause', 'activity', 'cost_center', 'cost_center_assignment', \
+         'jurisdiction_selection', 'work_settings', 'work_schedule', 'absence_type', 'absence', \
+         'custom_holiday', 'balance_adjustment', 'display_settings'"
+    };
+}
 
 /// Fields that name this device's own workspace and user. Every device has
 /// its own ids for them, so they are not synced; pulled rows get the local
@@ -95,15 +106,12 @@ impl Core {
     /// The next batch of unpushed changes, oldest first. Call
     /// [`Core::sync_mark_pushed`] with the server's answers.
     pub async fn sync_outbox(&self, limit: i64) -> Result<Outbox> {
-        // Keep in step with SYNCED_TABLES (sqlx wants a fixed SQL string).
-        let rows = sqlx::query(
+        let rows = sqlx::query(concat!(
             "SELECT seq, table_name, row_id, op, hlc, payload FROM change_log \
-             WHERE pushed_at IS NULL AND table_name IN \
-             ('project', 'tag', 'time_entry', 'pause', 'activity', 'cost_center', 'cost_center_assignment', \
-              'jurisdiction_selection', 'work_settings', 'work_schedule', 'absence_type', 'absence', \
-              'custom_holiday', 'balance_adjustment') \
-             ORDER BY seq LIMIT ?",
-        )
+             WHERE pushed_at IS NULL AND table_name IN (",
+            synced_tables_sql!(),
+            ") ORDER BY seq LIMIT ?"
+        ))
         .bind(limit)
         .fetch_all(self.pool())
         .await?;
@@ -185,6 +193,19 @@ impl Core {
         Ok(outbox)
     }
 
+    /// Changes waiting to be sent. Unlike `pending_changes` this leaves out
+    /// the tables that never sync (the user and workspace records), which
+    /// would otherwise stay in the count forever.
+    pub async fn sync_pending(&self) -> Result<i64> {
+        Ok(sqlx::query_scalar(concat!(
+            "SELECT count(*) FROM change_log WHERE pushed_at IS NULL AND table_name IN (",
+            synced_tables_sql!(),
+            ")"
+        ))
+        .fetch_one(self.pool())
+        .await?)
+    }
+
     /// Records the server's answer: marks the batch pushed and remembers the
     /// new server state of each row. `results` has one entry per change in
     /// the batch; a rejected change is not remembered (the server did not
@@ -223,5 +244,19 @@ impl Core {
         }
         tx.commit().await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_sql_list_matches_the_synced_tables() {
+        let listed: Vec<&str> = synced_tables_sql!()
+            .split(',')
+            .map(|t| t.trim().trim_matches('\''))
+            .collect();
+        assert_eq!(listed, SYNCED_TABLES);
     }
 }

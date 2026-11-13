@@ -41,7 +41,7 @@ pub use repo::{
     WorkScheduleInput,
 };
 #[cfg(feature = "db")]
-pub use repo::{ApplyReport, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
+pub use repo::{ApplyReport, FieldView, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
 
 #[cfg(feature = "db")]
 pub use db::Core;

@@ -359,3 +359,125 @@ async fn an_entrys_start_and_end_stay_a_consistent_pair() {
     // b's was the later edit, so its pair wins as a whole.
     assert_eq!((ea.start_at, ea.end_at), (t0 + 6 * H, Some(t0 + 8 * H)));
 }
+
+#[tokio::test]
+async fn a_conflict_can_be_compared_field_by_field() {
+    let (a, _) = device(1_700_000_000_000).await;
+    let (b, _) = device(1_700_000_000_000).await;
+    let mut server = Server::default();
+    let theirs = a.create_project(input("Theirs", Some("X"))).await.unwrap();
+    server.push(&a).await;
+    b.create_project(input("Mine", Some("X"))).await.unwrap();
+    b.sync_apply(&server.rows()).await.unwrap();
+
+    // The row is not on b (the alias is taken), so there is nothing local to show.
+    let view = b.sync_conflict_compare("project", &theirs.id).await.unwrap();
+    let name = view.iter().find(|f| f.field == "name").unwrap();
+    assert_eq!(name.server, serde_json::json!("Theirs"));
+    assert_eq!(name.local, None);
+    assert!(view
+        .iter()
+        .all(|f| f.field != "workspaceId" && f.field != "updatedAt"));
+
+    // A row that exists on both sides shows both values.
+    let both = a.create_project(input("Shared", None)).await.unwrap();
+    server.push(&a).await;
+    b.sync_apply(&server.rows()).await.unwrap();
+    b.update_project(&both.id, input("Shared, edited here", None))
+        .await
+        .unwrap();
+    let view = b.sync_conflict_compare("project", &both.id).await.unwrap();
+    let name = view.iter().find(|f| f.field == "name").unwrap();
+    assert_eq!(name.server, serde_json::json!("Shared"));
+    assert_eq!(name.local, Some(serde_json::json!("Shared, edited here")));
+    let billable = view.iter().find(|f| f.field == "billableDefault").unwrap();
+    assert_eq!(
+        billable.local,
+        Some(serde_json::json!(0)),
+        "booleans are stored as 0/1"
+    );
+}
+
+fn start(activity: Option<String>, note: &str) -> zeima_core::model::StartTimer {
+    zeima_core::model::StartTimer {
+        activity_id: activity,
+        project_id: None,
+        tag_ids: vec![],
+        note: note.into(),
+        billable: None,
+    }
+}
+
+#[tokio::test]
+async fn a_timer_started_on_one_device_runs_on_the_other_and_stops_there() {
+    use zeima_core::model::TimerState;
+    let t0 = 1_700_000_000_000;
+    let (a, clock_a) = device(t0).await;
+    let (b, clock_b) = device(t0).await;
+    let a = common::with_activity(a).await;
+    let mut server = Server::default();
+    server.push(&a).await;
+    b.sync_apply(&server.rows()).await.unwrap();
+
+    a.start_timer(start(common::activity(), "writing")).await.unwrap();
+    server.push(&a).await;
+    assert_eq!(b.sync_apply(&server.rows()).await.unwrap().conflicts, 0);
+    let TimerState::Running { entry } = b.timer_state().await.unwrap() else {
+        panic!("the timer should be running on b");
+    };
+    assert_eq!(entry.note, "writing");
+
+    // b stops it; a sees it stopped.
+    clock_b.advance(60_000);
+    clock_a.advance(60_000);
+    b.stop_timer().await.unwrap();
+    server.push(&b).await;
+    assert_eq!(a.sync_apply(&server.rows()).await.unwrap().conflicts, 0);
+    assert!(matches!(a.timer_state().await.unwrap(), TimerState::Idle));
+    let stopped = a.get_entry(&entry.id).await.unwrap();
+    assert!(stopped.end_at.is_some());
+}
+
+#[tokio::test]
+async fn two_timers_started_offline_are_a_conflict_with_clear_advice() {
+    use zeima_core::model::TimerState;
+    let t0 = 1_700_000_000_000;
+    let (a, _) = device(t0).await;
+    let (b, clock_b) = device(t0).await;
+    let a = common::with_activity(a).await;
+    let mut server = Server::default();
+    server.push(&a).await;
+    b.sync_apply(&server.rows()).await.unwrap();
+
+    // Both start a timer while offline.
+    let TimerState::Running { entry: on_a } = a.start_timer(start(common::activity(), "on a")).await.unwrap()
+    else {
+        panic!("a's timer should be running");
+    };
+    clock_b.advance(5_000);
+    b.start_timer(start(common::activity(), "on b")).await.unwrap();
+    server.push(&a).await;
+    server.push(&b).await;
+
+    // Each device keeps its own timer and is told about the other.
+    assert_eq!(a.sync_apply(&server.rows()).await.unwrap().conflicts, 1);
+    assert_eq!(b.sync_apply(&server.rows()).await.unwrap().conflicts, 1);
+    assert!(matches!(
+        b.timer_state().await.unwrap(),
+        TimerState::Running { .. }
+    ));
+    let conflicts = b.sync_conflicts().await.unwrap();
+    assert!(
+        conflicts[0].message.contains("timer is already running"),
+        "{}",
+        conflicts[0].message
+    );
+
+    // Following the advice: b stops its timer, then retries; a's timer is then the one running on b.
+    b.stop_timer().await.unwrap();
+    assert!(b.sync_retry_conflict("time_entry", &on_a.id).await.unwrap());
+    let TimerState::Running { entry } = b.timer_state().await.unwrap() else {
+        panic!("a's timer should run on b after the retry");
+    };
+    assert_eq!(entry.note, "on a");
+}

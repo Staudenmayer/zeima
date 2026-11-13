@@ -37,7 +37,7 @@ pub enum Rule {
 
 pub fn rule(table: &str) -> Rule {
     match table {
-        "work_settings" | "jurisdiction_selection" => Rule::Singleton,
+        "work_settings" | "jurisdiction_selection" | "display_settings" => Rule::Singleton,
         "work_schedule" => Rule::ByField("validFrom"),
         "absence_type" => Rule::ByField("key"),
         _ => Rule::Plain,

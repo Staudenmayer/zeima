@@ -42,6 +42,16 @@ pub struct RemoteRow {
     pub deleted: Option<String>,
 }
 
+/// One field of a conflicting row, as the account has it and as this device has it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldView {
+    pub field: String,
+    /// The account's value.
+    pub server: Value,
+    /// This device's value; `None` when the row does not exist here.
+    pub local: Option<Value>,
+}
+
 /// A server change that could not be written locally.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncConflict {
@@ -119,6 +129,104 @@ async fn columns(conn: &mut SqliteConnection, table: &str) -> std::result::Resul
             .map(|r| (r.get::<String, _>("name"), r.get::<i64, _>("notnull") != 0))
             .collect(),
     ))
+}
+
+/// A database error from applying a change, in words the user can act on.
+/// Anything not recognized is shown as it is.
+fn friendly_conflict(message: &str) -> String {
+    // SQLite names a partial unique index by its columns, and an expression
+    // index by its name, so each case lists what it may call itself.
+    let known: &[(&[&str], &str)] = &[
+        (
+            &["time_entry_one_running", "time_entry.user_id"],
+            "A timer is already running on this device. Stop it, then try again.",
+        ),
+        (
+            &["pause_one_open", "pause.user_id"],
+            "A pause is already open on this device. End it, then try again.",
+        ),
+        (
+            &["project_alias_unique", "project.workspace_id"],
+            "Another project on this device already uses this alias. Change one of them, then try again.",
+        ),
+        (
+            &["tag_name_unique", "tag.workspace_id"],
+            "A tag with this name already exists on this device. Rename one of them, then try again.",
+        ),
+        (
+            &["work_schedule_valid_from", "work_schedule.user_id"],
+            "This device already has a schedule starting on that day.",
+        ),
+        (
+            &["CHECK constraint failed"],
+            "The change does not fit this device's data (for example an end before the start).",
+        ),
+    ];
+    known
+        .iter()
+        .find(|(needles, _)| needles.iter().any(|n| message.contains(n)))
+        .map_or_else(|| message.to_string(), |(_, text)| (*text).to_string())
+}
+
+/// A typed row as JSON with the sync's field names, or `None` if it is missing.
+async fn local_row_fields(
+    conn: &mut SqliteConnection,
+    table: &str,
+    id: &str,
+) -> Result<Option<BTreeMap<String, Value>>> {
+    let cols = columns(conn, table).await?;
+    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT * FROM {table} WHERE id = ?")))
+        .bind(id)
+        .fetch_optional(&mut *conn)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let mut out = BTreeMap::new();
+    for name in cols.0.keys() {
+        let value = if let Ok(Some(i)) = row.try_get::<Option<i64>, _>(name.as_str()) {
+            Value::from(i)
+        } else if let Ok(Some(f)) = row.try_get::<Option<f64>, _>(name.as_str()) {
+            Value::from(f)
+        } else if let Ok(Some(t)) = row.try_get::<Option<String>, _>(name.as_str()) {
+            Value::String(t)
+        } else {
+            Value::Null
+        };
+        out.insert(camel(name), value);
+    }
+    // JSON columns hold several fields.
+    for (column, field) in [("daysJson", "days")] {
+        if let Some(Value::String(text)) = out.remove(column) {
+            out.insert(
+                field.to_string(),
+                serde_json::from_str(&text).unwrap_or(Value::String(text)),
+            );
+        }
+    }
+    if let Some(Value::String(text)) = out.remove("settingsJson") {
+        if let Ok(Value::Object(map)) = serde_json::from_str(&text) {
+            out.extend(map);
+        }
+    }
+    Ok(Some(out))
+}
+
+/// `budget_warn_pct` → `budgetWarnPct`.
+fn camel(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut upper = false;
+    for c in name.chars() {
+        if c == '_' {
+            upper = true;
+        } else if upper {
+            out.push(c.to_ascii_uppercase());
+            upper = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 async fn load_state(conn: &mut SqliteConnection, table: &str, row_id: &str) -> Result<RowState> {
@@ -382,7 +490,7 @@ impl Core {
                     )
                     .bind(&row.table)
                     .bind(&row.row_id)
-                    .bind(err.to_string())
+                    .bind(friendly_conflict(&err.to_string()))
                     .bind(self.now_ms())
                     .execute(&mut *tx)
                     .await?;
@@ -521,16 +629,17 @@ impl Core {
         }
 
         let mut values: Vec<(String, Bind)> = Vec::new();
-        if table == "work_settings" {
+        if matches!(table, "work_settings" | "display_settings") {
             // One JSON column holds all the settings. Start from the local
             // ones and lay the incoming fields over them, so a field a local
             // edit protects keeps its value.
             let mut settings: serde_json::Map<String, Value> = if exists {
-                let text: Option<String> =
-                    sqlx::query_scalar("SELECT settings_json FROM work_settings WHERE id = ?")
-                        .bind(&row.row_id)
-                        .fetch_optional(&mut *conn)
-                        .await?;
+                let text: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                    "SELECT settings_json FROM {table} WHERE id = ?"
+                )))
+                .bind(&row.row_id)
+                .fetch_optional(&mut *conn)
+                .await?;
                 text.and_then(|t| serde_json::from_str(&t).ok())
                     .unwrap_or_default()
             } else {
@@ -706,6 +815,38 @@ impl Core {
             .collect()
     }
 
+    /// The account's version of a row next to this device's, for the conflict
+    /// list. Fields that only identify the row on one device are left out.
+    pub async fn sync_conflict_compare(&self, table: &str, row_id: &str) -> Result<Vec<FieldView>> {
+        if !SYNCED_TABLES.contains(&table) {
+            return Ok(Vec::new());
+        }
+        let mut conn = self.pool().acquire().await?;
+        let state = load_state(&mut conn, table, row_id).await?;
+        let local_id = self.resolve_local(&mut conn, table, row_id, &state).await?;
+        let local = local_row_fields(&mut conn, table, &local_id).await?;
+
+        let mut fields: Vec<(String, Value)> = Vec::new();
+        for (name, versioned) in &state.fields {
+            if LOCAL_FIELDS.contains(&name.as_str()) || matches!(name.as_str(), "createdAt" | "updatedAt") {
+                continue;
+            }
+            match expand(table, name, &versioned.v) {
+                Some(parts) => fields.extend(parts),
+                None => fields.push((name.clone(), versioned.v.clone())),
+            }
+        }
+        Ok(fields
+            .into_iter()
+            .map(|(field, server)| {
+                let local = local
+                    .as_ref()
+                    .map(|row| row.get(&field).cloned().unwrap_or(Value::Null));
+                FieldView { field, server, local }
+            })
+            .collect())
+    }
+
     /// Tries to write the server's version of a conflicting row again, for
     /// example after the user changed the local row that was in the way.
     /// Returns whether it was written.
@@ -799,5 +940,21 @@ impl Core {
 
     pub async fn set_sync_cursor(&self, cursor: i64) -> Result<()> {
         self.set_meta("sync_cursor", &cursor.to_string()).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_database_errors_become_advice() {
+        let raw = "error returned from database: (code: 1) no such column: nothing";
+        // The index name is what SQLite reports for partial unique indexes.
+        assert!(
+            friendly_conflict("UNIQUE constraint failed: index 'time_entry_one_running'")
+                .contains("timer is already running")
+        );
+        assert_eq!(friendly_conflict(raw), raw, "unknown errors stay as they are");
     }
 }

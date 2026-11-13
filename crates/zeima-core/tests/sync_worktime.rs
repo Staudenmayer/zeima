@@ -458,3 +458,45 @@ async fn absence_types_sync_when_added_edited_and_removed() {
     server.sync(&a, &b).await;
     assert_eq!(b.list_absence_types().await.unwrap().len(), 5);
 }
+
+#[tokio::test]
+async fn display_settings_follow_the_user_and_merge_field_by_field() {
+    use serde_json::json;
+    let (a, clock_a) = device(T0).await;
+    let (b, clock_b) = device(T0).await;
+    let mut server = Server::default();
+
+    a.set_display_settings(&json!({"locale": "de", "timeFormat": "h24", "weekStart": "monday"}))
+        .await
+        .unwrap();
+    server.sync(&a, &b).await;
+    assert_eq!(
+        b.display_settings().await.unwrap().unwrap(),
+        json!({"locale": "de", "timeFormat": "h24", "weekStart": "monday"})
+    );
+
+    // Edits to different settings while offline both survive.
+    clock_a.advance(10_000);
+    a.set_display_settings(&json!({"locale": "en", "timeFormat": "h24", "weekStart": "monday"}))
+        .await
+        .unwrap();
+    clock_b.advance(20_000);
+    b.set_display_settings(&json!({"locale": "de", "timeFormat": "h12", "weekStart": "monday"}))
+        .await
+        .unwrap();
+    server.sync(&a, &b).await;
+    for device in [&a, &b] {
+        assert_eq!(
+            device.display_settings().await.unwrap().unwrap(),
+            json!({"locale": "en", "timeFormat": "h12", "weekStart": "monday"})
+        );
+    }
+
+    // What sync delivered is not sent back: saving the same values changes nothing.
+    let pending = b.sync_pending().await.unwrap();
+    b.set_display_settings(&b.display_settings().await.unwrap().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(b.sync_pending().await.unwrap(), pending);
+    assert!(b.set_display_settings(&json!("nope")).await.is_err());
+}
