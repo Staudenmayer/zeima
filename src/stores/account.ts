@@ -1,7 +1,13 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import { commands, type AccountStatus, type ConflictView, type JoinStrategy, type PlanInfo, type PlanOffer, type Subscription, type SyncStatus } from '@/bindings'
+import { computed, ref } from 'vue'
+import { commands, events, type AccountStatus, type ConflictView, type JoinStrategy, type PlanInfo, type PlanOffer, type Subscription, type SyncStatus } from '@/bindings'
 import { call } from '@/lib/ipc'
+
+interface SyncSummary {
+  key: string
+  params?: Record<string, string | number>
+  problem: boolean
+}
 
 const SIGNED_OUT: AccountStatus = { serverUrl: null, signedIn: false, user: null }
 
@@ -93,5 +99,25 @@ export const useAccountStore = defineStore('account', () => {
     status.value = await call(commands.accountSignOut())
   }
 
-  return { status, busy, sync, conflicts, plan, offers, subscription, join, retryConflict, dismissConflict, loadSync, syncNow, load, setServer, signIn, cancel, signOut }
+  /** One line for the sidebar: what the sync is doing or what needs attention. */
+  const syncSummary = computed<SyncSummary | null>(() => {
+    const st = sync.value
+    if (!status.value.signedIn || !st) return null
+    const line = (key: string, problem: boolean, params?: Record<string, string | number>): SyncSummary => ({ key, problem, params })
+    if (st.joinChoice) return line('sync.chooseJoin', true)
+    if (st.syncing) return line('sync.syncing', false)
+    if (st.lastErrorKind) return line(`sync.error.${st.lastErrorKind}`, true)
+    if (st.conflicts > 0) return line('sync.conflicts', true, { n: st.conflicts })
+    if (st.pending > 0) return line('sync.pending', false, { n: st.pending })
+    if (st.lastSyncedAt) {
+      const at = new Date(st.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      return line('sync.synced', false, { at })
+    }
+    return line('sync.waiting', false)
+  })
+
+  // The backend says when a sync starts or ends; keep the status current.
+  void events.syncChanged.listen(() => void loadSync())
+
+  return { status, busy, syncSummary, sync, conflicts, plan, offers, subscription, join, retryConflict, dismissConflict, loadSync, syncNow, load, setServer, signIn, cancel, signOut }
 })

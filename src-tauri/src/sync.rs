@@ -19,7 +19,7 @@ use zeima_core::{RemoteRow, SYNC_BATCH};
 
 use crate::account::{self, discover};
 use crate::commands::{CmdError, CmdResult};
-use crate::events::{DataChanged, DataKind};
+use crate::events::{DataChanged, DataKind, SyncChanged};
 use crate::state::AppState;
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -39,6 +39,40 @@ const MAX_BATCHES: usize = 20;
 struct Last {
     at: Option<i64>,
     error: Option<String>,
+    /// A run is in progress.
+    syncing: bool,
+}
+
+/// What a failed sync means for the user, so the UI can say it in words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncErrorKind {
+    /// The plan does not include syncing.
+    Plan,
+    /// The server could not be reached.
+    Offline,
+    /// The app is too old for this server.
+    UpdateNeeded,
+    /// The server answered with an error.
+    Server,
+}
+
+fn classify(error: &str) -> SyncErrorKind {
+    let e = error.to_lowercase();
+    if e.contains("not part of your plan") {
+        SyncErrorKind::Plan
+    } else if e.contains("newer version") || e.contains("please update") || e.contains("or newer") {
+        SyncErrorKind::UpdateNeeded
+    } else if e.contains("could not reach")
+        || e.contains("connection")
+        || e.contains("timed out")
+        || e.contains("dns")
+        || e.contains("error sending")
+    {
+        SyncErrorKind::Offline
+    } else {
+        SyncErrorKind::Server
+    }
 }
 
 fn last() -> &'static Mutex<Last> {
@@ -224,6 +258,32 @@ async fn pull_all(app: &AppHandle, api: &str, token: &str, workspace_id: &str) -
     Ok(applied)
 }
 
+/// Takes the language, formats and time zone another device saved. Only a
+/// difference is applied, and nothing is sent back (`set_display_settings`
+/// skips equal values). Returns whether the settings changed.
+async fn adopt_synced_settings(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let Ok(Some(synced)) = state.core.display_settings().await else {
+        return false;
+    };
+    let current = state.settings();
+    let merged = crate::settings::with_portable(&current, &synced);
+    if merged == current {
+        return false;
+    }
+    if crate::settings::save(&state.core, &merged).await.is_err() {
+        return false;
+    }
+    *state.settings.write().unwrap_or_else(|e| e.into_inner()) = merged.clone();
+    // A new zone or week start moves day boundaries.
+    crate::settings::apply_regional(&state.core, &merged).await;
+    let _ = DataChanged {
+        kinds: vec![DataKind::Settings, DataKind::Entry, DataKind::Work],
+    }
+    .emit(app);
+    true
+}
+
 /// Rows changed under the windows: have them reload.
 async fn reload_windows(app: &AppHandle) {
     // The auto-pause rules are read from this copy of the work settings.
@@ -270,9 +330,9 @@ async fn refresh_entitlement(app: &AppHandle, api: &str, token: &str) {
 }
 
 /// One sync: push, then pull. Returns the number of changes sent.
-async fn sync_once(app: &AppHandle) -> Result<usize, String> {
+async fn sync_once(app: &AppHandle) -> Result<Option<usize>, String> {
     let Some((server, token)) = account::current_token(app).await? else {
-        return Ok(0);
+        return Ok(None);
     };
     let probe = server.clone();
     let (discovery, _) = tauri::async_runtime::spawn_blocking(move || discover(&probe))
@@ -315,25 +375,34 @@ async fn sync_once(app: &AppHandle) -> Result<usize, String> {
     let sent = push_all(app, &api, &token, &workspace_id).await?;
     let pulled = pull_all(app, &api, &token, &workspace_id).await?;
     if pulled > 0 {
+        adopt_synced_settings(app).await;
         reload_windows(app).await;
     }
-    Ok(sent)
+    Ok(Some(sent))
 }
 
 /// Runs a sync if signed in, remembering the outcome for `sync_status`.
 pub async fn run(app: &AppHandle) -> Result<usize, String> {
     let _guard = lock_async().lock().await;
+    last().lock().unwrap_or_else(|e| e.into_inner()).syncing = true;
+    let _ = SyncChanged.emit(app);
     let result = sync_once(app).await;
     let now = app.state::<AppState>().core.now_ms();
-    let mut last = last().lock().unwrap_or_else(|e| e.into_inner());
-    match &result {
-        Ok(_) => {
-            last.at = Some(now);
-            last.error = None;
+    {
+        let mut last = last().lock().unwrap_or_else(|e| e.into_inner());
+        last.syncing = false;
+        match &result {
+            // Not signed in: nothing was synced, and nothing went wrong.
+            Ok(None) => last.error = None,
+            Ok(Some(_)) => {
+                last.at = Some(now);
+                last.error = None;
+            }
+            Err(e) => last.error = Some(e.clone()),
         }
-        Err(e) => last.error = Some(e.clone()),
     }
-    result
+    let _ = SyncChanged.emit(app);
+    result.map(|sent| sent.unwrap_or(0))
 }
 
 #[derive(Debug, Serialize, Type)]
@@ -345,6 +414,10 @@ pub struct SyncStatus {
     #[specta(type = Option<specta_typescript::Number>)]
     pub last_synced_at: Option<i64>,
     pub last_error: Option<String>,
+    /// What the error means, for a message in words.
+    pub last_error_kind: Option<SyncErrorKind>,
+    /// A sync is running right now.
+    pub syncing: bool,
     /// Server changes that could not be applied here.
     #[specta(type = specta_typescript::Number)]
     pub conflicts: i64,
@@ -357,7 +430,7 @@ pub struct SyncStatus {
 #[specta::specta]
 pub async fn sync_status(app: AppHandle) -> CmdResult<SyncStatus> {
     let core = &app.state::<AppState>().core;
-    let pending = core.pending_changes().await?;
+    let pending = core.sync_pending().await?;
     let conflicts = core.sync_conflict_count().await?;
     let join_choice = core.get_meta(JOIN_PENDING_KEY).await?.as_deref() == Some("1");
     let last = last().lock().unwrap_or_else(|e| e.into_inner());
@@ -365,6 +438,12 @@ pub async fn sync_status(app: AppHandle) -> CmdResult<SyncStatus> {
         pending,
         last_synced_at: last.at,
         last_error: if join_choice { None } else { last.error.clone() },
+        last_error_kind: if join_choice {
+            None
+        } else {
+            last.error.as_deref().map(classify)
+        },
+        syncing: last.syncing,
         conflicts,
         join_choice,
     })
@@ -396,6 +475,63 @@ pub async fn sync_conflicts(app: AppHandle) -> CmdResult<Vec<ConflictView>> {
             name: c.name,
             message: c.message,
             at: c.at,
+        })
+        .collect())
+}
+
+/// One field of a conflicting row, ready to show.
+#[derive(Debug, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictField {
+    pub field: String,
+    /// The account's value.
+    pub server: String,
+    /// This device's value; `None` when the row does not exist here.
+    pub local: Option<String>,
+    /// The two differ (or there is no local row).
+    pub differs: bool,
+}
+
+/// A value as text: strings plain, empty as a dash, structures as compact JSON.
+fn show(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "—".into(),
+        serde_json::Value::String(s) if s.is_empty() => "—".into(),
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// The account's version of a conflicting row next to this device's.
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_conflict_details(
+    app: AppHandle,
+    table: String,
+    row_id: String,
+) -> CmdResult<Vec<ConflictField>> {
+    let fields = app
+        .state::<AppState>()
+        .core
+        .sync_conflict_compare(&table, &row_id)
+        .await?;
+    Ok(fields
+        .into_iter()
+        .map(|f| {
+            // SQLite keeps booleans as 0/1.
+            let local = f.local.map(|l| match (&f.server, &l) {
+                (serde_json::Value::Bool(_), serde_json::Value::Number(n)) => {
+                    serde_json::Value::Bool(n.as_i64() == Some(1))
+                }
+                _ => l,
+            });
+            let differs = local.as_ref().is_none_or(|l| *l != f.server);
+            ConflictField {
+                field: f.field,
+                server: show(&f.server),
+                local: local.as_ref().map(show),
+                differs,
+            }
         })
         .collect())
 }
@@ -541,9 +677,66 @@ pub fn spawn_listener(app: AppHandle) {
     });
 }
 
+// --------------------------------------------------------------------------
+// Sending soon after a change
+// --------------------------------------------------------------------------
+
+/// How often to look for unsent changes.
+const WATCH_EVERY: Duration = Duration::from_secs(3);
+/// After a failed run, wait this long before trying again from here (the
+/// minute timer in `background.rs` keeps trying anyway).
+const RETRY_AFTER_ERROR: Duration = Duration::from_secs(30);
+
+/// Sends changes a few seconds after they are made instead of at the next
+/// minute tick. It waits until the number of unsent changes has stopped
+/// growing, so a burst of edits goes out as one batch. Does nothing while
+/// signed out.
+pub fn spawn_push_watcher(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut seen: i64 = 0;
+        let mut hold_until = tokio::time::Instant::now();
+        loop {
+            tokio::time::sleep(WATCH_EVERY).await;
+            if tokio::time::Instant::now() < hold_until {
+                continue;
+            }
+            let core = &app.state::<AppState>().core;
+            let pending = core.sync_pending().await.unwrap_or(0);
+            if pending == 0 {
+                seen = 0;
+                continue;
+            }
+            // Wait for a quiet moment: the same count twice in a row.
+            if pending != seen {
+                seen = pending;
+                continue;
+            }
+            seen = 0;
+            if run(&app).await.is_err() {
+                hold_until = tokio::time::Instant::now() + RETRY_AFTER_ERROR;
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_are_sorted_into_what_the_user_can_do_about_them() {
+        assert_eq!(classify("syncing is not part of your plan"), SyncErrorKind::Plan);
+        assert_eq!(
+            classify("could not reach the server: Connection Failed: tcp connect error"),
+            SyncErrorKind::Offline
+        );
+        assert_eq!(classify("io: timed out reading response"), SyncErrorKind::Offline);
+        assert_eq!(
+            classify("this server needs Zeima 1.2.0 or newer; please update the app"),
+            SyncErrorKind::UpdateNeeded
+        );
+        assert_eq!(classify("the server answered 500: oops"), SyncErrorKind::Server);
+    }
 
     #[test]
     fn the_channel_url_follows_the_api_scheme() {

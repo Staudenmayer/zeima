@@ -200,6 +200,8 @@ export const commands = {
 	/**  Settles the choice and syncs. */
 	syncJoin: (strategy: JoinStrategy) => typedError<SyncStatus, CmdError>(__TAURI_INVOKE("sync_join", { strategy })),
 	syncConflicts: () => typedError<ConflictView[], CmdError>(__TAURI_INVOKE("sync_conflicts")),
+	/**  The account's version of a conflicting row next to this device's. */
+	syncConflictDetails: (table: string, rowId: string) => typedError<ConflictField[], CmdError>(__TAURI_INVOKE("sync_conflict_details", { table, rowId })),
 	/**  Tries the server's version again; true if it was written. */
 	syncRetryConflict: (table: string, rowId: string) => typedError<boolean, CmdError>(__TAURI_INVOKE("sync_retry_conflict", { table, rowId })),
 	/**  Gives up on a conflict; the local row stays as it is. */
@@ -212,6 +214,7 @@ export const events = {
 	navigate: makeEvent<Navigate>("navigate"),
 	promptsChanged: makeEvent<PromptsChanged>("prompts-changed"),
 	quickSwitchOpened: makeEvent<QuickSwitchOpened>("quick-switch-opened"),
+	syncChanged: makeEvent<SyncChanged>("sync-changed"),
 	timerChanged: makeEvent<TimerChanged>("timer-changed"),
 };
 
@@ -525,6 +528,17 @@ export type CmdError = {
 	message: string,
 	/**  Input field a validation error refers to. */
 	field: string | null,
+};
+
+/**  One field of a conflicting row, ready to show. */
+export type ConflictField = {
+	field: string,
+	/**  The account's value. */
+	server: string,
+	/**  This device's value; `None` when the row does not exist here. */
+	local: string | null,
+	/**  The two differ (or there is no local row). */
+	differs: boolean,
 };
 
 /**  A server change that could not be written on this device. */
@@ -1032,11 +1046,29 @@ export type Summary = {
 	entryCount: number,
 };
 
+/**  A sync started or finished; the sync status in the UI refreshes. */
+export type SyncChanged = null;
+
+/**  What a failed sync means for the user, so the UI can say it in words. */
+export type SyncErrorKind = 
+/**  The plan does not include syncing. */
+"plan" | 
+/**  The server could not be reached. */
+"offline" | 
+/**  The app is too old for this server. */
+"update_needed" | 
+/**  The server answered with an error. */
+"server";
+
 export type SyncStatus = {
 	/**  Changes not yet sent. */
 	pending: number,
 	lastSyncedAt: number | null,
 	lastError: string | null,
+	/**  What the error means, for a message in words. */
+	lastErrorKind: SyncErrorKind | null,
+	/**  A sync is running right now. */
+	syncing: boolean,
 	/**  Server changes that could not be applied here. */
 	conflicts: number,
 	/**

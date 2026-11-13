@@ -484,6 +484,11 @@ pub async fn settings_set(
     }
 
     settings::save(&state.core, &settings).await?;
+    // The settings that follow the user to other devices.
+    state
+        .core
+        .set_display_settings(&settings::portable(&settings))
+        .await?;
     *state.settings.write().unwrap_or_else(|e| e.into_inner()) = settings.clone();
     // A new zone moves day boundaries: every view reloads its data.
     if settings::apply_regional(&state.core, &settings).await {

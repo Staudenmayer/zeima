@@ -148,6 +148,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             sync::sync_now,
             sync::sync_join,
             sync::sync_conflicts,
+            sync::sync_conflict_details,
             sync::sync_retry_conflict,
             sync::sync_dismiss_conflict,
         ])
@@ -157,6 +158,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             events::QuickSwitchOpened,
             events::Navigate,
             events::PromptsChanged,
+            events::SyncChanged,
         ])
 }
 
@@ -240,6 +242,7 @@ pub fn run() {
             }
             background::spawn(app.handle().clone());
             sync::spawn_listener(app.handle().clone());
+            sync::spawn_push_watcher(app.handle().clone());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { activity::on_startup(&handle).await });
             let handle = app.handle().clone();

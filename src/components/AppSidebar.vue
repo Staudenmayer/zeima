@@ -36,7 +36,10 @@ const props = withDefaults(defineProps<SidebarProps>(), {
 
 const { t } = useI18n()
 const account = useAccountStore()
-onMounted(() => account.load())
+onMounted(async () => {
+  await account.load()
+  await account.loadSync()
+})
 
 const tracking = computed(() => [
   { title: t('nav.dashboard'), url: '/', icon: LayoutDashboard },
@@ -88,9 +91,19 @@ const user = computed(() => ({
     <SidebarFooter>
       <!--<NavUser :user="user"></NavUser>-->
       <NavMain :items="system" />
-      <p class="truncate px-2 pb-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-        {{ account.status.signedIn ? $t('account.signedInAs', { name: account.status.user?.email ?? account.status.user?.name ?? '' }) : $t('app.local') }}
-      </p>
+      <div class="px-2 pb-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+        <p class="truncate">
+          {{ account.status.signedIn ? $t('account.signedInAs', { name: account.status.user?.email ?? account.status.user?.name ?? '' }) : $t('app.local') }}
+        </p>
+        <RouterLink
+          v-if="account.syncSummary"
+          to="/settings"
+          class="block truncate hover:underline"
+          :class="account.syncSummary.problem ? 'text-amber-600 dark:text-amber-400' : ''"
+        >
+          {{ $t(account.syncSummary.key, account.syncSummary.params ?? {}) }}
+        </RouterLink>
+      </div>
     </SidebarFooter>
     <SidebarRail />
   </Sidebar>

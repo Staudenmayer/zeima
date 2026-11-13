@@ -136,6 +136,46 @@ pub async fn apply_regional(core: &Core, settings: &AppSettings) -> bool {
 }
 
 /// Falls back to defaults if nothing (or something unreadable) is stored.
+/// The settings that follow the user between devices (stored and synced as
+/// `display_settings`). Shortcuts and autostart belong to one machine.
+pub const PORTABLE: &[&str] = &[
+    "locale",
+    "durationFormat",
+    "timezone",
+    "daylightSaving",
+    "dateFormat",
+    "timeFormat",
+    "numberFormat",
+    "weekStart",
+];
+
+/// The portable part of `settings` as a JSON object.
+pub fn portable(settings: &AppSettings) -> serde_json::Value {
+    let all = serde_json::to_value(settings).unwrap_or_default();
+    let mut part = serde_json::Map::new();
+    for key in PORTABLE {
+        if let Some(value) = all.get(*key) {
+            part.insert((*key).to_string(), value.clone());
+        }
+    }
+    serde_json::Value::Object(part)
+}
+
+/// `settings` with the portable fields replaced by those in `synced`.
+/// Unknown or invalid values are ignored, so a newer app's setting cannot
+/// break an older one.
+pub fn with_portable(settings: &AppSettings, synced: &serde_json::Value) -> AppSettings {
+    let mut all = serde_json::to_value(settings).unwrap_or_default();
+    if let (Some(target), Some(source)) = (all.as_object_mut(), synced.as_object()) {
+        for key in PORTABLE {
+            if let Some(value) = source.get(*key) {
+                target.insert((*key).to_string(), value.clone());
+            }
+        }
+    }
+    serde_json::from_value(all).unwrap_or_else(|_| settings.clone())
+}
+
 pub async fn load(core: &Core) -> AppSettings {
     match core.get_meta(KEY).await {
         Ok(Some(json)) => serde_json::from_str(&json).unwrap_or_default(),
@@ -145,4 +185,47 @@ pub async fn load(core: &Core) -> AppSettings {
 
 pub async fn save(core: &Core, settings: &AppSettings) -> zeima_core::Result<()> {
     core.set_meta(KEY, &serde_json::to_string(settings)?).await
+}
+
+#[cfg(test)]
+mod portable_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_portable_settings_travel() {
+        let settings = AppSettings {
+            locale: Some("de".into()),
+            autostart: true,
+            shortcut_toggle_window: "Alt+Z".into(),
+            ..AppSettings::default()
+        };
+        let part = portable(&settings);
+        assert_eq!(part["locale"], "de");
+        assert!(part.get("autostart").is_none());
+        assert!(part.get("shortcutToggleWindow").is_none());
+    }
+
+    #[test]
+    fn synced_values_replace_the_portable_ones_and_leave_the_rest() {
+        let mine = AppSettings {
+            locale: Some("en".into()),
+            autostart: true,
+            shortcut_quick_switch: "Alt+Q".into(),
+            ..AppSettings::default()
+        };
+        let theirs = serde_json::json!({"locale": "de", "weekStart": "sunday", "autostart": false});
+        let merged = with_portable(&mine, &theirs);
+        assert_eq!(merged.locale.as_deref(), Some("de"));
+        assert!(merged.autostart, "per-machine settings are not touched");
+        assert_eq!(merged.shortcut_quick_switch, "Alt+Q");
+        // Nothing to change: the same settings come back.
+        assert_eq!(with_portable(&mine, &portable(&mine)), mine);
+    }
+
+    #[test]
+    fn invalid_synced_values_are_ignored() {
+        let mine = AppSettings::default();
+        let bad = serde_json::json!({"weekStart": "someday", "dateFormat": 42});
+        assert_eq!(with_portable(&mine, &bad), mine);
+    }
 }

@@ -35,6 +35,7 @@ export const SYNCED_TABLES = [
   'absence',
   'custom_holiday',
   'balance_adjustment',
+  'display_settings',
 ] as const
 
 const Uuid = Type.String({ format: 'uuid' })

@@ -7,8 +7,7 @@ import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import type { ConflictView } from '@/bindings'
-import { commands } from '@/bindings'
+import { commands, type ConflictField, type ConflictView } from '@/bindings'
 import { AppError, call, errorMessage } from '@/lib/ipc'
 import { useAccountStore } from '@/stores/account'
 
@@ -71,6 +70,24 @@ async function retry(c: ConflictView) {
     toast.error(errorMessage(err))
   }
 }
+/** Conflicts whose field comparison is open, with the fields once loaded. */
+const open = ref(new Map<string, ConflictField[]>())
+const keyOf = (c: ConflictView) => `${c.table}:${c.rowId}`
+async function toggle(c: ConflictView) {
+  const next = new Map(open.value)
+  if (next.has(keyOf(c))) {
+    next.delete(keyOf(c))
+  } else {
+    try {
+      next.set(keyOf(c), await call(commands.syncConflictDetails(c.table, c.rowId)))
+    } catch (err) {
+      toast.error(errorMessage(err))
+      return
+    }
+  }
+  open.value = next
+}
+
 async function dismiss(c: ConflictView) {
   try {
     await account.dismissConflict(c)
@@ -198,12 +215,32 @@ async function signOut() {
               <p class="truncate">{{ c.message }}</p>
             </div>
             <div class="flex gap-2">
+              <Button size="sm" variant="ghost" @click="toggle(c)">{{ open.has(keyOf(c)) ? $t('account.hideDetails') : $t('account.details') }}</Button>
               <Button size="sm" variant="outline" @click="retry(c)">{{ $t('account.retry') }}</Button>
               <Button size="sm" variant="ghost" @click="dismiss(c)">{{ $t('account.dismiss') }}</Button>
             </div>
+            <table v-if="open.has(keyOf(c))" class="mt-2 w-full basis-full border-t pt-2 text-left">
+              <thead>
+                <tr class="text-muted-foreground">
+                  <th class="py-1 pr-3 font-normal">{{ $t('account.field') }}</th>
+                  <th class="py-1 pr-3 font-normal">{{ $t('account.accountValue') }}</th>
+                  <th class="py-1 font-normal">{{ $t('account.thisDevice') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="f in open.get(keyOf(c))" :key="f.field" :class="f.differs ? 'font-medium text-foreground' : ''">
+                  <td class="py-0.5 pr-3 align-top">{{ f.field }}</td>
+                  <td class="break-words py-0.5 pr-3 align-top">{{ f.server }}</td>
+                  <td class="break-words py-0.5 align-top">{{ f.local ?? $t('account.notOnDevice') }}</td>
+                </tr>
+              </tbody>
+            </table>
           </li>
         </ul>
-        <p v-if="account.sync.lastError" class="text-destructive">{{ account.sync.lastError }}</p>
+        <div v-if="account.sync.lastError" class="text-destructive">
+          <p>{{ $t(`account.syncError.${account.sync.lastErrorKind ?? 'server'}`) }}</p>
+          <p class="break-words text-xs opacity-70">{{ account.sync.lastError }}</p>
+        </div>
       </div>
     </CardContent>
     <ConfirmDialog

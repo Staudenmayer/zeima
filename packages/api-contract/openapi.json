@@ -792,6 +792,12 @@
                               "enum": [
                                 "balance_adjustment"
                               ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "display_settings"
+                              ]
                             }
                           ]
                         },

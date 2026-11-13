@@ -45,3 +45,7 @@ pub struct Navigate {
 /// Pending prompts changed; the prompt window reloads.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct PromptsChanged;
+
+/// A sync started or finished; the sync status in the UI refreshes.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct SyncChanged;
