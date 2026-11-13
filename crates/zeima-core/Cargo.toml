@@ -26,6 +26,8 @@ sqlx = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 specta = { workspace = true, optional = true }
 specta-typescript = { workspace = true, optional = true }
+base64 = "0.22"
+ed25519-dalek = "3.0.0"
 
 [dev-dependencies]
 tokio = { workspace = true }

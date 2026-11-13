@@ -32,3 +32,4 @@ addons/*/target/
 
 # Server environment
 .env
+packages/core-wasm/pkg

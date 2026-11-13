@@ -1,0 +1,21 @@
+[package]
+name = "zeima-core-wasm"
+description = "zeima-core's pure logic for JavaScript (the server): country profiles, holidays and work-time calculation."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zeima-core = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+# Pin to the wasm-bindgen CLI that packages/core-wasm/build.mjs installs.
+wasm-bindgen = "=0.2.100"
+# zeima-core makes UUIDs; on wasm32 they need JavaScript's random numbers.
+uuid = { workspace = true, features = ["js"] }

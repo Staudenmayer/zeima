@@ -1,0 +1,12 @@
+{
+  "name": "@zeima/core-wasm",
+  "version": "1.0.0-alpha.0",
+  "private": true,
+  "description": "zeima-core's pure logic (country profiles, holidays, work time) for Node, built from crates/zeima-core-wasm. Run `bun run --cwd packages/core-wasm build` first.",
+  "type": "commonjs",
+  "main": "pkg/zeima_core_wasm.js",
+  "types": "pkg/zeima_core_wasm.d.ts",
+  "scripts": {
+    "build": "node build.mjs"
+  }
+}

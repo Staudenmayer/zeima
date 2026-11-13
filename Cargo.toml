@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/zeima-core", "crates/zeima-addon-sdk"]
+members = ["src-tauri", "crates/zeima-core", "crates/zeima-addon-sdk", "crates/zeima-core-wasm"]
 exclude = ["addons"]
 
 [workspace.package]
@@ -13,7 +13,7 @@ zeima-core = { path = "crates/zeima-core" }
 zeima-addon-sdk = { path = "crates/zeima-addon-sdk", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-uuid = { version = "1", features = ["v7", "serde"] }
+uuid = { version = "1", features = ["v7", "v5", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 thiserror = "2"
