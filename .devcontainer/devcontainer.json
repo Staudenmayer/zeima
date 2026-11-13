@@ -1,0 +1,39 @@
+{
+  "name": "Zeima",
+  "dockerComposeFile": ["../deploy/compose.dev.yml", "compose.yml"],
+  "service": "dev",
+  "runServices": ["dev", "postgres", "keycloak", "mailpit"],
+  "workspaceFolder": "/workspaces/zeima",
+  "shutdownAction": "stopCompose",
+
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": { "profile": "default", "targets": "wasm32-unknown-unknown" },
+    "ghcr.io/devcontainers/features/node:1": { "version": "24" }
+  },
+
+  "forwardPorts": [1420, 3000, 5173, 8080, 8025, 5432],
+  "portsAttributes": {
+    "1420": { "label": "Vite (app UI)" },
+    "3000": { "label": "API (/docs)" },
+    "8080": { "label": "Keycloak" },
+    "8025": { "label": "Mailpit" },
+    "5432": { "label": "Postgres" }
+  },
+
+  "postCreateCommand": "sudo chown -R vscode: target node_modules /usr/local/cargo/registry && bun install",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Vue.volar",
+        "tauri-apps.tauri-vscode",
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "editorconfig.editorconfig"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy"
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+# Adds the development container next to the stack in deploy/compose.dev.yml
+# (Postgres, Keycloak with the zeima realm, Mailpit).
+services:
+  dev:
+    build:
+      context: ../.devcontainer
+      dockerfile: Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspaces/zeima:cached
+      # Keep build output and dependencies off the host (fast, no OS mixups).
+      - target:/workspaces/zeima/target
+      - node_modules:/workspaces/zeima/node_modules
+      - cargo-registry:/usr/local/cargo/registry
+    environment:
+      # The API reaches Keycloak by service name; tokens still carry the
+      # public issuer (localhost:8080, the forwarded port).
+      KEYCLOAK_URL: http://localhost:8080
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      PUBLIC_URL: http://localhost:3000
+      DATABASE_URL: postgres://zeima:zeima@postgres:5432/zeima
+      CARGO_TARGET_DIR: /workspaces/zeima/target
+    depends_on:
+      keycloak:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+volumes:
+  target:
+  node_modules:
+  cargo-registry:
