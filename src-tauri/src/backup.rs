@@ -13,9 +13,7 @@ const PREFIX: &str = "time-";
 const SUFFIX: &str = ".db";
 
 pub fn dir(app: &AppHandle) -> std::io::Result<PathBuf> {
-    let dir = app
-        .path()
-        .app_data_dir()
+    let dir = crate::instance::data_dir(app)
         .map_err(std::io::Error::other)?
         .join("backups");
     std::fs::create_dir_all(&dir)?;

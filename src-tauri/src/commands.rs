@@ -120,9 +120,7 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<A
         device_id: ctx.device_id.clone(),
         workspace_id: ctx.workspace_id.clone(),
         user_id: ctx.user_id.clone(),
-        data_dir: app
-            .path()
-            .app_data_dir()
+        data_dir: crate::instance::data_dir(&app)
             .map(|p| p.display().to_string())
             .unwrap_or_default(),
         default_tz: state.core.default_tz(),
@@ -474,13 +472,16 @@ pub async fn settings_set(
             field: Some("shortcuts".into()),
         });
     }
-    let autolaunch = app.autolaunch();
-    let result = if settings.autostart {
-        autolaunch.enable()
-    } else {
-        autolaunch.disable()
-    };
-    result.map_err(|e| CmdError::other("autostart", e))?;
+    // A test instance (ZEIMA_DATA_DIR) must not change what the real app starts with.
+    if !crate::instance::is_secondary() {
+        let autolaunch = app.autolaunch();
+        let result = if settings.autostart {
+            autolaunch.enable()
+        } else {
+            autolaunch.disable()
+        };
+        result.map_err(|e| CmdError::other("autostart", e))?;
+    }
 
     settings::save(&state.core, &settings).await?;
     *state.settings.write().unwrap_or_else(|e| e.into_inner()) = settings.clone();

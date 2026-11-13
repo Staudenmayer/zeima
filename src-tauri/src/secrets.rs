@@ -36,7 +36,8 @@ pub fn entry_name(addon_id: &str, name: &str) -> String {
 pub struct Keychain;
 
 fn entry(name: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, name).map_err(|e| format!("keychain: {e}"))
+    keyring::Entry::new(&crate::instance::keychain_service(SERVICE), name)
+        .map_err(|e| format!("keychain: {e}"))
 }
 
 fn read(name: &str) -> Result<Option<String>, String> {

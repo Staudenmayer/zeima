@@ -67,9 +67,7 @@ pub struct Addons {
 
 /// Folder with one sub-folder per installed addon.
 pub fn addons_dir(app: &AppHandle) -> std::io::Result<PathBuf> {
-    let dir = app
-        .path()
-        .app_data_dir()
+    let dir = crate::instance::data_dir(app)
         .map_err(std::io::Error::other)?
         .join("addons");
     std::fs::create_dir_all(&dir)?;

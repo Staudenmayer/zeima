@@ -49,6 +49,26 @@ Syncing works without any of the "later" items: start the API with
    "Register" to create a user. The verification mail arrives in Mailpit at
    http://localhost:8025.
 
+### Two instances on one machine (testing sync)
+
+Set `ZEIMA_DATA_DIR` to a folder and the app runs as a separate device with its
+own database, backups, addons, device id and keychain entries; it neither stops
+nor is stopped by another instance. Debug builds load the dev server, so start
+the normal instance with `bun run tauri dev` first, then in another terminal:
+
+```sh
+ZEIMA_DATA_DIR=/tmp/zeima-b ./target/debug/zeima
+```
+
+(Build it once with `cargo build -p zeima`; after code changes rebuild.) The
+window title shows the folder name (`Zeima (zeima-b)`). Sign in to the same
+account in both and use Sync now. Things to know:
+
+- A test instance never changes the system's autostart setting.
+- Global shortcuts are claimed by whichever instance starts first; the second
+  logs "shortcuts not registered". Choose other shortcuts in its Settings.
+- Delete the folder to start over with a fresh device.
+
 An automated check of the same flow, without the app, is
 `deploy/e2e/smoke.mjs` (see the comment at the top of the file).
 

@@ -31,6 +31,8 @@ bun run typecheck
 
 `.devcontainer/` sets up Rust, Node 24, Bun and the Tauri libraries, and starts Postgres, Keycloak (with the `zeima` realm) and Mailpit next to it. Open the folder in VS Code and choose "Reopen in Container". Inside, `cargo test --workspace --all-features`, `bun run test`, `bun run --cwd server test` and `bun run --cwd server dev` work as above. The desktop window (`tauri dev`) needs a display, so run that on the host; the container is for the Rust core, the frontend checks and the server.
 
+To run a second copy as a separate device (for testing sync), see "Two instances on one machine" in `docs/setup-server.md` (`ZEIMA_DATA_DIR`).
+
 Data is stored in `zeima.db` in the app data folder (shown under Settings → About).
 
 ## Shortcuts (defaults, configurable)

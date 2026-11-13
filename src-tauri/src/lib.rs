@@ -10,6 +10,7 @@ mod commands_addons;
 mod commands_report;
 mod commands_work;
 mod events;
+mod instance;
 mod license;
 mod oauth;
 mod os;
@@ -176,11 +177,15 @@ pub fn run() {
     #[cfg(debug_assertions)]
     export_bindings(&builder);
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+    let mut app_builder = tauri::Builder::default();
+    // A test instance (ZEIMA_DATA_DIR) neither stops others nor is stopped.
+    if !instance::is_secondary() {
+        app_builder = app_builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let app = app.clone();
             tauri::async_runtime::spawn(async move { windows::show_main(&app, None).await });
-        }))
+        }));
+    }
+    app_builder
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![MINIMIZED_ARG]),
@@ -189,6 +194,7 @@ pub fn run() {
             tauri_plugin_window_state::Builder::new()
                 // Visibility is decided at startup (autostart starts hidden).
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                .with_filename(instance::window_state_file())
                 .with_denylist(&[windows::QUICKSWITCH, windows::PROMPT])
                 .build(),
         )
@@ -201,7 +207,7 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
 
-            let data_dir = app.path().app_data_dir()?;
+            let data_dir = instance::data_dir(app.handle())?;
             std::fs::create_dir_all(&data_dir)?;
             let core = tauri::async_runtime::block_on(Core::open(
                 &data_dir.join("zeima.db"),
@@ -224,6 +230,9 @@ pub fn run() {
             addons::start(app.handle());
 
             tray::create(app.handle())?;
+            if let (Some(label), Some(window)) = (instance::label(), app.get_webview_window("main")) {
+                let _ = window.set_title(&format!("Zeima ({label})"));
+            }
             windows::hide_main_on_close(app.handle());
             if !std::env::args().any(|a| a == MINIMIZED_ARG) {
                 let handle = app.handle().clone();
