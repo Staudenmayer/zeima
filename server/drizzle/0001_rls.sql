@@ -11,14 +11,31 @@
 -- zeima_app may only read identity data (organizations, the Keycloak mirror,
 -- entitlements); those are written by the owner role.
 
+-- Roles belong to the whole cluster, so two databases (or two API replicas)
+-- migrating at the same moment can both find the role missing and both create
+-- it. The loser's error is expected and harmless.
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'zeima_app') THEN
-    CREATE ROLE zeima_app NOLOGIN;
-  END IF;
+  CREATE ROLE zeima_app NOLOGIN;
+EXCEPTION WHEN duplicate_object OR unique_violation THEN
+  NULL;
 END $$;
 --> statement-breakpoint
-GRANT zeima_app TO CURRENT_USER;
+-- Lets the owner `SET ROLE zeima_app`. A superuser needs no membership; for
+-- others the grant is cluster-wide too, so a collision is retried once.
+DO $$
+BEGIN
+  IF NOT pg_has_role(CURRENT_USER, 'zeima_app', 'MEMBER') THEN
+    BEGIN
+      GRANT zeima_app TO CURRENT_USER;
+    EXCEPTION WHEN OTHERS THEN
+      PERFORM pg_sleep(0.2);
+      IF NOT pg_has_role(CURRENT_USER, 'zeima_app', 'MEMBER') THEN
+        GRANT zeima_app TO CURRENT_USER;
+      END IF;
+    END;
+  END IF;
+END $$;
 --> statement-breakpoint
 GRANT USAGE ON SCHEMA public TO zeima_app;
 --> statement-breakpoint

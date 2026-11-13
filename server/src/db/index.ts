@@ -21,8 +21,20 @@ export function connect(url: string, options: postgres.Options<Record<string, po
   return { client, db: drizzle(client, { schema }) as Db }
 }
 
+/** Arbitrary key of the advisory lock that lets only one process migrate a database at a time. */
+const MIGRATION_LOCK = 7_240_001
+
+/**
+ * Brings the schema up to date. Several API replicas may start together, so
+ * one process migrates while the others wait on a database lock (held by a
+ * transaction on one pool connection; the migration uses another, so the pool
+ * needs at least two).
+ */
 export async function migrateDb(db: Db) {
-  await migrate(db, { migrationsFolder: MIGRATIONS })
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${MIGRATION_LOCK})`)
+    await migrate(db, { migrationsFolder: MIGRATIONS })
+  })
 }
 
 export interface Caller {
