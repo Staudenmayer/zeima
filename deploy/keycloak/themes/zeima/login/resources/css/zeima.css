@@ -1,0 +1,45 @@
+/* Zeima branding for the Keycloak sign-in pages (keycloak.v2 / PatternFly 5). */
+
+:root {
+  --zeima-blue: #2563eb;
+  --zeima-blue-dark: #1d4ed8;
+}
+
+/* The logo above the form. */
+#kc-header-wrapper::before {
+  content: "";
+  display: block;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 12px;
+  background: url("../img/zeima.svg") center / contain no-repeat;
+  border-radius: 14px;
+}
+
+/* Buttons and links in the Zeima blue. */
+.pf-v5-c-button.pf-m-primary {
+  --pf-v5-c-button--m-primary--BackgroundColor: var(--zeima-blue);
+  --pf-v5-c-button--m-primary--hover--BackgroundColor: var(--zeima-blue-dark);
+  --pf-v5-c-button--m-primary--focus--BackgroundColor: var(--zeima-blue-dark);
+  --pf-v5-c-button--m-primary--active--BackgroundColor: var(--zeima-blue-dark);
+  border-radius: 8px;
+}
+
+.pf-v5-c-form-control,
+.pf-v5-c-form-control::before {
+  border-radius: 8px;
+}
+
+a {
+  --pf-v5-global--link--Color: var(--zeima-blue);
+}
+
+.pf-v5-c-login__main {
+  border-radius: 14px;
+}
+
+/* The page behind the card. */
+.login-pf body,
+.pf-v5-c-login {
+  background-image: none;
+}

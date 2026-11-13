@@ -1,0 +1,10 @@
+# HTTPS in front of the API and Keycloak (deploy/docker-compose.yml).
+# DOMAIN comes from the environment; certificates are automatic.
+
+{$DOMAIN} {
+	reverse_proxy api:3000
+}
+
+id.{$DOMAIN} {
+	reverse_proxy keycloak:8080
+}
