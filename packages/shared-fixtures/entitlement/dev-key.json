@@ -1,0 +1,5 @@
+{
+  "warning": "DEVELOPMENT ONLY. This private key is public on purpose; never use it outside local development and tests.",
+  "publicKey": "uc5ahADn6SYNbnRjPmkLLGtDyq6auywr0gVcgZcwwAQ",
+  "privateKeyPkcs8": "MC4CAQAwBQYDK2VwBCIEIOGJrAEpsx8geqCZOLrTdqUl2uLuga073Qq-4BUKNTKs"
+}

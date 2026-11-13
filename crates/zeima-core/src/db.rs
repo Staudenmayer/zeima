@@ -173,6 +173,17 @@ impl Core {
         self.clock.now_ms()
     }
 
+    /// Moves the hybrid clock past a timestamp received from another device,
+    /// so later local writes sort after it.
+    pub(crate) fn observe_hlc(&self, remote: &str) {
+        let now = self.clock.now_ms();
+        let _ = self
+            .hlc
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .observe(remote, now);
+    }
+
     /// IANA zone stamped on new entries when none is given (the OS zone).
     pub fn default_tz(&self) -> String {
         self.default_tz.read().unwrap_or_else(|e| e.into_inner()).clone()

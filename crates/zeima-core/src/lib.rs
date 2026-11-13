@@ -7,6 +7,7 @@
 pub mod addon;
 pub mod autopause;
 pub mod clock;
+pub mod entitlement;
 pub mod error;
 pub mod events;
 pub mod export;
@@ -17,6 +18,7 @@ pub mod locale;
 pub mod model;
 pub mod report;
 pub mod summary;
+pub mod sync;
 pub mod worktime;
 
 #[cfg(feature = "db")]
@@ -38,6 +40,8 @@ pub use repo::{
     default_schedule, AddonRecord, Balance, BudgetStatus, HolidayView, ProfileSummary, VacationSummary,
     WorkScheduleInput,
 };
+#[cfg(feature = "db")]
+pub use repo::{ApplyReport, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
 
 #[cfg(feature = "db")]
 pub use db::Core;

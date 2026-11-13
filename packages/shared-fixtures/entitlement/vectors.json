@@ -1,0 +1,120 @@
+{
+  "description": "Entitlement token vectors (SPEC §2). Rust (crates/zeima-core/src/entitlement.rs) and TypeScript (server/src/licensing/entitlement.ts) verify these. The key is a development key; production builds trust the vendor key only.",
+  "now": 1800000000,
+  "trustedKeys": [
+    "uc5ahADn6SYNbnRjPmkLLGtDyq6auywr0gVcgZcwwAQ"
+  ],
+  "cases": [
+    {
+      "name": "a current token",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InplaW1hLWVudGl0bGVtZW50K2p3dCJ9.eyJ2IjoxLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoicHJvIiwiZmVhdHVyZXMiOlsic3luYyJdLCJpYXQiOjE3OTkxMzYwMDAsImdyYWNlRGF5cyI6MTQsImV4cCI6MTgwMjU5MjAwMH0.X_k7QAtLaaXmxiE5kZTaRrKYfmQpKHOn8bgoBG0HxqsUzh0iVxGAauAdgRm7YkZWohrb3ZxmRjHRaz6v1zwdAA",
+      "expect": {
+        "status": "valid",
+        "plan": "pro",
+        "features": [
+          "sync"
+        ]
+      }
+    },
+    {
+      "name": "a token 3 days past its end is in grace",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InplaW1hLWVudGl0bGVtZW50K2p3dCJ9.eyJ2IjoxLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoicHJvIiwiZmVhdHVyZXMiOlsic3luYyJdLCJpYXQiOjE3OTkxMzYwMDAsImdyYWNlRGF5cyI6MTQsImV4cCI6MTc5OTc0MDgwMH0.KUTjzgA6WSGUFtHXhMMnOs9pIEfYyainmMVe9UFm45Ha7oRKOHoSE9lh5ydeLBLWQhX34kWirYoYfFfp5JjsAw",
+      "expect": {
+        "status": "grace",
+        "plan": "pro",
+        "features": [
+          "sync"
+        ]
+      }
+    },
+    {
+      "name": "a token past its grace period has lapsed to free",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InplaW1hLWVudGl0bGVtZW50K2p3dCJ9.eyJ2IjoxLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoicHJvIiwiZmVhdHVyZXMiOlsic3luYyJdLCJpYXQiOjE3OTkxMzYwMDAsImdyYWNlRGF5cyI6MTQsImV4cCI6MTc5ODI3MjAwMH0.RUaZqTikiSejk612fCd4bdUni0ceIpS_IDPljLLG9vqInqtQTyGxA_9OhizI_O2tgToGPBFpjGzlpu8V1vo6BQ",
+      "expect": {
+        "status": "expired",
+        "plan": "free",
+        "features": []
+      }
+    },
+    {
+      "name": "a token without a grace period lapses at once",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InplaW1hLWVudGl0bGVtZW50K2p3dCJ9.eyJ2IjoxLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoicHJvIiwiZmVhdHVyZXMiOlsic3luYyJdLCJpYXQiOjE3OTkxMzYwMDAsImdyYWNlRGF5cyI6MCwiZXhwIjoxNzk5OTk5OTk5fQ.Ti0NGoTjyu_0ZApd7DVnkbPBcSujYn6P-dDTF2S2CTFZyC0KoA5uE2k0cUNBMtjvH7qnud71Vc7NQftoCsPEBQ",
+      "expect": {
+        "status": "expired",
+        "plan": "free",
+        "features": []
+      }
+    },
+    {
+      "name": "org tokens keep the organization and seats",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InplaW1hLWVudGl0bGVtZW50K2p3dCJ9.eyJ2IjoxLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoidGVhbSIsImZlYXR1cmVzIjpbInN5bmMiLCJvcmciLCJwcmVzZW5jZSJdLCJpYXQiOjE3OTkxMzYwMDAsImdyYWNlRGF5cyI6MTQsIm9yZ0lkIjoib3JnLTEiLCJzZWF0cyI6MjUsImV4cCI6MTgwMDA4NjQwMH0.a2JZqK5ZzmxhVEmeQOaMEGG9zMYPnwTVRY7kTcbCEiqxcIShgPYrVeR-s9CIpoCkF4wTvf-RLoZ8UEeThUVcAA",
+      "expect": {
+        "status": "valid",
+        "plan": "team",
+        "features": [
+          "sync",
+          "org",
+          "presence"
+        ],
+        "orgId": "org-1",
+        "seats": 25
+      }
+    },
+    {
+      "name": "a changed payload fails the signature",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InplaW1hLWVudGl0bGVtZW50K2p3dCJ9.eyJ2IjoxLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoidGVhbSIsImZlYXR1cmVzIjpbInN5bmMiLCJvcmciXSwiaWF0IjoxNzk5MTM2MDAwLCJncmFjZURheXMiOjE0LCJleHAiOjE4MDI1OTIwMDB9.X_k7QAtLaaXmxiE5kZTaRrKYfmQpKHOn8bgoBG0HxqsUzh0iVxGAauAdgRm7YkZWohrb3ZxmRjHRaz6v1zwdAA",
+      "expect": {
+        "status": "invalid",
+        "error": "bad_signature"
+      }
+    },
+    {
+      "name": "a token signed by another key fails the signature",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InplaW1hLWVudGl0bGVtZW50K2p3dCJ9.eyJ2IjoxLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoicHJvIiwiZmVhdHVyZXMiOlsic3luYyJdLCJpYXQiOjE3OTkxMzYwMDAsImdyYWNlRGF5cyI6MTQsImV4cCI6MTgwMDA4NjQwMH0.1RGv7t9o15WV2g_gnx_EdLEPhqEz-_C119Hc-bdETcpxH09DjEhU-SaPI8prCtzqJkF4DdKNH2xHewZtCVg9Aw",
+      "expect": {
+        "status": "invalid",
+        "error": "bad_signature"
+      }
+    },
+    {
+      "name": "alg none is refused",
+      "token": "eyJhbGciOiJub25lIiwidHlwIjoiemVpbWEtZW50aXRsZW1lbnQrand0In0.eyJ2IjoxLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoicHJvIiwiZmVhdHVyZXMiOlsic3luYyJdLCJpYXQiOjE3OTkxMzYwMDAsImdyYWNlRGF5cyI6MTQsImV4cCI6MTgwMDA4NjQwMH0.",
+      "expect": {
+        "status": "invalid",
+        "error": "bad_header"
+      }
+    },
+    {
+      "name": "a foreign token type is refused",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJ2IjoxLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoicHJvIiwiZmVhdHVyZXMiOlsic3luYyJdLCJpYXQiOjE3OTkxMzYwMDAsImdyYWNlRGF5cyI6MTQsImV4cCI6MTgwMDA4NjQwMH0.zg3SSCG-V9X9Y6CswjI2qtzsUB-_5D3C0eAzoXG_rBr_qpVIsQZBQNDVy2sYFRNe7lX-yTlVIg_uhTAl9kLbCg",
+      "expect": {
+        "status": "invalid",
+        "error": "bad_header"
+      }
+    },
+    {
+      "name": "an unknown version is refused",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InplaW1hLWVudGl0bGVtZW50K2p3dCJ9.eyJ2IjoyLCJzdWIiOiIyYzhmMWY1ZS0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDEiLCJwbGFuIjoicHJvIiwiZmVhdHVyZXMiOlsic3luYyJdLCJpYXQiOjE3OTkxMzYwMDAsImdyYWNlRGF5cyI6MTQsImV4cCI6MTgwMDA4NjQwMH0.Ga42v47j47EWfVRh_YG1tZ4aMPgInbUWk2VbrfYKkRLbupWiTTrMuGTuppPfc6zCHZ76q_BlS_73_M6WYYwEAQ",
+      "expect": {
+        "status": "invalid",
+        "error": "bad_payload"
+      }
+    },
+    {
+      "name": "a token without a subject is refused",
+      "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InplaW1hLWVudGl0bGVtZW50K2p3dCJ9.eyJwbGFuIjoicHJvIiwiZmVhdHVyZXMiOltdLCJ2IjoxLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDA4NjQwMH0.FH8YnRdQRTHVZwycBd95fhNScRDDGXTgnYEHMDs-HmaTpGYcufahfTcbztQoi2DDyu0iYsbgCLtntHIvZ-OSAQ",
+      "expect": {
+        "status": "invalid",
+        "error": "bad_payload"
+      }
+    },
+    {
+      "name": "garbage is refused",
+      "token": "not a token",
+      "expect": {
+        "status": "invalid",
+        "error": "malformed"
+      }
+    }
+  ]
+}

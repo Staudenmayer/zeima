@@ -1,0 +1,1124 @@
+{
+  "description": "Sync merge vectors (SPEC \u00a76.8). Rust (crates/zeima-core/src/sync.rs) and TypeScript (server/src/sync/merge.ts) both run these. `cases` apply `changes` in order to `initial` as `actor`; `convergence` changes, applied in any order, must give one state.",
+  "hlcFormat": "{wall_ms:015}-{counter:06}-{node}; compared as strings",
+  "cases": [
+    {
+      "name": "creates a row from the first change",
+      "initial": null,
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000010-000000-a",
+          "fields": {
+            "name": "A",
+            "note": "x"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "A",
+              "h": "000000000000010-000000-a"
+            },
+            "note": {
+              "v": "x",
+              "h": "000000000000010-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a newer value replaces an older one",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "A",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000020-000000-a",
+          "fields": {
+            "name": "B"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "B",
+              "h": "000000000000020-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an older value is ignored",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "B",
+            "h": "000000000000020-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000010-000000-a",
+          "fields": {
+            "name": "A"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "B",
+              "h": "000000000000020-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "ignored"
+          }
+        ]
+      }
+    },
+    {
+      "name": "fields are merged one by one",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "N",
+            "h": "000000000000050-000000-a"
+          },
+          "note": {
+            "v": "old",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000030-000000-a",
+          "fields": {
+            "name": "stale",
+            "note": "new"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "N",
+              "h": "000000000000050-000000-a"
+            },
+            "note": {
+              "v": "new",
+              "h": "000000000000030-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      },
+      "note": "Only the field that is newer wins; the stale name does not overwrite."
+    },
+    {
+      "name": "a field the row never had is added",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "N",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000005-000000-a",
+          "fields": {
+            "color": "#fff"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "N",
+              "h": "000000000000010-000000-a"
+            },
+            "color": {
+              "v": "#fff",
+              "h": "000000000000005-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "replaying a change changes nothing",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "A",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000010-000000-a",
+          "fields": {
+            "name": "A"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "A",
+              "h": "000000000000010-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "ignored"
+          }
+        ]
+      }
+    },
+    {
+      "name": "equal wall time and counter: the node id decides",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "from a",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000010-000000-b",
+          "fields": {
+            "name": "from b"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "from b",
+              "h": "000000000000010-000000-b"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a higher counter beats the same wall time",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "first",
+            "h": "000000000000010-000001-z"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000010-000002-a",
+          "fields": {
+            "name": "second"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "second",
+              "h": "000000000000010-000002-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a delete marks the row and keeps its fields",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "A",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "delete",
+          "hlc": "000000000000020-000000-a"
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "A",
+              "h": "000000000000010-000000-a"
+            }
+          },
+          "deleted": "000000000000020-000000-a"
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an older delete is ignored",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "A",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": "000000000000030-000000-a"
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "delete",
+          "hlc": "000000000000020-000000-a"
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "A",
+              "h": "000000000000010-000000-a"
+            }
+          },
+          "deleted": "000000000000030-000000-a"
+        },
+        "results": [
+          {
+            "status": "ignored"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a later delete replaces an earlier one",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "A",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": "000000000000020-000000-a"
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "delete",
+          "hlc": "000000000000030-000000-a"
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "A",
+              "h": "000000000000010-000000-a"
+            }
+          },
+          "deleted": "000000000000030-000000-a"
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "an edit after the delete is still recorded",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "A",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": "000000000000020-000000-a"
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000030-000000-a",
+          "fields": {
+            "name": "B"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "B",
+              "h": "000000000000030-000000-a"
+            }
+          },
+          "deleted": "000000000000020-000000-a"
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      },
+      "note": "Whether the row is live is decided later: a field newer than the delete revives it."
+    },
+    {
+      "name": "an edit older than the field it targets is ignored even after a delete",
+      "initial": {
+        "fields": {
+          "name": {
+            "v": "A",
+            "h": "000000000000040-000000-a"
+          }
+        },
+        "deleted": "000000000000050-000000-a"
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000030-000000-a",
+          "fields": {
+            "name": "B"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "name": {
+              "v": "A",
+              "h": "000000000000040-000000-a"
+            }
+          },
+          "deleted": "000000000000050-000000-a"
+        },
+        "results": [
+          {
+            "status": "ignored"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a delete can arrive before the row exists",
+      "initial": null,
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "delete",
+          "hlc": "000000000000020-000000-a"
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {},
+          "deleted": "000000000000020-000000-a"
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a member cannot edit a locked entry",
+      "initial": {
+        "fields": {
+          "locked": {
+            "v": true,
+            "h": "000000000000010-000000-a"
+          },
+          "note": {
+            "v": "a",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "time_entry",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000020-000000-a",
+          "fields": {
+            "note": "b"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "locked": {
+              "v": true,
+              "h": "000000000000010-000000-a"
+            },
+            "note": {
+              "v": "a",
+              "h": "000000000000010-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "rejected",
+            "reason": "locked"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a member cannot delete a locked entry",
+      "initial": {
+        "fields": {
+          "locked": {
+            "v": true,
+            "h": "000000000000010-000000-a"
+          },
+          "note": {
+            "v": "a",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "time_entry",
+          "rowId": "r1",
+          "op": "delete",
+          "hlc": "000000000000020-000000-a"
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "locked": {
+              "v": true,
+              "h": "000000000000010-000000-a"
+            },
+            "note": {
+              "v": "a",
+              "h": "000000000000010-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "rejected",
+            "reason": "locked"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a manager can edit a locked entry",
+      "initial": {
+        "fields": {
+          "locked": {
+            "v": true,
+            "h": "000000000000010-000000-a"
+          },
+          "note": {
+            "v": "a",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": true
+      },
+      "changes": [
+        {
+          "table": "time_entry",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000020-000000-a",
+          "fields": {
+            "note": "b"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "locked": {
+              "v": true,
+              "h": "000000000000010-000000-a"
+            },
+            "note": {
+              "v": "b",
+              "h": "000000000000020-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a member cannot change the locked flag",
+      "initial": {
+        "fields": {
+          "locked": {
+            "v": false,
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "time_entry",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000020-000000-a",
+          "fields": {
+            "locked": true
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "locked": {
+              "v": false,
+              "h": "000000000000010-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "rejected",
+            "reason": "forbidden_field"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a manager can lock an entry",
+      "initial": {
+        "fields": {
+          "locked": {
+            "v": false,
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": true
+      },
+      "changes": [
+        {
+          "table": "time_entry",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000020-000000-a",
+          "fields": {
+            "locked": true
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "locked": {
+              "v": true,
+              "h": "000000000000020-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a member can edit an unlocked entry",
+      "initial": {
+        "fields": {
+          "locked": {
+            "v": false,
+            "h": "000000000000010-000000-a"
+          },
+          "note": {
+            "v": "a",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "time_entry",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000020-000000-a",
+          "fields": {
+            "note": "b"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "locked": {
+              "v": false,
+              "h": "000000000000010-000000-a"
+            },
+            "note": {
+              "v": "b",
+              "h": "000000000000020-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "the lock rule applies to time entries only",
+      "initial": {
+        "fields": {
+          "locked": {
+            "v": true,
+            "h": "000000000000010-000000-a"
+          },
+          "note": {
+            "v": "a",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000020-000000-a",
+          "fields": {
+            "note": "b"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "locked": {
+              "v": true,
+              "h": "000000000000010-000000-a"
+            },
+            "note": {
+              "v": "b",
+              "h": "000000000000020-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "applied"
+          }
+        ]
+      }
+    },
+    {
+      "name": "rejected changes in a batch do not stop the others",
+      "initial": {
+        "fields": {
+          "locked": {
+            "v": true,
+            "h": "000000000000010-000000-a"
+          },
+          "note": {
+            "v": "a",
+            "h": "000000000000010-000000-a"
+          }
+        },
+        "deleted": null
+      },
+      "actor": {
+        "manager": false
+      },
+      "changes": [
+        {
+          "table": "time_entry",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000020-000000-a",
+          "fields": {
+            "note": "b"
+          }
+        },
+        {
+          "table": "time_entry",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000030-000000-a",
+          "fields": {
+            "note": "c"
+          }
+        }
+      ],
+      "expect": {
+        "state": {
+          "fields": {
+            "locked": {
+              "v": true,
+              "h": "000000000000010-000000-a"
+            },
+            "note": {
+              "v": "a",
+              "h": "000000000000010-000000-a"
+            }
+          },
+          "deleted": null
+        },
+        "results": [
+          {
+            "status": "rejected",
+            "reason": "locked"
+          },
+          {
+            "status": "rejected",
+            "reason": "locked"
+          }
+        ]
+      }
+    }
+  ],
+  "convergence": [
+    {
+      "name": "two devices edit different fields",
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000010-000000-a",
+          "fields": {
+            "name": "A1"
+          }
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000011-000000-b",
+          "fields": {
+            "note": "B1"
+          }
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000012-000000-a",
+          "fields": {
+            "name": "A2"
+          }
+        }
+      ]
+    },
+    {
+      "name": "two devices edit the same field",
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000010-000000-a",
+          "fields": {
+            "name": "A"
+          }
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000010-000000-b",
+          "fields": {
+            "name": "B"
+          }
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000009-000005-c",
+          "fields": {
+            "name": "C"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an edit and a delete cross",
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000010-000000-a",
+          "fields": {
+            "name": "A"
+          }
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "delete",
+          "hlc": "000000000000020-000000-a"
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000015-000000-a",
+          "fields": {
+            "name": "B"
+          }
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000025-000000-a",
+          "fields": {
+            "note": "n"
+          }
+        }
+      ]
+    },
+    {
+      "name": "repeated deletes and replays",
+      "changes": [
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "delete",
+          "hlc": "000000000000005-000000-a"
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "delete",
+          "hlc": "000000000000005-000000-a"
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000007-000000-a",
+          "fields": {
+            "name": "x"
+          }
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "upsert",
+          "hlc": "000000000000007-000000-a",
+          "fields": {
+            "name": "x"
+          }
+        },
+        {
+          "table": "project",
+          "rowId": "r1",
+          "op": "delete",
+          "hlc": "000000000000003-000000-a"
+        }
+      ]
+    }
+  ]
+}

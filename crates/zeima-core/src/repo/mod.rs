@@ -8,11 +8,17 @@ mod cost_centers;
 mod data;
 mod entries;
 mod projects;
+mod sync_apply;
+mod sync_groups;
+mod sync_ids;
+mod sync_outbox;
 mod tags;
 mod work;
 
 pub use addons::AddonRecord;
 pub use budget::BudgetStatus;
+pub use sync_apply::{ApplyReport, RemoteRow, SyncConflict};
+pub use sync_outbox::{Outbox, BATCH as SYNC_BATCH, SYNCED_TABLES};
 pub(crate) use work::invalidate_entry_days;
 pub use work::{default_schedule, Balance, HolidayView, ProfileSummary, VacationSummary, WorkScheduleInput};
 
