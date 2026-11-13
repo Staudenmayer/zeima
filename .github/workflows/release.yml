@@ -76,6 +76,19 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the updater artifacts (see docs/releasing.md for the key).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Keys of the licence issuers this build trusts (a repository variable).
+          ZEIMA_ENTITLEMENT_KEYS: ${{ vars.ZEIMA_ENTITLEMENT_KEYS }}
+          # macOS signing and notarization. Without these secrets the build is
+          # unsigned (Gatekeeper warns). See docs/releasing.md.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tauriScript: bunx tauri
           tagName: ${{ github.ref_name }}
@@ -83,7 +96,9 @@ jobs:
           releaseBody: See the assets below to download and install.
           releaseDraft: false
           prerelease: ${{ needs.verify.outputs.prerelease == 'true' }}
-          args: ${{ matrix.args }}
+          # latest.json: what the app's updater reads.
+          includeUpdaterJson: true
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
 
   addons:
     # Runs after the app builds: they create the release, which the addon

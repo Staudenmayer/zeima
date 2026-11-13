@@ -30,6 +30,20 @@ jobs:
 
   server:
     runs-on: ubuntu-latest
+    # Row-level security tests (server/test/db.test.ts) need a real Postgres.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: zeima
+          POSTGRES_PASSWORD: zeima
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U zeima" --health-interval 5s
+          --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://zeima:zeima@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -37,6 +51,19 @@ jobs:
         with:
           node-version: 24
       - run: bun install --frozen-lockfile
+      # The server tests include zeima-core running as WebAssembly.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.100
+      - name: Build @zeima/core-wasm
+        run: bun run --cwd packages/core-wasm build
+      - name: Lint
+        run: bun run lint
+        working-directory: server
       - name: Typecheck
         run: bun run typecheck
         working-directory: server
@@ -45,10 +72,85 @@ jobs:
       - name: Test
         run: bun run test
         working-directory: server
+      - name: TypeScript API types are current
+        run: |
+          bun run --cwd packages/api-contract generate
+          git diff --exit-code -- packages/api-contract/schema.d.ts \
+            || { echo "run: bun run --cwd packages/api-contract generate"; exit 1; }
+      # A pull request may not break clients of the current API version
+      # (SPEC §7: breaking changes need a new /v<n>).
+      - name: No breaking API changes
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --depth=1 origin "$GITHUB_BASE_REF"
+          if git show "origin/$GITHUB_BASE_REF:packages/api-contract/openapi.json" > /tmp/base-openapi.json 2>/dev/null; then
+            docker run --rm -v "$PWD:/w" -v /tmp:/t docker.io/tufin/oasdiff breaking \
+              /t/base-openapi.json /w/packages/api-contract/openapi.json --fail-on ERR
+          else
+            echo "the base branch has no committed contract yet"
+          fi
       - name: Keycloak realm is valid JSON
         run: python3 -m json.tool deploy/keycloak/realm-zeima.json > /dev/null
       - name: Docker image builds
         run: docker build -f server/Dockerfile -t zeima-api:ci .
+
+  # Boots the self-hosted stack (deploy/docker-compose.yml) and runs a real
+  # sign-in and sync against it, so self-hosting cannot silently break.
+  selfhosted:
+    runs-on: ubuntu-latest
+    env:
+      PUBLIC_URL: https://localhost:8443
+      ID_URL: https://id.localhost:8443
+      KEYCLOAK_ADMIN_PASSWORD: ci-admin-password
+      NODE_TLS_REJECT_UNAUTHORIZED: "0" # Caddy's local CA
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Configure
+        run: |
+          cat > deploy/.env <<EOF
+          DOMAIN=localhost
+          PUBLIC_URL=$PUBLIC_URL
+          ID_URL=$ID_URL
+          POSTGRES_PASSWORD=ci-postgres-password
+          KEYCLOAK_DB_PASSWORD=ci-keycloak-db-password
+          KEYCLOAK_ADMIN_PASSWORD=$KEYCLOAK_ADMIN_PASSWORD
+          API_ADMIN_SECRET=ci-api-admin-secret
+          HTTP_PORT=8088
+          HTTPS_PORT=8443
+          EOF
+          echo "127.0.0.1 id.localhost" | sudo tee -a /etc/hosts
+      - name: Start the stack
+        run: docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+      - name: Wait for sign-in and the API
+        run: |
+          for i in $(seq 1 60); do
+            curl -skf "$ID_URL/realms/zeima/.well-known/openid-configuration" > /dev/null \
+              && curl -skf "$PUBLIC_URL/readyz" > /dev/null && exit 0
+            sleep 5
+          done
+          docker compose -f deploy/docker-compose.yml logs
+          exit 1
+      # Realm changes reach running installations this way (deploy/keycloak/apply.sh);
+      # the sign-in must keep working after it.
+      - name: Apply the realm with keycloak-config-cli
+        env:
+          KEYCLOAK_URL: http://keycloak:8080
+          KEYCLOAK_PASSWORD: ${{ env.KEYCLOAK_ADMIN_PASSWORD }}
+          CONTAINER_NETWORK: zeima_default
+          ZEIMA_API_ADMIN_SECRET: ci-api-admin-secret
+          ZEIMA_API_URL: ${{ env.PUBLIC_URL }}
+          ZEIMA_WEB_URL: ${{ env.PUBLIC_URL }}
+          ZEIMA_SWAGGER_ENABLED: "false"
+          ZEIMA_VERIFY_EMAIL: "false"
+        run: deploy/keycloak/apply.sh
+      - name: Sign in and sync
+        run: node deploy/e2e/smoke.mjs
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --tail 200
 
   rust:
     strategy:
