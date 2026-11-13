@@ -106,7 +106,7 @@
     },
     "/readyz": {
       "get": {
-        "summary": "Readiness: the dependencies (Keycloak, later the database) are reachable",
+        "summary": "Readiness: the dependencies (Keycloak, the database) are reachable",
         "tags": [
           "health"
         ],
@@ -209,6 +209,76 @@
                       }
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/zeima-server": {
+      "get": {
+        "summary": "Find the API and the sign-in issuer from the server URL",
+        "tags": [
+          "discovery"
+        ],
+        "responses": {
+          "200": {
+            "description": "Where to sign in and where the API lives",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "apiUrl",
+                    "issuer",
+                    "clientId",
+                    "apiVersions",
+                    "minClientVersion",
+                    "deploymentMode"
+                  ],
+                  "properties": {
+                    "apiUrl": {
+                      "type": "string",
+                      "description": "Base URL of the API (without /v1)"
+                    },
+                    "issuer": {
+                      "type": "string",
+                      "description": "OpenID Connect issuer; its /.well-known/openid-configuration lists the endpoints"
+                    },
+                    "clientId": {
+                      "type": "string",
+                      "description": "Public OAuth client the desktop app signs in with"
+                    },
+                    "apiVersions": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      },
+                      "description": "API versions this server speaks (/v<n>)"
+                    },
+                    "minClientVersion": {
+                      "type": "string",
+                      "description": "Oldest desktop app version (major.minor.patch) this server works with"
+                    },
+                    "deploymentMode": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "cloud"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "self_hosted"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "description": "Where to sign in and where the API lives"
                 }
               }
             }
@@ -375,6 +445,1387 @@
             }
           },
           "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/workspaces": {
+      "get": {
+        "summary": "The workspaces the caller can use",
+        "tags": [
+          "sync"
+        ],
+        "description": "A second device finds the personal workspace here and syncs into it instead of creating another.",
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "kind",
+                      "name",
+                      "orgId"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "kind": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "personal"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "org"
+                            ]
+                          }
+                        ]
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "orgId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create the personal workspace (idempotent)",
+        "tags": [
+          "sync"
+        ],
+        "description": "The first sync of a local workspace uploads it as the caller's personal workspace with this id.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "kind",
+                    "name",
+                    "orgId"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "kind": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "personal"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "org"
+                          ]
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "orgId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sync/push": {
+      "post": {
+        "summary": "Send changes to a workspace",
+        "tags": [
+          "sync"
+        ],
+        "description": "Each change is merged field by field (last write wins by HLC). The response has one result per change, in order. Rejected changes are not applied; the reason says why.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "workspaceId",
+                  "deviceId",
+                  "changes"
+                ],
+                "properties": {
+                  "workspaceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "deviceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "table",
+                        "rowId",
+                        "op",
+                        "hlc"
+                      ],
+                      "properties": {
+                        "table": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "project"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "tag"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "time_entry"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "pause"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "activity"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "cost_center"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "cost_center_assignment"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "jurisdiction_selection"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "work_settings"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "work_schedule"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "absence_type"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "absence"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "custom_holiday"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "balance_adjustment"
+                              ]
+                            }
+                          ]
+                        },
+                        "rowId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "op": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "upsert"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "delete"
+                              ]
+                            }
+                          ]
+                        },
+                        "hlc": {
+                          "type": "string",
+                          "pattern": "^[0-9]{15}-[0-9]{6}-[^\\s]+$",
+                          "description": "`{wall_ms:015}-{counter:06}-{node}`"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "description": "Only the fields that changed",
+                          "additionalProperties": {}
+                        }
+                      }
+                    },
+                    "maxItems": 500
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "results"
+                  ],
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "status"
+                            ],
+                            "properties": {
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "applied"
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "status"
+                            ],
+                            "properties": {
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "ignored"
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "status",
+                              "reason"
+                            ],
+                            "properties": {
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "rejected"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sync/pull": {
+      "get": {
+        "summary": "Rows changed since a cursor",
+        "tags": [
+          "sync"
+        ],
+        "description": "Returns the merged state of rows changed after `cursor`, oldest first, across all workspaces the caller can see. Merge each field into the local row with the same rule as push. Pass the returned `cursor` next time; `more` says to ask again.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "in": "query",
+            "name": "cursor",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 500
+            },
+            "in": "query",
+            "name": "limit",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rows",
+                    "cursor",
+                    "more"
+                  ],
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "workspaceId",
+                          "table",
+                          "rowId",
+                          "fields",
+                          "deleted"
+                        ],
+                        "properties": {
+                          "workspaceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "table": {
+                            "type": "string"
+                          },
+                          "rowId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "fields": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object",
+                              "required": [
+                                "v",
+                                "h"
+                              ],
+                              "properties": {
+                                "v": {},
+                                "h": {
+                                  "type": "string"
+                                }
+                              }
+                            }
+                          },
+                          "deleted": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "cursor": {
+                      "type": "integer"
+                    },
+                    "more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/entitlement": {
+      "get": {
+        "summary": "The caller's plan, features and signed entitlement token",
+        "tags": [
+          "licensing"
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the caller may use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "plan",
+                    "features",
+                    "status",
+                    "orgId",
+                    "seats",
+                    "expiresAt",
+                    "token"
+                  ],
+                  "properties": {
+                    "plan": {
+                      "type": "string"
+                    },
+                    "features": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "valid"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "grace"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "expired"
+                          ]
+                        }
+                      ]
+                    },
+                    "orgId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "seats": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "expiresAt": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "End of the paid period, unix seconds"
+                    },
+                    "token": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Ed25519-signed token for offline checks; null on the Free plan"
+                    }
+                  },
+                  "description": "What the caller may use"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/license": {
+      "put": {
+        "summary": "Install a license file (self-hosted)",
+        "tags": [
+          "licensing"
+        ],
+        "description": "The token must be signed by a trusted issuer (`ENTITLEMENT_PUBLIC_KEYS`). It replaces the license for the same user or organization.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 20,
+                    "maxLength": 20000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A license held by this server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "plan",
+                    "features",
+                    "status",
+                    "orgId",
+                    "userId",
+                    "seats",
+                    "expiresAt"
+                  ],
+                  "properties": {
+                    "plan": {
+                      "type": "string"
+                    },
+                    "features": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "valid"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "grace"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "expired"
+                          ]
+                        }
+                      ]
+                    },
+                    "orgId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "userId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "seats": {
+                      "anyOf": [
+                        {
+                          "type": "integer"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "expiresAt": {
+                      "type": "integer",
+                      "description": "End of the paid period, unix seconds"
+                    }
+                  },
+                  "description": "A license held by this server"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "The licenses installed on this server",
+        "tags": [
+          "licensing"
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "plan",
+                      "features",
+                      "status",
+                      "orgId",
+                      "userId",
+                      "seats",
+                      "expiresAt"
+                    ],
+                    "properties": {
+                      "plan": {
+                        "type": "string"
+                      },
+                      "features": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "status": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "valid"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "grace"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "expired"
+                            ]
+                          }
+                        ]
+                      },
+                      "orgId": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "userId": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "seats": {
+                        "anyOf": [
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "expiresAt": {
+                        "type": "integer",
+                        "description": "End of the paid period, unix seconds"
+                      }
+                    },
+                    "description": "A license held by this server"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/plans": {
+      "get": {
+        "summary": "What can be bought",
+        "tags": [
+          "billing"
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "key",
+                      "plan"
+                    ],
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "plan": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/checkout": {
+      "post": {
+        "summary": "A purchase link for the caller",
+        "tags": [
+          "billing"
+        ],
+        "description": "Open the link in a browser. The purchase turns into an entitlement when the payment provider confirms it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "key"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "orgId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "url"
+                  ],
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing": {
+      "get": {
+        "summary": "The caller's subscription",
+        "tags": [
+          "billing"
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "plan",
+                        "status",
+                        "validUntil",
+                        "portalUrl"
+                      ],
+                      "properties": {
+                        "plan": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "validUntil": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Unix ms"
+                        },
+                        "portalUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Where the customer manages the subscription"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/webhook": {
+      "post": {
+        "summary": "Lemon Squeezy webhook",
+        "tags": [
+          "billing"
+        ],
+        "description": "Signed with the webhook secret (`X-Signature`, HMAC-SHA256 of the body). Not for clients.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "status"
+                  ],
+                  "properties": {
+                    "status": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "applied"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "ignored"
+                          ]
+                        }
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "Problem details (RFC 9457)",
             "content": {
               "application/problem+json": {

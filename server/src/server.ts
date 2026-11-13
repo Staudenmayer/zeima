@@ -2,8 +2,9 @@
 
 import { buildApp } from './app.ts'
 import { ConfigError, loadConfig } from './config.ts'
+import { connect, migrateDb } from './db/index.ts'
 
-let config
+let config: ReturnType<typeof loadConfig>
 try {
   config = loadConfig()
 } catch (err) {
@@ -12,7 +13,15 @@ try {
   process.exit(1)
 }
 
-const app = await buildApp(config)
+const { client, db } = connect(config.databaseUrl)
+// Self-hosted installs have no separate migration step: the API brings its
+// schema up to date before it listens.
+await migrateDb(db)
+
+const app = await buildApp(config, { db })
+app.addHook('onClose', async () => {
+  await client.end()
+})
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {

@@ -1,0 +1,46 @@
+# Who may do what inside an organization (SPEC §5.9).
+#
+# `can(actor, action, resource)` looks up the actor's role in the active org
+# and gets a scope. No entry means denied.
+#
+#   own    the resource belongs to the actor
+#   group  the resource's owner shares a department group with the actor
+#   org    anything in the org
+#
+# The server is authoritative; the desktop app uses this table only to hide
+# or show UI. Changing it needs a matching row in the matrix test.
+version: 1
+
+actions:
+  # Time entries and everything that hangs off them
+  entry.read:        { owner: org, admin: own, manager: group, member: own }
+  entry.write:       { owner: own, admin: own, manager: own, member: own }
+  entry.write_locked: { owner: org, admin: org, manager: group }
+  entry.approve:     { owner: org, admin: org, manager: group }
+
+  # Absences
+  absence.read:      { owner: org, admin: org, manager: group, member: own }
+  absence.write:     { owner: own, admin: own, manager: own, member: own }
+  absence.approve:   { owner: org, admin: org, manager: group }
+
+  # Shared org data
+  project.read:      { owner: org, admin: org, manager: org, member: org }
+  project.write:     { owner: org, admin: org }
+  cost_center.read:  { owner: org, admin: org, manager: org, member: org }
+  cost_center.write: { owner: org, admin: org }
+  tag.write:         { owner: org, admin: org }
+  policy.write:      { owner: org, admin: org }
+
+  # People
+  member.read:       { owner: org, admin: org, manager: group, member: own }
+  member.invite:     { owner: org, admin: org }
+  member.manage:     { owner: org, admin: org }
+  group.manage:      { owner: org, admin: org }
+  role.assign:       { owner: org }
+
+  # Organization
+  org.settings:      { owner: org, admin: org }
+  addon.allowlist:   { owner: org, admin: org }
+  audit.read:        { owner: org, admin: org }
+  billing.manage:    { owner: org }
+  org.delete:        { owner: org }

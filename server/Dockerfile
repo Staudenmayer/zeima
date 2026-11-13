@@ -7,6 +7,7 @@ WORKDIR /app
 COPY package.json bun.lock ./
 COPY server/package.json server/
 COPY packages/api-contract/package.json packages/api-contract/
+COPY packages/shared-fixtures/package.json packages/shared-fixtures/
 # Only the server's production dependencies, not the desktop frontend's.
 RUN bun install --frozen-lockfile --production --filter '@zeima/server'
 
@@ -18,6 +19,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/server/node_modules ./server/node_modules
 COPY server/package.json ./server/
 COPY server/src ./server/src
+COPY server/drizzle ./server/drizzle
+COPY packages/shared-fixtures/permissions.yaml ./packages/shared-fixtures/permissions.yaml
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \

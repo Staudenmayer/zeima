@@ -34,7 +34,7 @@ export const healthRoutes: FastifyPluginAsyncTypebox<{ checks: Record<string, Re
     {
       schema: {
         tags: ['health'],
-        summary: 'Readiness: the dependencies (Keycloak, later the database) are reachable',
+        summary: 'Readiness: the dependencies (Keycloak, the database) are reachable',
         response: { 200: Readiness, 503: Readiness },
       },
     },

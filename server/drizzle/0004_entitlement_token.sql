@@ -1,0 +1,1 @@
+ALTER TABLE "entitlement" ADD COLUMN "token" text;

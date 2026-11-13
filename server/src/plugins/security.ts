@@ -20,6 +20,8 @@ export const securityPlugin = fp(
     await app.register(rateLimit, {
       max: config.rateLimitPerMinute,
       timeWindow: '1 minute',
+      // Injected test sockets have no address.
+      keyGenerator: (request) => request.ip ?? 'unknown',
       // Probes must keep working under load.
       allowList: (request) => request.url === '/healthz' || request.url === '/readyz',
       errorResponseBuilder: (_request, context) =>

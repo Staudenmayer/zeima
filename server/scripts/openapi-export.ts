@@ -8,11 +8,12 @@ import { loadConfig } from '../src/config.ts'
 
 export const CONTRACT_PATH = new URL('../../packages/api-contract/openapi.json', import.meta.url)
 
-/** The OpenAPI document with the default configuration, as committed. */
+/** The OpenAPI document with the modules of both deployment modes, as committed. */
 export async function exportOpenApi(): Promise<string> {
   const app = await buildApp(loadConfig({ NODE_ENV: 'production', METRICS_ENABLED: 'false' }), {
     logger: false,
     readiness: {},
+    documentAll: true,
   })
   await app.ready()
   const doc = JSON.stringify(app.swagger(), null, 2) + '\n'

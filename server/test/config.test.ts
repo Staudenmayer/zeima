@@ -48,3 +48,11 @@ describe('loadConfig', () => {
     expect(text).toContain('DEPLOYMENT_MODE')
   })
 })
+
+describe('MIN_CLIENT_VERSION', () => {
+  it('defaults to every version and must look like major.minor.patch', () => {
+    expect(loadConfig({}).minClientVersion).toBe('0.0.0')
+    expect(loadConfig({ MIN_CLIENT_VERSION: '1.1.0' }).minClientVersion).toBe('1.1.0')
+    expect(() => loadConfig({ MIN_CLIENT_VERSION: 'new' })).toThrow(ConfigError)
+  })
+})

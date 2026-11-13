@@ -29,7 +29,7 @@ describe('OpenAPI contract', async () => {
   })
 
   it('versions the API under /v1', () => {
-    const unversioned = Object.keys(doc.paths).filter((p) => !p.startsWith('/v1/') && !['/healthz', '/readyz'].includes(p))
+    const unversioned = Object.keys(doc.paths).filter((p) => !p.startsWith('/v1/') && !['/healthz', '/readyz', '/.well-known/zeima-server'].includes(p))
     expect(unversioned).toEqual([])
   })
 

@@ -37,6 +37,8 @@ export interface AuthUser {
   orgs: Record<string, OrgMembership>
   /** Client the token was issued to (`azp`). */
   client: string
+  /** When the token expires, unix ms. */
+  expiresAt: number
 }
 
 declare module 'fastify' {
@@ -59,7 +61,11 @@ export function orgsFromGroups(groups: readonly string[]): Record<string, OrgMem
   for (const path of groups) {
     const [, root, orgId, kind, ...rest] = path.split('/')
     if (root !== 'orgs' || !orgId || !kind) continue
-    const org = (orgs[orgId] ??= { role: 'member', groups: [] })
+    let org = orgs[orgId]
+    if (!org) {
+      org = { role: 'member', groups: [] }
+      orgs[orgId] = org
+    }
     if (kind === 'roles' && rest.length === 1 && (ORG_ROLES as readonly string[]).includes(rest[0]!)) {
       const role = rest[0] as OrgRole
       if (rank(role) < rank(org.role)) org.role = role
@@ -85,6 +91,7 @@ function userFromClaims(claims: JWTPayload): AuthUser {
     roles,
     orgs: orgsFromGroups(groups),
     client: str(claims.azp) ?? '',
+    expiresAt: (claims.exp ?? 0) * 1000,
   }
 }
 
