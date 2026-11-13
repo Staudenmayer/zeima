@@ -152,6 +152,58 @@ export const commands = {
 	 *  IPC numbers are JS numbers).
 	 */
 	addonTimeline: (from: number | null, to: number | null) => typedError<AddonTimelineItem[], CmdError>(__TAURI_INVOKE("addon_timeline", { from, to })),
+	accountStatus: () => typedError<AccountStatus, CmdError>(__TAURI_INVOKE("account_status")),
+	/**
+	 *  Sets (or, with `None`, clears) the server. Checks that it is a Zeima
+	 *  server first. Changing the server signs out.
+	 */
+	accountSetServer: (url: string | null) => typedError<AccountStatus, CmdError>(__TAURI_INVOKE("account_set_server", { url })),
+	/**
+	 *  Signs in in the system browser. Resolves when done, failed, timed out
+	 *  (5 minutes) or cancelled (error code `cancelled`).
+	 */
+	accountSignIn: () => typedError<AccountStatus, CmdError>(__TAURI_INVOKE("account_sign_in")),
+	accountCancel: () => typedError<null, CmdError>(__TAURI_INVOKE("account_cancel")),
+	/**
+	 *  Forgets the sign-in on this device. The server session stays until it
+	 *  expires; revoking it from the account page signs out everywhere.
+	 */
+	accountSignOut: () => typedError<AccountStatus, CmdError>(__TAURI_INVOKE("account_sign_out")),
+	/**  A valid access token for API calls, or `None` when signed out. */
+	accountAccessToken: () => typedError<string | null, CmdError>(__TAURI_INVOKE("account_access_token")),
+	syncStatus: () => typedError<SyncStatus, CmdError>(__TAURI_INVOKE("sync_status")),
+	/**  The newer version that is available, if any. */
+	updateCheck: () => typedError<{
+	version: string,
+	currentVersion: string,
+	/**  Release notes, if the release has any. */
+	notes: string | null,
+} | null, CmdError>(__TAURI_INVOKE("update_check")),
+	/**  Downloads the newer version, installs it and restarts the app. */
+	updateInstall: () => typedError<null, CmdError>(__TAURI_INVOKE("update_install")),
+	planStatus: () => typedError<PlanInfo, CmdError>(__TAURI_INVOKE("plan_status")),
+	/**  What can be bought here. Empty on servers without billing and when signed out. */
+	billingPlans: () => typedError<PlanOffer[], CmdError>(__TAURI_INVOKE("billing_plans")),
+	/**  Opens the purchase page for a plan in the browser. */
+	billingCheckout: (key: string) => typedError<null, CmdError>(__TAURI_INVOKE("billing_checkout", { key })),
+	/**  The caller's subscription, if they have bought one. */
+	billingSubscription: () => typedError<{
+	plan: string,
+	status: string,
+	validUntil: number | null,
+	portalUrl: string | null,
+} | null, CmdError>(__TAURI_INVOKE("billing_subscription")),
+	/**  Opens the page where the customer manages or cancels the subscription. */
+	billingOpenPortal: () => typedError<null, CmdError>(__TAURI_INVOKE("billing_open_portal")),
+	/**  Syncs now. Returns the status afterwards. */
+	syncNow: () => typedError<SyncStatus, CmdError>(__TAURI_INVOKE("sync_now")),
+	/**  Settles the choice and syncs. */
+	syncJoin: (strategy: JoinStrategy) => typedError<SyncStatus, CmdError>(__TAURI_INVOKE("sync_join", { strategy })),
+	syncConflicts: () => typedError<ConflictView[], CmdError>(__TAURI_INVOKE("sync_conflicts")),
+	/**  Tries the server's version again; true if it was written. */
+	syncRetryConflict: (table: string, rowId: string) => typedError<boolean, CmdError>(__TAURI_INVOKE("sync_retry_conflict", { table, rowId })),
+	/**  Gives up on a conflict; the local row stays as it is. */
+	syncDismissConflict: (table: string, rowId: string) => typedError<null, CmdError>(__TAURI_INVOKE("sync_dismiss_conflict", { table, rowId })),
 };
 
 /** Events */
@@ -206,6 +258,18 @@ export type AbsenceTypeInput = {
 	color: string,
 	reducesTarget: boolean,
 	affectsVacation: boolean,
+};
+
+export type AccountStatus = {
+	serverUrl: string | null,
+	signedIn: boolean,
+	user: AccountUser | null,
+};
+
+export type AccountUser = {
+	id: string,
+	email: string | null,
+	name: string | null,
 };
 
 /**
@@ -463,6 +527,17 @@ export type CmdError = {
 	field: string | null,
 };
 
+/**  A server change that could not be written on this device. */
+export type ConflictView = {
+	/**  `project`, `tag`, `time_entry`, … */
+	table: string,
+	rowId: string,
+	/**  The server's name for the row, if it has one. */
+	name: string | null,
+	message: string,
+	at: number,
+};
+
 /**  Kostenstelle: accounting unit time is allocated to. */
 export type CostCenter = {
 	id: string,
@@ -625,6 +700,16 @@ export type Hook = "entry.started" | "entry.stopped" | "entry.created" | "entry.
 /**  Items shown in the timesheet calendar, e.g. calendar events. */
 "timeline.events";
 
+/**  How a device that already has data joins an account that has data too. */
+export type JoinStrategy = 
+/**  Replace this device's data with the account's. Anything only here is lost. */
+"replace_local" | 
+/**
+ *  Keep both. Items that exist on both sides (the same alias or name) are
+ *  reported as conflicts to sort out.
+ */
+"merge";
+
 export type JurisdictionSelection = {
 	profileId: string,
 	region: string | null,
@@ -712,6 +797,23 @@ export type Permission =
 "notify" | 
 /**  HTTP requests, only to `allowed_hosts`. */
 "network";
+
+export type PlanInfo = {
+	plan: string,
+	status: PlanStatus,
+	features: string[],
+	/**  End of the paid period, unix ms. */
+	expiresAt: number | null,
+};
+
+export type PlanOffer = {
+	key: string,
+	plan: string,
+};
+
+export type PlanStatus = "valid" | "grace" | 
+/**  No token, or it lapsed. */
+"free";
 
 /**  Summary of a bundled profile for pickers. */
 export type ProfileInfo = {
@@ -911,6 +1013,13 @@ export type StartTimer = {
 	billable: boolean | null,
 };
 
+export type Subscription = {
+	plan: string,
+	status: string,
+	validUntil: number | null,
+	portalUrl: string | null,
+};
+
 export type Summary = {
 	range: Range,
 	/**  Wall-clock time covered by at least one entry. Overlaps count once. */
@@ -921,6 +1030,20 @@ export type Summary = {
 	 */
 	byProject: ProjectTotal[],
 	entryCount: number,
+};
+
+export type SyncStatus = {
+	/**  Changes not yet sent. */
+	pending: number,
+	lastSyncedAt: number | null,
+	lastError: string | null,
+	/**  Server changes that could not be applied here. */
+	conflicts: number,
+	/**
+	 *  This device and the account both have data: the user has to choose
+	 *  (`sync_join`) before syncing starts.
+	 */
+	joinChoice: boolean,
 };
 
 export type Tag = {
@@ -982,6 +1105,13 @@ export type TimeFormat =
 export type TimerChanged = TimerState;
 
 export type TimerState = { status: "idle" } | { status: "running"; entry: TimeEntry } | { status: "paused"; pause: Pause; resumeEntry: TimeEntry | null };
+
+export type UpdateInfo = {
+	version: string,
+	currentVersion: string,
+	/**  Release notes, if the release has any. */
+	notes: string | null,
+};
 
 export type VacationSummary = {
 	year: number,

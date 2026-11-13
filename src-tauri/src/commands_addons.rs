@@ -338,7 +338,7 @@ fn find_provider(
 }
 
 /// What the browser shows after the redirect.
-fn sign_in_pages(language: &str) -> oauth::Pages {
+pub(crate) fn sign_in_pages(language: &str) -> oauth::Pages {
     let (title, ok, failed) = if language == "de" {
         (
             "Zeima",

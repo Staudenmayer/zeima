@@ -1,20 +1,25 @@
+mod account;
 mod activity;
 mod addons;
 mod background;
 mod backup;
+mod billing;
 mod budget;
 mod commands;
 mod commands_addons;
 mod commands_report;
 mod commands_work;
 mod events;
+mod license;
 mod oauth;
 mod os;
 mod secrets;
 mod settings;
 mod shortcuts;
 mod state;
+mod sync;
 mod tray;
+mod updates;
 mod windows;
 
 use std::sync::{Arc, RwLock};
@@ -125,6 +130,25 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands_addons::addon_oauth_cancel,
             commands_addons::addon_oauth_disconnect,
             commands_addons::addon_timeline,
+            account::account_status,
+            account::account_set_server,
+            account::account_sign_in,
+            account::account_cancel,
+            account::account_sign_out,
+            account::account_access_token,
+            sync::sync_status,
+            updates::update_check,
+            updates::update_install,
+            license::plan_status,
+            billing::billing_plans,
+            billing::billing_checkout,
+            billing::billing_subscription,
+            billing::billing_open_portal,
+            sync::sync_now,
+            sync::sync_join,
+            sync::sync_conflicts,
+            sync::sync_retry_conflict,
+            sync::sync_dismiss_conflict,
         ])
         .events(tauri_specta::collect_events![
             events::TimerChanged,
@@ -172,6 +196,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
@@ -205,6 +230,7 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move { windows::show_main(&handle, None).await });
             }
             background::spawn(app.handle().clone());
+            sync::spawn_listener(app.handle().clone());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { activity::on_startup(&handle).await });
             let handle = app.handle().clone();

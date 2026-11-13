@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import AccountCard from '@/components/time/AccountCard.vue'
 import ThemeSwitch from '@/components/ThemeSwitch.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import SettingsNav from '@/components/time/SettingsNav.vue'
@@ -16,12 +17,30 @@ import TimezonePicker from '@/components/time/TimezonePicker.vue'
 import { errorMessage } from '@/lib/ipc'
 import { useSettingsStore } from '@/stores/settings'
 import { useSetupStore } from '@/stores/setup'
+import { useUpdatesStore } from '@/stores/updates'
 
 definePage({ meta: { titleKey: 'nav.settings' } })
 
 const { t } = useI18n()
 const store = useSettingsStore()
 const setup = useSetupStore()
+const updates = useUpdatesStore()
+const upToDate = ref(false)
+async function checkForUpdates() {
+  upToDate.value = false
+  try {
+    upToDate.value = (await updates.check()) === null
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
+}
+async function installUpdate() {
+  try {
+    await updates.install()
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
+}
 
 const form = ref<AppSettings | null>(null)
 watch(
@@ -226,6 +245,8 @@ async function save() {
       </CardContent>
     </Card>
 
+    <AccountCard />
+
     <Card>
       <CardHeader>
         <div class="flex flex-wrap items-center justify-between gap-4">
@@ -255,6 +276,13 @@ async function save() {
           <dt class="text-muted-foreground">{{ $t('settings.pendingChanges') }}</dt>
           <dd>{{ store.info.pendingChanges }}</dd>
         </dl>
+        <div class="mt-4 flex flex-wrap items-center gap-3 text-sm">
+          <Button v-if="updates.available" :disabled="updates.installing" @click="installUpdate">
+            {{ $t('settings.updateInstall', { version: updates.available.version }) }}
+          </Button>
+          <Button v-else variant="outline" :disabled="updates.checking" @click="checkForUpdates">{{ $t('settings.updateCheck') }}</Button>
+          <span v-if="upToDate" class="text-muted-foreground">{{ $t('settings.updateCurrent') }}</span>
+        </div>
       </CardContent>
     </Card>
   </div>

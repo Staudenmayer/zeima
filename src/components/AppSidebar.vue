@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { SidebarProps } from '@/components/ui/sidebar'
 
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAccountStore } from '@/stores/account'
 import {
   BarChart3,
   Clock,
@@ -34,6 +35,8 @@ const props = withDefaults(defineProps<SidebarProps>(), {
 })
 
 const { t } = useI18n()
+const account = useAccountStore()
+onMounted(() => account.load())
 
 const tracking = computed(() => [
   { title: t('nav.dashboard'), url: '/', icon: LayoutDashboard },
@@ -85,7 +88,9 @@ const user = computed(() => ({
     <SidebarFooter>
       <!--<NavUser :user="user"></NavUser>-->
       <NavMain :items="system" />
-      <p class="px-2 pb-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">{{ $t('app.local') }}</p>
+      <p class="truncate px-2 pb-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+        {{ account.status.signedIn ? $t('account.signedInAs', { name: account.status.user?.email ?? account.status.user?.name ?? '' }) : $t('app.local') }}
+      </p>
     </SidebarFooter>
     <SidebarRail />
   </Sidebar>

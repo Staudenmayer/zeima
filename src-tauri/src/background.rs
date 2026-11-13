@@ -15,6 +15,8 @@ use crate::state::AppState;
 use crate::{addons, backup, budget, tray};
 
 const INTERVAL: Duration = Duration::from_secs(30);
+/// Ticks between sync runs (one minute).
+const SYNC_EVERY: u32 = 2;
 /// Ticks between backup checks (one hour).
 const BACKUP_EVERY: u32 = 120;
 
@@ -29,6 +31,11 @@ pub fn spawn(app: AppHandle) {
             if ticks.is_multiple_of(BACKUP_EVERY) {
                 if let Err(err) = backup::run(&app, false).await {
                     eprintln!("backup failed: {err}");
+                }
+            }
+            if ticks.is_multiple_of(SYNC_EVERY) {
+                if let Err(err) = crate::sync::run(&app).await {
+                    eprintln!("sync failed: {err}");
                 }
             }
             let state = app.state::<AppState>();
