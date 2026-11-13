@@ -7,7 +7,7 @@
 //
 // Sources: [workspace.package] in Cargo.toml (src-tauri/tauri.conf.json has no
 // "version", so Tauri and the in-app "About" use the Cargo one), and the
-// package.json files. Cargo.lock is refreshed by `set`.
+// package.json files. Cargo.lock and bun.lock are refreshed by `set`.
 import { execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -16,7 +16,13 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SEMVER =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/
-const packageJsons = ['package.json', 'server/package.json', 'packages/api-contract/package.json']
+const packageJsons = [
+  'package.json',
+  'server/package.json',
+  'packages/api-contract/package.json',
+  'packages/core-wasm/package.json',
+  'packages/shared-fixtures/package.json',
+]
 const cargoToml = join(root, 'Cargo.toml')
 const tauriConf = join(root, 'src-tauri/tauri.conf.json')
 
@@ -67,6 +73,8 @@ if (cmd === 'check') {
   }
   // Refresh the workspace crates' entries in Cargo.lock without upgrading anything.
   execSync('cargo update --workspace --offline', { cwd: root, stdio: 'inherit' })
+  // Same for the workspaces' versions in bun.lock (CI installs with --frozen-lockfile).
+  execSync('bun install --lockfile-only', { cwd: root, stdio: 'inherit' })
   console.log(`Set version ${version}`)
 } else {
   console.error('Usage: node scripts/version.mjs check [tag] | set X.Y.Z')

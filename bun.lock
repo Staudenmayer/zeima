@@ -43,6 +43,10 @@
         "openapi-typescript": "^7.13.0",
       },
     },
+    "packages/core-wasm": {
+      "name": "@zeima/core-wasm",
+      "version": "1.0.0-alpha.0",
+    },
     "packages/shared-fixtures": {
       "name": "@zeima/shared-fixtures",
       "version": "1.0.0-alpha.0",
@@ -570,6 +574,8 @@
     "@vueuse/shared": ["@vueuse/shared@15.0.0", "", { "peerDependencies": { "vue": "^3.5.0" } }, "sha512-vbNXhGrbV53xPOMSyOzMHQRvhMgZf7oNDw2RChUetVxwTIEkInQ1joZ9JbT0G3z2n2AJNjvmCWeM9ySYrnvogA=="],
 
     "@zeima/api-contract": ["@zeima/api-contract@workspace:packages/api-contract"],
+
+    "@zeima/core-wasm": ["@zeima/core-wasm@workspace:packages/core-wasm"],
 
     "@zeima/server": ["@zeima/server@workspace:server"],
 
