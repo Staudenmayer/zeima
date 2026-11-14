@@ -41,6 +41,7 @@ export const SYNCED_TABLES = [
   'work_location',
   'org_policy',
   'office',
+  'room',
   'meeting',
   'meeting_response',
 ] as const

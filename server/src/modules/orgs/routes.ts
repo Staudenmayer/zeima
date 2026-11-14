@@ -14,6 +14,7 @@ import { PRESENCE_STATES } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { reconcileOrganization } from './reconcile.ts'
 import { freeBusy } from '../../meetings/freebusy.ts'
+import { roomBookings } from '../../meetings/rooms.ts'
 import { audit, auditEntries, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
 
 const Role = Type.Union(ORG_ROLES.map((r) => Type.Literal(r)))
@@ -665,6 +666,33 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       // Only people of this organization.
       const members = new Set((await listMembers(database(), orgId)).map((m) => m.id))
       return freeBusy(database(), workspace, userIds.filter((u) => members.has(u)), from, to, timezone ?? 'UTC')
+    },
+  )
+
+  app.post(
+    '/orgs/:orgId/rooms/bookings',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'When the meeting rooms are booked (for choosing one)',
+        description: 'Only times, never which meeting. Every member may ask. `to` is at most 31 days after `from`.',
+        security: SECURITY,
+        params: OrgParams,
+        body: Type.Object({
+          from: Type.Integer({ description: 'Unix ms' }),
+          to: Type.Integer({ description: 'Unix ms' }),
+          exclude: Type.Optional(Type.String({ format: 'uuid', description: 'A meeting to leave out: the one being changed' })),
+        }),
+        response: { 200: Type.Record(Type.String(), Type.Array(Type.Object({ from: Type.Integer(), to: Type.Integer() }))), ...problems(400, 401, 403, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId } = request.params
+      actorIn({ user: request.user! }, orgId)
+      const { from, to, exclude } = request.body
+      if (to <= from || to - from > 31 * 86_400_000) throw new HttpProblem(400, 'bad_request', '`to` must be after `from`, within 31 days')
+      const workspace = await orgWorkspaceId(database(), orgId)
+      return workspace ? roomBookings(database(), workspace, from, to, exclude) : {}
     },
   )
 

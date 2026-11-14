@@ -92,10 +92,12 @@ What it creates:
   6 projects (one visible to its members only), 3 absence types.
 - **Entries:** about three weeks per person, roughly 385 in total.
 - **Absences:** pending, approved and rejected requests; an admin decides.
+- **Rooms** (by `ada`): Blue room, Green room and Board room, with seats.
 - **Meetings** (by `max`, inviting you and others): a daily standup, weekly
-  planning, a Tuesday/Thursday design sync, a retrospective every second
-  Friday, a customer demo, a quarterly review and a cancelled workshop; plus
-  attendee answers.
+  planning (Blue room), a Tuesday/Thursday design sync (Green room), a
+  retrospective every second Friday (Board room), a customer demo, a quarterly
+  review (Board room) and a cancelled workshop; plus attendee answers. No room
+  is booked twice.
 
 Your own entries and meetings in the organization are not created: the script
 cannot act as you. Create those in the app. The app pulls the rest the next time

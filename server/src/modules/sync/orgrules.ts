@@ -11,6 +11,7 @@
 
 import { and, eq, inArray } from 'drizzle-orm'
 import { type Db, schema } from '../../db/index.ts'
+import { roomIsTaken } from '../../meetings/rooms.ts'
 import { type Actor, can, scopeOf } from '../../plugins/authz.ts'
 import type { Change, Outcome, RowState } from '../../sync/merge.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId, type PolicyRow } from './policy.ts'
@@ -27,6 +28,7 @@ const SHARED: Record<string, string> = {
   absence_type: 'policy.write',
   org_policy: 'policy.write',
   office: 'policy.write',
+  room: 'policy.write',
   custom_holiday: 'policy.write',
 }
 
@@ -175,6 +177,10 @@ export async function checkOrgWrite(
   if (!owner) return { status: 'rejected', reason: 'forbidden' }
   if (change.table === 'absence') return checkAbsence(db, actor, orgId, change, current, owner)
   if (change.table === 'meeting_response' && owner === actor.user.id) return checkMeetingResponse(db, orgId, actor.user.id, merged)
+  if (change.table === 'meeting' && owner === actor.user.id && change.op !== 'delete') {
+    const workspace = await orgWorkspaceId(db, orgId)
+    if (workspace && (await roomIsTaken(db, workspace, change.rowId, merged))) return { status: 'rejected', reason: 'room_taken' }
+  }
   const moved = change.fields?.userId
   if (current && typeof moved === 'string' && moved !== owner) return { status: 'rejected', reason: 'forbidden_field' }
   if (owner === actor.user.id) return change.table === 'time_entry' ? checkEntryPolicy(db, actor, orgId, change, merged) : null

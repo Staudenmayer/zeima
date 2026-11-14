@@ -475,6 +475,38 @@ pub async fn office_delete(app: AppHandle, state: State<'_, AppState>, id: Strin
     Ok(())
 }
 
+/// The organization's rooms for meetings.
+#[tauri::command]
+#[specta::specta]
+pub async fn rooms_list(state: State<'_, AppState>) -> CmdResult<Vec<zeima_core::Room>> {
+    Ok(state.data().list_rooms().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn room_save(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: Option<String>,
+    name: String,
+    capacity: Option<u32>,
+) -> CmdResult<zeima_core::Room> {
+    let room = state
+        .data()
+        .save_room(id.as_deref(), &name, capacity.map(i64::from))
+        .await?;
+    work_changed(&app).await;
+    Ok(room)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn room_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state.data().delete_room(&id).await?;
+    work_changed(&app).await;
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn location_pattern_get(state: State<'_, AppState>) -> CmdResult<zeima_core::LocationPattern> {

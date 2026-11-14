@@ -17,7 +17,7 @@ use crate::{Core, Result};
 
 /// Tables the server accepts (`server/src/modules/sync/routes.ts`). Changes
 /// to other tables stay in the log until the server learns them.
-pub const SYNCED_TABLES: [&str; 20] = [
+pub const SYNCED_TABLES: [&str; 21] = [
     "project",
     "tag",
     "time_entry",
@@ -36,6 +36,7 @@ pub const SYNCED_TABLES: [&str; 20] = [
     "work_location",
     "org_policy",
     "office",
+    "room",
     "meeting",
     "meeting_response",
 ];
@@ -46,7 +47,7 @@ macro_rules! synced_tables_sql {
     () => {
         "'project', 'tag', 'time_entry', 'pause', 'activity', 'cost_center', 'cost_center_assignment', \
          'jurisdiction_selection', 'work_settings', 'work_schedule', 'absence_type', 'absence', \
-         'custom_holiday', 'balance_adjustment', 'display_settings', 'work_location', 'org_policy', 'office', 'meeting', 'meeting_response'"
+         'custom_holiday', 'balance_adjustment', 'display_settings', 'work_location', 'org_policy', 'office', 'room', 'meeting', 'meeting_response'"
     };
 }
 

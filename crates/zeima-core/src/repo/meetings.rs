@@ -27,6 +27,8 @@ pub struct Meeting {
     pub end_at: i64,
     pub tz: String,
     pub location: Option<String>,
+    /// The room of the organization it is held in (then `location` is its name).
+    pub room_id: Option<String>,
     pub online_url: Option<String>,
     pub project_id: Option<String>,
     /// The activity time spent in it is tracked under.
@@ -54,6 +56,9 @@ pub struct MeetingInput {
     pub end_at: i64,
     pub tz: Option<String>,
     pub location: Option<String>,
+    /// A room of the organization; its name becomes the location.
+    #[serde(default)]
+    pub room_id: Option<String>,
     pub online_url: Option<String>,
     pub project_id: Option<String>,
     /// The activity time spent in it is tracked under.
@@ -93,9 +98,12 @@ pub struct MeetingOccurrence {
     pub my_status: Option<RsvpStatus>,
 }
 
+/// How far ahead a room booking is checked (repeating meetings).
+const ROOM_HORIZON_MS: i64 = 2 * 365 * 24 * 3_600_000;
+
 macro_rules! columns {
     () => {
-        "id, user_id, title, start_at, end_at, tz, location, online_url, project_id, activity_id, tag_ids_json, billable, cost_center_id, note, rrule, attendee_ids_json, cancelled"
+        "id, user_id, title, start_at, end_at, tz, location, room_id, online_url, project_id, activity_id, tag_ids_json, billable, cost_center_id, note, rrule, attendee_ids_json, cancelled"
     };
 }
 
@@ -108,6 +116,7 @@ fn from_row(r: &SqliteRow) -> Result<Meeting> {
         end_at: r.try_get("end_at")?,
         tz: r.try_get("tz")?,
         location: r.try_get("location")?,
+        room_id: r.try_get("room_id")?,
         online_url: r.try_get("online_url")?,
         project_id: r.try_get("project_id")?,
         activity_id: r.try_get("activity_id")?,
@@ -149,6 +158,7 @@ impl MeetingInput {
         crate::model::validate_tz(&tz)?;
         self.tz = Some(tz);
         self.location = trimmed(&self.location);
+        self.room_id = trimmed(&self.room_id);
         self.online_url = trimmed(&self.online_url);
         if let Some(url) = &self.online_url {
             if !url.starts_with("https://") && !url.starts_with("http://") {
@@ -221,7 +231,20 @@ impl Core {
         self.write_meeting(Some(existing), input).await
     }
 
-    async fn write_meeting(&self, existing: Option<Meeting>, input: MeetingInput) -> Result<Meeting> {
+    async fn write_meeting(&self, existing: Option<Meeting>, mut input: MeetingInput) -> Result<Meeting> {
+        // A room must be one of the organization's; its name is the place shown.
+        if let Some(room) = input.room_id.clone() {
+            let name: Option<String> = sqlx::query_scalar(
+                "SELECT name FROM room WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            )
+            .bind(&room)
+            .bind(&self.ctx().workspace_id)
+            .fetch_optional(self.pool())
+            .await?;
+            input.location = Some(name.ok_or_else(|| Error::validation("roomId", "unknown room"))?);
+            self.check_room_free(existing.as_ref().map(|m| m.id.as_str()), &room, &input)
+                .await?;
+        }
         let mut tx = self.begin().await?;
         let s = tx.stamp();
         let meeting = Meeting {
@@ -234,6 +257,7 @@ impl Core {
             end_at: input.end_at,
             tz: input.tz.unwrap_or_default(),
             location: input.location,
+            room_id: input.room_id,
             online_url: input.online_url,
             project_id: input.project_id,
             activity_id: input.activity_id,
@@ -246,11 +270,11 @@ impl Core {
             cancelled: false,
         };
         sqlx::query(
-            "INSERT INTO meeting (id, workspace_id, user_id, title, start_at, end_at, tz, location, online_url, project_id,
+            "INSERT INTO meeting (id, workspace_id, user_id, title, start_at, end_at, tz, location, room_id, online_url, project_id,
                 activity_id, tag_ids_json, billable, cost_center_id, note, rrule, attendee_ids_json, cancelled, created_at, updated_at, hlc, origin_device)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
              ON CONFLICT (id) DO UPDATE SET title = excluded.title, start_at = excluded.start_at, end_at = excluded.end_at,
-                tz = excluded.tz, location = excluded.location, online_url = excluded.online_url,
+                tz = excluded.tz, location = excluded.location, room_id = excluded.room_id, online_url = excluded.online_url,
                 project_id = excluded.project_id, activity_id = excluded.activity_id, tag_ids_json = excluded.tag_ids_json, billable = excluded.billable,
                 cost_center_id = excluded.cost_center_id, note = excluded.note, rrule = excluded.rrule,
                 attendee_ids_json = excluded.attendee_ids_json, cancelled = 0, updated_at = excluded.updated_at,
@@ -264,6 +288,7 @@ impl Core {
         .bind(meeting.end_at)
         .bind(&meeting.tz)
         .bind(&meeting.location)
+        .bind(&meeting.room_id)
         .bind(&meeting.online_url)
         .bind(&meeting.project_id)
         .bind(&meeting.activity_id)
@@ -282,6 +307,51 @@ impl Core {
         tx.log_upsert("meeting", &meeting.id, &s, &meeting).await?;
         tx.commit().await?;
         Ok(meeting)
+    }
+
+    /// Refuses a booking that overlaps another meeting in the room, repeats
+    /// included. This device only knows the meetings it was asked to; the
+    /// server checks against all of them.
+    async fn check_room_free(&self, own_id: Option<&str>, room: &str, input: &MeetingInput) -> Result<()> {
+        let tz = input.tz.clone().unwrap_or_default();
+        let horizon = input.start_at + ROOM_HORIZON_MS;
+        let mine = occurrences(
+            input.start_at,
+            input.end_at,
+            &tz,
+            input.rrule.as_deref(),
+            input.start_at,
+            horizon,
+        );
+        let others: Vec<Meeting> = sqlx::query(concat!(
+            "SELECT ",
+            columns!(),
+            " FROM meeting WHERE workspace_id = ? AND room_id = ? AND cancelled = 0 AND deleted_at IS NULL"
+        ))
+        .bind(&self.ctx().workspace_id)
+        .bind(room)
+        .fetch_all(self.pool())
+        .await?
+        .iter()
+        .map(from_row)
+        .collect::<Result<_>>()?;
+        for m in others.iter().filter(|m| Some(m.id.as_str()) != own_id) {
+            let theirs = occurrences(
+                m.start_at,
+                m.end_at,
+                &m.tz,
+                m.rrule.as_deref(),
+                input.start_at,
+                horizon,
+            );
+            if mine
+                .iter()
+                .any(|(a, b)| theirs.iter().any(|(c, d)| a < d && c < b))
+            {
+                return Err(Error::Conflict("the room is taken at that time".into()));
+            }
+        }
+        Ok(())
     }
 
     /// Calls a meeting off; it stays in the list, marked cancelled.

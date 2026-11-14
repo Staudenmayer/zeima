@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { commands, type Meeting, type MeetingInput } from '@/bindings'
+import { commands, type Meeting, type MeetingInput, type Room } from '@/bindings'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -38,7 +38,7 @@ type Repeat = 'none' | 'daily' | 'weekly'
 const REPEATS: Repeat[] = ['none', 'daily', 'weekly']
 const DAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
 
-const form = ref({ title: '', date: '', start: '09:00', end: '10:00', location: '', url: '', note: '', projectId: null as string | null, activityId: null as string | null, tagIds: [] as string[], billable: false, costCenterId: null as string | null, attendees: [] as string[], repeat: 'none' as Repeat, weekdays: [] as number[], count: 10 })
+const form = ref({ title: '', date: '', start: '09:00', end: '10:00', location: '', roomId: null as string | null, url: '', note: '', projectId: null as string | null, activityId: null as string | null, tagIds: [] as string[], billable: false, costCenterId: null as string | null, attendees: [] as string[], repeat: 'none' as Repeat, weekdays: [] as number[], count: 10 })
 const saving = ref(false)
 const busy = ref<Record<string, { from: number; to: number; kind: string }[]>>({})
 
@@ -104,6 +104,7 @@ watch(open, async (isOpen) => {
     start: m ? toTimeInput(m.startAt) : '09:00',
     end: m ? toTimeInput(m.endAt) : '10:00',
     location: m?.location ?? '',
+    roomId: m?.roomId ?? null,
     url: m?.onlineUrl ?? '',
     note: m?.note ?? '',
     projectId: m?.projectId ?? null,
@@ -157,6 +158,35 @@ watch(
   },
 )
 
+// The rooms of the organization, and which are booked at the chosen time
+// (asked of the server, which knows every meeting; only times come back).
+const NO_ROOM = '__none'
+const rooms = ref<Room[]>([])
+const roomBooked = ref<Set<string>>(new Set())
+let roomTicket = 0
+watch(
+  [open, startAt, endAt],
+  async () => {
+    if (!open.value) return
+    const mine = ++roomTicket
+    try {
+      rooms.value = await call(commands.roomsList())
+      const orgId = workspaces.active?.orgId
+      if (!orgId || rooms.value.length === 0) {
+        roomBooked.value = new Set()
+        return
+      }
+      const text = await call(
+        commands.orgRequest('POST', `/v1/orgs/${orgId}/rooms/bookings`, JSON.stringify({ from: startAt.value, to: endAt.value > startAt.value ? endAt.value : startAt.value + 3_600_000, ...(props.meeting ? { exclude: props.meeting.id } : {}) })),
+      )
+      if (mine === roomTicket) roomBooked.value = new Set(Object.keys(JSON.parse(text || '{}')))
+    } catch {
+      if (mine === roomTicket) roomBooked.value = new Set()
+    }
+  },
+  { immediate: true },
+)
+
 /** The people who are busy at the chosen time, and when. */
 const conflicts = computed(() =>
   form.value.attendees
@@ -174,6 +204,10 @@ function toggle(id: string, on: boolean) {
 
 async function save() {
   const f = form.value
+  if (f.roomId && roomBooked.value.has(f.roomId)) {
+    toast.error(t('meetings.roomTaken'))
+    return
+  }
   if (f.repeat === 'weekly' && f.weekdays.length === 0) {
     toast.error(t('meetings.pickWeekday'))
     return
@@ -183,7 +217,8 @@ async function save() {
     startAt: startAt.value,
     endAt: endAt.value > startAt.value ? endAt.value : startAt.value + 3_600_000,
     tz: getTimeZone() ?? null,
-    location: f.location || null,
+    location: f.roomId ? null : f.location || null,
+    roomId: f.roomId,
     onlineUrl: f.url || null,
     projectId: f.projectId,
     activityId: f.activityId,
@@ -259,7 +294,20 @@ async function save() {
           </p>
         </div>
         <div class="grid grid-cols-2 gap-3">
-          <div class="grid gap-2"><Label for="m-loc">{{ $t('meetings.location') }}</Label><Input id="m-loc" v-model="form.location" maxlength="200" /></div>
+          <div class="grid gap-2">
+            <Label for="m-loc">{{ $t('meetings.location') }}</Label>
+            <Select v-if="rooms.length" :model-value="form.roomId ?? NO_ROOM" @update:model-value="(v) => (form.roomId = v === NO_ROOM ? null : String(v))">
+              <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="NO_ROOM">{{ $t('meetings.otherPlace') }}</SelectItem>
+                <SelectItem v-for="r in rooms" :key="r.id" :value="r.id">
+                  {{ r.name }}<span v-if="r.capacity" class="text-muted-foreground"> · {{ $t('rooms.capacity', { n: r.capacity }) }}</span><span v-if="roomBooked.has(r.id)" class="text-amber-600"> · {{ $t('meetings.booked') }}</span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Input v-if="!form.roomId" id="m-loc" v-model="form.location" maxlength="200" />
+            <p v-else-if="roomBooked.has(form.roomId)" class="text-xs text-amber-600">{{ $t('meetings.roomTaken') }}</p>
+          </div>
           <div class="grid gap-2"><Label for="m-url">{{ $t('meetings.onlineUrl') }}</Label><Input id="m-url" v-model="form.url" type="url" placeholder="https://" /></div>
         </div>
         <div class="grid grid-cols-2 gap-3">

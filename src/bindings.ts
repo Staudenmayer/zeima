@@ -209,6 +209,10 @@ export const commands = {
 	officesList: () => typedError<Office[], CmdError>(__TAURI_INVOKE("offices_list")),
 	officeSave: (id: string | null, name: string, capacity: number | null) => typedError<Office, CmdError>(__TAURI_INVOKE("office_save", { id, name, capacity })),
 	officeDelete: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("office_delete", { id })),
+	/**  The organization's rooms for meetings. */
+	roomsList: () => typedError<Room[], CmdError>(__TAURI_INVOKE("rooms_list")),
+	roomSave: (id: string | null, name: string, capacity: number | null) => typedError<Room, CmdError>(__TAURI_INVOKE("room_save", { id, name, capacity })),
+	roomDelete: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("room_delete", { id })),
 	locationPatternGet: () => typedError<LocationPattern, CmdError>(__TAURI_INVOKE("location_pattern_get")),
 	locationPatternSet: (pattern: LocationPattern) => typedError<null, CmdError>(__TAURI_INVOKE("location_pattern_set", { pattern })),
 	/**  Sets the days without a location from the usual week; returns how many. */
@@ -851,6 +855,8 @@ export type Meeting = {
 	endAt: number,
 	tz: string,
 	location: string | null,
+	/**  The room of the organization it is held in (then `location` is its name). */
+	roomId: string | null,
 	onlineUrl: string | null,
 	projectId: string | null,
 	/**  The activity time spent in it is tracked under. */
@@ -873,6 +879,8 @@ export type MeetingInput = {
 	endAt: number,
 	tz: string | null,
 	location: string | null,
+	/**  A room of the organization; its name becomes the location. */
+	roomId?: string | null,
 	onlineUrl: string | null,
 	projectId: string | null,
 	/**  The activity time spent in it is tracked under. */
@@ -1217,6 +1225,13 @@ export type ReportRow = {
 	billableMs: number,
 	entryCount: number,
 	children: ReportRow[],
+};
+
+/**  A place for meetings, with room for `capacity` people. */
+export type Room = {
+	id: string,
+	name: string,
+	capacity: number | null,
 };
 
 export type RsvpStatus = "accepted" | "declined" | "tentative";

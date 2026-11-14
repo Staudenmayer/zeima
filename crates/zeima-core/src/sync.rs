@@ -78,6 +78,14 @@ pub enum Reason {
     Locked,
     /// Only managers change the `locked` flag.
     ForbiddenField,
+    /// The server's organization rules: not allowed for this person or table.
+    Forbidden,
+    ForbiddenTable,
+    /// The organization's policy asks for a project or tags on an entry.
+    PolicyProject,
+    PolicyTags,
+    /// Another meeting has the room at that time.
+    RoomTaken,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

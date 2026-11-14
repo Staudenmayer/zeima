@@ -54,7 +54,7 @@ pub use repo::{
     ImportPreview, ImportReport, LocationKind, LocationPattern, Office, PatternDay, WorkLocation,
 };
 #[cfg(feature = "db")]
-pub use repo::{Meeting, MeetingInput, MeetingOccurrence, MeetingResponse, RsvpStatus};
+pub use repo::{Meeting, MeetingInput, MeetingOccurrence, MeetingResponse, Room, RsvpStatus};
 
 #[cfg(feature = "db")]
 pub use db::{Core, WorkspaceInfo};

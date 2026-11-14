@@ -2,13 +2,14 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { Ban, CalendarPlus, CalendarX2, Download, ExternalLink, MapPin, Pencil, Plus } from '@lucide/vue'
+import { Ban, CalendarPlus, CalendarX2, DoorOpen, Download, ExternalLink, MapPin, Pencil, Plus } from '@lucide/vue'
 import { commands, type Meeting, type MeetingOccurrence, type RsvpStatus } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
 import MeetingDialog from '@/components/time/MeetingDialog.vue'
+import RoomsDialog from '@/components/time/RoomsDialog.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
 import { call, errorMessage } from '@/lib/ipc'
@@ -75,6 +76,7 @@ async function run(action: () => Promise<unknown>, done?: string) {
 const respond = (o: MeetingOccurrence, status: RsvpStatus) => run(() => call(commands.meetingRespond(o.meeting.id, status)))
 
 const dialogOpen = ref(false)
+const roomsOpen = ref(false)
 const editing = ref<Meeting | null>(null)
 function openDialog(m: Meeting | null) {
   editing.value = m
@@ -96,6 +98,7 @@ const { sort, apply: sortOccurrences } = useSort<MeetingOccurrence>(null, {
 
 <template>
   <PageHeader :title="$t('nav.meetings')">
+    <Button v-if="workspaces.inOrg && workspaces.canEditShared" variant="outline" @click="roomsOpen = true"><DoorOpen /> {{ $t('meetings.rooms') }}</Button>
     <Button v-if="workspaces.inOrg" @click="openDialog(null)"><Plus /> {{ $t('meetings.new') }}</Button>
   </PageHeader>
 
@@ -174,6 +177,7 @@ const { sort, apply: sortOccurrences } = useSort<MeetingOccurrence>(null, {
   </div>
 
   <MeetingDialog v-model:open="dialogOpen" :meeting="editing" @saved="load" />
+  <RoomsDialog v-model:open="roomsOpen" />
   <ConfirmDialog
     v-model:open="cancelOpen"
     :title="$t('meetings.cancelConfirm', { title: cancelling?.title ?? '' })"

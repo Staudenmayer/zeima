@@ -270,6 +270,40 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       expect(await pulledIds(BEN)).not.toContain(R_ANNA)
     })
 
+    it('book a room for one meeting at a time', async () => {
+      const ROOM = id(90), RM1 = id(91), RM2 = id(92), RM3 = id(93)
+      const HOUR = 3_600_000, WEEK = 7 * 86_400_000
+      const at = Date.UTC(2027, 0, 4, 10) // Monday 4 Jan 2027, 10:00 UTC
+      const applied = [{ status: 'applied' }]
+      // Rooms are kept by those who keep the organization's rules.
+      expect(await results(ANNA, [upsert('room', ROOM, 800, { name: 'Blue room', capacity: 8 })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await results(ADMIN, [upsert('room', ROOM, 801, { name: 'Blue room', capacity: 8 })])).toEqual(applied)
+
+      const booking = { ...meeting, startAt: at, endAt: at + HOUR, rrule: 'FREQ=WEEKLY;COUNT=2', attendeeIds: [], roomId: ROOM }
+      expect(await results(MANAGER, [upsert('meeting', RM1, 810, booking)])).toEqual(applied)
+      // Overlapping, also in a repeat, is refused; back to back and another room are fine.
+      const clash = { ...booking, userId: ANNA, startAt: at + WEEK + HOUR / 2, endAt: at + WEEK + 1.5 * HOUR, rrule: null }
+      expect(await results(ANNA, [upsert('meeting', RM2, 820, clash)])).toEqual([{ status: 'rejected', reason: 'room_taken' }])
+      expect(await results(ANNA, [upsert('meeting', RM3, 821, { ...clash, startAt: at + HOUR, endAt: at + 2 * HOUR })])).toEqual(applied)
+      expect(await results(ANNA, [upsert('meeting', RM2, 822, { ...clash, roomId: null })])).toEqual(applied)
+
+      // Everyone can ask when the rooms are booked: times only.
+      const ask = async (who: string) =>
+        app.inject({ method: 'POST', url: `/v1/orgs/${ORG}/rooms/bookings`, headers: await headers(who), payload: { from: at - HOUR, to: at + 20 * 86_400_000 } })
+      const res = await ask(BEN)
+      expect(res.statusCode).toBe(200)
+      expect((res.json() as Record<string, { from: number }[]>)[ROOM]!.map((b) => b.from)).toEqual([at, at + HOUR, at + WEEK])
+      expect(res.body).not.toContain('Sync')
+      expect((await ask(OUTSIDER)).statusCode).toBe(403)
+      // The meeting being changed does not count against itself.
+      const own = await app.inject({ method: 'POST', url: `/v1/orgs/${ORG}/rooms/bookings`, headers: await headers(BEN), payload: { from: at - HOUR, to: at + 20 * 86_400_000, exclude: RM1 } })
+      expect((own.json() as Record<string, { from: number }[]>)[ROOM]!.map((b) => b.from)).toEqual([at + HOUR])
+
+      // Calling the first meeting off frees the room again.
+      expect(await results(MANAGER, [upsert('meeting', RM1, 830, { cancelled: true })])).toEqual(applied)
+      expect(await results(ANNA, [upsert('meeting', RM2, 840, { roomId: ROOM })])).toEqual(applied)
+    })
+
     it('tell others when someone is busy, and nothing more', async () => {
       const ask = async (who: string, body: object) =>
         app.inject({ method: 'POST', url: `/v1/orgs/${ORG}/freebusy`, headers: await headers(who), payload: body })

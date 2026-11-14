@@ -334,6 +334,8 @@ Delivered as first-party **addons** (§5.12), not built into the app. The addon 
 
 ### 5.8 Meetings (Org)
 - Schedule a meeting with org users and/or external emails. Shows a free/busy grid from attendees' work schedules, absences, work location and calendar busy times.
+- **Rooms.** The organization keeps a list of rooms (name, optional seats). A meeting picks a room instead of writing a place; a room is booked by one meeting at a time, repeats included, and a meeting that is called off frees it. The server refuses an overlapping booking (`room_taken`); the meeting dialog asks `POST /v1/orgs/:id/rooms/bookings` (times only, every member may) to mark rooms that are booked at the chosen time.
+- **Busy, not what for.** Colleagues see *that* someone has a meeting or an approved absence (times only, `POST /v1/orgs/:id/freebusy`), as Busy / Absent blocks in the timesheet when they add the person; never the title, note, place or activity. Only the organizer and those asked get the meeting itself.
 - The meeting is linked to a project and cost center. At meeting time, each attendee gets a prompt to *track this meeting* (or it is tracked automatically if they opted in).
 - Bidirectional sync with the organizer's calendar provider. RSVPs sync back.
 - Recurrence via RRULE.

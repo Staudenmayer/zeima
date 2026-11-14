@@ -1726,6 +1726,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{orgId}/rooms/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * When the meeting rooms are booked (for choosing one)
+         * @description Only times, never which meeting. Every member may ask. `to` is at most 31 days after `from`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description Unix ms */
+                        from: number;
+                        /** @description Unix ms */
+                        to: number;
+                        /**
+                         * Format: uuid
+                         * @description A meeting to leave out: the one being changed
+                         */
+                        exclude?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: {
+                                from: number;
+                                to: number;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{orgId}/audit": {
         parameters: {
             query?: never;
@@ -1960,7 +2056,7 @@ export interface paths {
                         /** Format: uuid */
                         deviceId: string;
                         changes: {
-                            table: "project" | "tag" | "time_entry" | "pause" | "activity" | "cost_center" | "cost_center_assignment" | "jurisdiction_selection" | "work_settings" | "work_schedule" | "absence_type" | "absence" | "custom_holiday" | "balance_adjustment" | "display_settings" | "work_location" | "org_policy" | "office" | "meeting" | "meeting_response";
+                            table: "project" | "tag" | "time_entry" | "pause" | "activity" | "cost_center" | "cost_center_assignment" | "jurisdiction_selection" | "work_settings" | "work_schedule" | "absence_type" | "absence" | "custom_holiday" | "balance_adjustment" | "display_settings" | "work_location" | "org_policy" | "office" | "room" | "meeting" | "meeting_response";
                             /** Format: uuid */
                             rowId: string;
                             op: "upsert" | "delete";

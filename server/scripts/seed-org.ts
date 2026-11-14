@@ -280,6 +280,14 @@ if (vacation && sick) {
   }
 } else console.log('no vacation/sick absence types found; skipped absences')
 
+// ---- rooms for the meetings, by the admin
+const room = (n: string) => uid(`room/${n}`)
+await push('ada', 'room', [
+  ['Blue room', 8],
+  ['Green room', 4],
+  ['Board room', 14],
+].map(([n, seats]) => ({ id: room(n as string), fields: { name: n, capacity: seats } })))
+
 // ---- meetings by Max (manager), inviting the owner and others
 const at = (offsetDays: number, h: number, m = 0) => {
   const d = new Date(today.getTime() + offsetDays * DAY)
@@ -291,17 +299,17 @@ const M = (key: string, title: string, day: number, s: [number, number], e: [num
   id: uid(`meeting/${key}`),
   fields: {
     userId: ids.get('max'), title, startAt: at(day, s[0], s[1]), endAt: at(day, e[0], e[1]), tz: 'Europe/Berlin', location: null, onlineUrl: null,
-    projectId: null, activityId: act('Meeting'), tagIds: [], billable: false, costCenterId: null, note: '', rrule: null, attendeeIds: everyone, cancelled: false, ...extra,
+    roomId: null, projectId: null, activityId: act('Meeting'), tagIds: [], billable: false, costCenterId: null, note: '', rrule: null, attendeeIds: everyone, cancelled: false, ...extra,
   },
 })
 const meetings = [
   M('standup', 'Daily standup', monday, [9, 30], [9, 45], { rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', onlineUrl: 'https://meet.example.com/standup', projectId: proj('Atlas') }),
-  M('planning', 'Sprint planning', monday, [10, 0], [11, 30], { rrule: 'FREQ=WEEKLY;BYDAY=MO', location: 'Room 2.14', projectId: proj('Atlas'), activityId: act('Planning'), tagIds: [tag('feature')], costCenterId: cc('100') }),
-  M('design', 'Design sync', monday + 1, [15, 0], [16, 0], { rrule: 'FREQ=WEEKLY;BYDAY=TU,TH', onlineUrl: 'https://meet.example.com/design', projectId: proj('Customer Portal'), billable: true, tagIds: [tag('customer')] }),
-  M('retro', 'Retrospective', monday + 4, [14, 0], [15, 0], { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=FR', location: 'Room 1.02' }),
+  M('planning', 'Sprint planning', monday, [10, 0], [11, 30], { rrule: 'FREQ=WEEKLY;BYDAY=MO', roomId: room('Blue room'), location: 'Blue room', projectId: proj('Atlas'), activityId: act('Planning'), tagIds: [tag('feature')], costCenterId: cc('100') }),
+  M('design', 'Design sync', monday + 1, [15, 0], [16, 0], { rrule: 'FREQ=WEEKLY;BYDAY=TU,TH', roomId: room('Green room'), location: 'Green room', onlineUrl: 'https://meet.example.com/design', projectId: proj('Customer Portal'), billable: true, tagIds: [tag('customer')] }),
+  M('retro', 'Retrospective', monday + 4, [14, 0], [15, 0], { rrule: 'FREQ=WEEKLY;INTERVAL=2;BYDAY=FR', roomId: room('Board room'), location: 'Board room' }),
   M('demo', 'Customer demo', 1, [11, 0], [12, 0], { location: 'Globex HQ', projectId: proj('Customer Portal'), billable: true, tagIds: [tag('customer'), tag('onsite')], costCenterId: cc('100'), attendeeIds: [OWNER_ID, ids.get('ada'), ids.get('grace')] }),
-  M('qreview', 'Quarterly review', 3, [13, 0], [15, 0], { onlineUrl: 'https://meet.example.com/qr', activityId: act('Review'), tagIds: [tag('urgent')], costCenterId: cc('200') }),
-  M('cancelled', 'Workshop (cancelled)', 2, [10, 0], [12, 0], { cancelled: true, location: 'Room 3.01' }),
+  M('qreview', 'Quarterly review', 3, [13, 0], [15, 0], { roomId: room('Board room'), location: 'Board room', onlineUrl: 'https://meet.example.com/qr', activityId: act('Review'), tagIds: [tag('urgent')], costCenterId: cc('200') }),
+  M('cancelled', 'Workshop (cancelled)', 2, [10, 0], [12, 0], { cancelled: true, roomId: room('Green room'), location: 'Green room' }),
 ]
 await push('max', 'meeting', meetings)
 const answers: [string, string, string][] = [

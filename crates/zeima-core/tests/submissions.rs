@@ -621,6 +621,7 @@ async fn meetings_are_called_answered_and_repeat() {
         end_at: T_MON + HOUR,
         tz: None,
         location: Some("Room 4".into()),
+        room_id: None,
         online_url: Some("https://meet.example.com/x".into()),
         project_id: None,
         activity_id: Some(" work-1 ".into()),
@@ -756,4 +757,100 @@ async fn meetings_are_called_answered_and_repeat() {
             && ics.contains("STATUS:CANCELLED"),
         "{ics}"
     );
+}
+
+#[tokio::test]
+async fn a_room_is_booked_by_one_meeting_at_a_time() {
+    use zeima_core::MeetingInput;
+    const HOUR: i64 = 3_600_000;
+    const WEEK: i64 = 7 * 24 * HOUR;
+    const T_MON: i64 = 1_791_187_200_000; // 2026-10-05 08:00 UTC, a Monday
+    let (_, ada, ben) = setup().await;
+    ada.set_default_tz("UTC").unwrap();
+    ben.set_default_tz("UTC").unwrap();
+
+    // The list: names are unique (ignoring case), a capacity is at least 1.
+    let blue = ada.save_room(None, " Blue room ", Some(8)).await.unwrap();
+    assert_eq!((blue.name.as_str(), blue.capacity), ("Blue room", Some(8)));
+    assert!(matches!(
+        ada.save_room(None, "blue ROOM", None).await,
+        Err(Error::Conflict(_))
+    ));
+    assert!(ada.save_room(None, "Tiny", Some(0)).await.is_err());
+    let green = ada.save_room(None, "Green room", None).await.unwrap();
+    assert_eq!(ada.list_rooms().await.unwrap().len(), 2);
+    // A room can be renamed to its own name.
+    ada.save_room(Some(&green.id), "Green room", Some(4))
+        .await
+        .unwrap();
+
+    let meeting = |room: Option<&str>, start: i64, rrule: Option<&str>| MeetingInput {
+        title: "Sync".into(),
+        start_at: start,
+        end_at: start + HOUR,
+        tz: None,
+        location: Some("somewhere".into()),
+        room_id: room.map(Into::into),
+        online_url: None,
+        project_id: None,
+        activity_id: None,
+        tag_ids: vec![],
+        billable: false,
+        cost_center_id: None,
+        note: String::new(),
+        rrule: rrule.map(Into::into),
+        attendee_ids: vec![],
+    };
+
+    // The room's name is the place; an unknown room is refused.
+    let first = ada
+        .create_meeting(meeting(Some(&blue.id), T_MON, Some("FREQ=WEEKLY;COUNT=3")))
+        .await
+        .unwrap();
+    assert_eq!(first.location.as_deref(), Some("Blue room"));
+    assert!(ada
+        .create_meeting(meeting(Some("nope"), T_MON, None))
+        .await
+        .is_err());
+
+    // Overlapping in the same room is refused, also with a later repeat; another room or time is fine.
+    assert!(matches!(
+        ada.create_meeting(meeting(Some(&blue.id), T_MON + HOUR / 2, None))
+            .await,
+        Err(Error::Conflict(_))
+    ));
+    assert!(matches!(
+        ada.create_meeting(meeting(Some(&blue.id), T_MON + 2 * WEEK, None))
+            .await,
+        Err(Error::Conflict(_))
+    ));
+    assert!(
+        ada.create_meeting(meeting(Some(&blue.id), T_MON + HOUR, None))
+            .await
+            .is_ok(),
+        "back to back is fine"
+    );
+    assert!(ada
+        .create_meeting(meeting(Some(&green.id), T_MON, None))
+        .await
+        .is_ok());
+    assert!(
+        ada.create_meeting(meeting(Some(&blue.id), T_MON + 3 * WEEK, None))
+            .await
+            .is_ok(),
+        "after the last repeat"
+    );
+
+    // Changing a meeting does not clash with itself; calling it off frees the room.
+    ada.update_meeting(
+        &first.id,
+        meeting(Some(&blue.id), T_MON, Some("FREQ=WEEKLY;COUNT=2")),
+    )
+    .await
+    .unwrap();
+    ada.cancel_meeting(&first.id).await.unwrap();
+    assert!(ada
+        .create_meeting(meeting(Some(&blue.id), T_MON, None))
+        .await
+        .is_ok());
 }
