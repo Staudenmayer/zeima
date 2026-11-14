@@ -42,6 +42,7 @@ export default {
     noMatch: 'Nothing matches the search or the filters.',
   },
   common: {
+    pickDate: 'Choose a date',
     close: 'Close',
     save: 'Save',
     cancel: 'Cancel',

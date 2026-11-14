@@ -1,22 +1,25 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { parseDate, type DateValue } from '@internationalized/date'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CalendarDays } from '@lucide/vue'
+import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
-import { formatDateText, parseDateText } from '@/lib/time'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { formatDateText, getWeekStart, parseDateText } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 
-// Date field in the date format setting, with the system date picker
-// behind the calendar button. The native date input alone would show the
-// OS locale's format instead.
+// Date field in the date format setting, with the calendar (shadcn-vue)
+// behind the calendar button. The native date input would show the OS
+// locale's format instead.
 const model = defineModel<string>({ required: true }) // `YYYY-MM-DD`
 const props = defineProps<{ class?: string; id?: string; required?: boolean; min?: string; ariaLabel?: string }>()
 
 const settings = useSettingsStore()
 const text = ref('')
 const invalid = ref(false)
-const picker = ref<HTMLInputElement | null>(null)
+const pickerOpen = ref(false)
 
 const { locale } = useI18n()
 const placeholder = () => {
@@ -44,14 +47,25 @@ function commit() {
   show()
 }
 
-function openPicker() {
-  const el = picker.value
-  if (!el) return
+/** The calendar's value: `YYYY-MM-DD` as a date (none when empty or not a date). */
+const picked = computed<DateValue | undefined>(() => {
   try {
-    el.showPicker()
+    return model.value ? parseDate(model.value) : undefined
   } catch {
-    el.focus()
+    return undefined
   }
+})
+const minValue = computed<DateValue | undefined>(() => {
+  try {
+    return props.min ? parseDate(props.min) : undefined
+  } catch {
+    return undefined
+  }
+})
+function pick(value: DateValue | undefined) {
+  if (!value) return
+  model.value = value.toString()
+  pickerOpen.value = false
 }
 </script>
 
@@ -69,24 +83,27 @@ function openPicker() {
       @blur="commit"
       @keydown.enter="commit"
     />
-    <button
-      type="button"
-      class="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground"
-      tabindex="-1"
-      @click="openPicker"
-    >
-      <CalendarDays class="size-4" />
-    </button>
-    <!-- Only for the picker; the visible field is the text input. -->
-    <input
-      ref="picker"
-      type="date"
-      class="pointer-events-none absolute right-0 bottom-0 size-0 opacity-0"
-      tabindex="-1"
-      aria-hidden="true"
-      :value="model"
-      :min="min"
-      @change="model = ($event.target as HTMLInputElement).value"
-    />
+    <Popover v-model:open="pickerOpen">
+      <PopoverTrigger as-child>
+        <button
+          type="button"
+          class="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground"
+          tabindex="-1"
+          :aria-label="$t('common.pickDate')"
+        >
+          <CalendarDays class="size-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="end" class="w-auto p-0">
+        <Calendar
+          :model-value="picked"
+          :min-value="minValue"
+          :locale="locale"
+          :week-starts-on="(getWeekStart() as 0 | 1 | 2 | 3 | 4 | 5 | 6)"
+          initial-focus
+          @update:model-value="pick"
+        />
+      </PopoverContent>
+    </Popover>
   </div>
 </template>

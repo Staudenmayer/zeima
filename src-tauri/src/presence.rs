@@ -14,7 +14,7 @@ use zeima_core::model::TimerState;
 use crate::state::AppState;
 
 /// How often to look; a report that has not changed is repeated about every minute.
-const CHECK_EVERY: Duration = Duration::from_secs(15);
+const CHECK_EVERY: Duration = Duration::from_secs(5);
 const REPEAT_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -80,6 +80,15 @@ pub async fn changed(app: &AppHandle, kinds: &[DataKind]) {
     if kinds.contains(&DataKind::Entry) || kinds.contains(&DataKind::Away) {
         let _ = PromptsChanged.emit(app);
     }
+    // What colleagues see (timer, meetings, the day's location, shared project) may have changed.
+    if kinds.iter().any(|k| {
+        matches!(
+            k,
+            DataKind::Entry | DataKind::Away | DataKind::Timeline | DataKind::Work | DataKind::Settings
+        )
+    }) {
+        crate::presence::report_now(app);
+    }
     if kinds.contains(&DataKind::Entry) || kinds.contains(&DataKind::Project) {
         budget::check(app).await;
     }

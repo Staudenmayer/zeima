@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MonthInput from '@/components/time/MonthInput.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -6,7 +7,6 @@ import { toast } from 'vue-sonner'
 import { ArrowLeft, Printer } from '@lucide/vue'
 import { commands, type Report, type WorkDay } from '@/bindings'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { useFormat } from '@/composables/useFormat'
 import { useWorkDays } from '@/composables/useWorkDays'
 import { call, errorMessage } from '@/lib/ipc'
@@ -93,7 +93,7 @@ async function print() {
 <template>
   <div class="mx-auto flex max-w-[210mm] flex-wrap items-center gap-2 px-4 py-4 print:hidden">
     <Button variant="ghost" @click="router.back()"><ArrowLeft /> {{ $t('reports.sheet.back') }}</Button>
-    <Input v-model="month" type="month" class="w-44" :aria-label="$t('reports.groups.month')" />
+    <MonthInput v-model="month" class="w-48" :aria-label="$t('reports.groups.month')" />
     <Button class="ml-auto" @click="print"><Printer /> {{ $t('reports.sheet.print') }}</Button>
   </div>
 

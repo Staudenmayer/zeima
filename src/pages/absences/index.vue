@@ -8,6 +8,7 @@ import { commands, type Absence, type AbsenceType, type HolidayView, type Vacati
 import { Badge } from '@/components/ui/badge'
 import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
 import TableToolbar from '@/components/time/TableToolbar.vue'
+import MonthCalendarFilter from '@/components/time/MonthCalendarFilter.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -138,9 +139,6 @@ const personOptions = computed<FilterOption[]>(() => [
 ])
 const typeOptions = computed<FilterOption[]>(() => work.absenceTypes.map((x) => ({ value: x.id, label: work.absenceTypeName(x), color: x.color })))
 const statusOptions = computed<FilterOption[]>(() => (['requested', 'approved', 'rejected'] as const).map((v) => ({ value: v, label: t(`absences.status.${v}`) })))
-const monthOptions = computed<FilterOption[]>(() =>
-  Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: new Intl.DateTimeFormat(locale.value, { month: 'long' }).format(new Date(2000, i, 15)) })),
-)
 /** Whether the absence touches one of the months (it may span several). */
 function inMonths(a: Absence, months: string[]) {
   const y = String(year.value)
@@ -224,7 +222,7 @@ const { sort, sorted: sortedAbsences } = useSort(filtered, {
         <MultiFilter v-if="withPeople" v-model="filter.people" :label="$t('timesheet.person')" :options="personOptions" />
         <MultiFilter v-model="filter.types" :label="$t('absences.type')" :options="typeOptions" />
         <MultiFilter v-model="filter.statuses" :label="$t('absences.statusColumn')" :options="statusOptions" />
-        <MultiFilter v-model="filter.months" :label="$t('absences.month')" :options="monthOptions" />
+        <MonthCalendarFilter v-model="filter.months" v-model:year="year" :label="$t('absences.month')" />
       </TableToolbar>
       <p v-if="sortedAbsences.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
       <div v-else class="overflow-x-auto rounded-lg border">

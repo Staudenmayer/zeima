@@ -44,6 +44,7 @@ const de: typeof en = {
     noMatch: 'Nichts passt zur Suche oder zu den Filtern.',
   },
   common: {
+    pickDate: 'Datum wählen',
     close: 'Schließen',
     save: 'Speichern',
     cancel: 'Abbrechen',

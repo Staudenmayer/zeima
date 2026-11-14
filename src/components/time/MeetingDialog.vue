@@ -18,6 +18,7 @@ import { useOrgStore } from '@/stores/org'
 import { useProjectsStore } from '@/stores/projects'
 import { useWorkspaceStore } from '@/stores/workspace'
 import ActivitySelect from './ActivitySelect.vue'
+import DateInput from './DateInput.vue'
 import MultiSelect from './MultiSelect.vue'
 import CostCenterSelect from './CostCenterSelect.vue'
 import ProjectSelect from './ProjectSelect.vue'
@@ -243,7 +244,7 @@ async function save() {
       <form class="grid gap-4" @submit.prevent="save">
         <div class="grid gap-2"><Label for="m-title">{{ $t('meetings.title') }}</Label><Input id="m-title" v-model="form.title" required maxlength="200" autofocus /></div>
         <div class="grid grid-cols-3 gap-3">
-          <div class="grid gap-2"><Label for="m-date">{{ $t('meetings.date') }}</Label><Input id="m-date" v-model="form.date" type="date" required /></div>
+          <div class="grid gap-2"><Label for="m-date">{{ $t('meetings.date') }}</Label><DateInput id="m-date" v-model="form.date" required /></div>
           <div class="grid gap-2"><Label for="m-start">{{ $t('meetings.start') }}</Label><Input id="m-start" v-model="form.start" type="time" required /></div>
           <div class="grid gap-2"><Label for="m-end">{{ $t('meetings.end') }}</Label><Input id="m-end" v-model="form.end" type="time" required /></div>
         </div>

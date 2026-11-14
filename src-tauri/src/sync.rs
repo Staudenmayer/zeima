@@ -332,6 +332,8 @@ async fn reload_windows(app: &AppHandle) {
         ],
     }
     .emit(app);
+    // A synced location or meeting may change the status colleagues see.
+    crate::presence::report_now(app);
     crate::tray::refresh(app).await;
 }
 

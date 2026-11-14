@@ -123,10 +123,16 @@ pub fn spawn(app: AppHandle) {
                 detector.set_idle_minutes(app.state::<Activity>().idle_minutes(cfg.idle_minutes));
                 let snapshot = probe.snapshot();
                 let now = app.state::<AppState>().core.now_ms();
-                app.state::<Activity>().idle.store(
-                    snapshot.locked == Some(true) || snapshot.idle_ms.is_some_and(|ms| ms >= AWAY_AFTER_MS),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                let idle_now =
+                    snapshot.locked == Some(true) || snapshot.idle_ms.is_some_and(|ms| ms >= AWAY_AFTER_MS);
+                let was_idle = app
+                    .state::<Activity>()
+                    .idle
+                    .swap(idle_now, std::sync::atomic::Ordering::Relaxed);
+                // Away (or back) is told to the organizations at once.
+                if idle_now != was_idle {
+                    crate::presence::report_now(&app);
+                }
                 let observation = Observation {
                     now,
                     idle_ms: snapshot.idle_ms,

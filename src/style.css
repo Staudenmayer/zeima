@@ -1,4 +1,6 @@
 
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&display=swap');
+
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -134,6 +136,39 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+  /* Whatever can be clicked shows the hand, whatever component it comes from (the
+     browser default for buttons is the arrow); what is switched off shows the arrow. */
+  button,
+  summary,
+  select,
+  a[href],
+  label[for],
+  label:has([role='switch'], [role='checkbox'], input[type='checkbox'], input[type='radio']),
+  [role='button'],
+  [role='tab'],
+  [role='option'],
+  [role='menuitem'],
+  [role='menuitemcheckbox'],
+  [role='menuitemradio'],
+  [role='checkbox'],
+  [role='switch'],
+  [role='radio'],
+  [role='combobox'],
+  [role='link'],
+  input[type='checkbox'],
+  input[type='radio'],
+  input[type='file'],
+  input[type='color'],
+  input[type='range'] {
+    cursor: pointer;
+  }
+  button:disabled,
+  select:disabled,
+  input:disabled,
+  [aria-disabled='true'],
+  [data-disabled] {
+    cursor: default;
   }
   html.bare,
   html.bare body {
