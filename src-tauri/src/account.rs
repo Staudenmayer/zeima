@@ -22,7 +22,7 @@ use crate::secrets::{entry_name, Keychain, SecretStore};
 use crate::state::AppState;
 
 /// Keychain namespace and token-cache key of the account.
-const ACCOUNT_ID: &str = "zeima-account";
+pub(crate) const ACCOUNT_ID: &str = "zeima-account";
 const PROVIDER_ID: &str = "zeima";
 const SERVER_KEY: &str = "server_url";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);

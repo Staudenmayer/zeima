@@ -8,6 +8,7 @@ import {
   BarChart3,
   Clock,
   FolderKanban,
+  Building2,
   Landmark,
   LayoutDashboard,
   Palmtree,
@@ -53,6 +54,7 @@ const tracking = computed(() => [
 ])
 
 const system = computed(() => [
+  ...(account.status.signedIn ? [{ title: t('nav.organization'), url: '/organization', icon: Building2 }] : []),
   { title: t('nav.addons'), url: '/addons', icon: Puzzle },
   { title: t('nav.settings'), url: '/settings', icon: Settings },
 ])

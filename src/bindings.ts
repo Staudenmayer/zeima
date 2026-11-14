@@ -182,6 +182,12 @@ export const commands = {
 	/**  Downloads the newer version, installs it and restarts the app. */
 	updateInstall: () => typedError<null, CmdError>(__TAURI_INVOKE("update_install")),
 	planStatus: () => typedError<PlanInfo, CmdError>(__TAURI_INVOKE("plan_status")),
+	/**
+	 *  Sends a request to the signed-in server's organization API. Returns the
+	 *  JSON answer as text (`None` for "no content"); the server's problem
+	 *  details become the error, with its `code`.
+	 */
+	orgRequest: (method: string, path: string, body: string | null) => typedError<string | null, CmdError>(__TAURI_INVOKE("org_request", { method, path, body })),
 	/**  What can be bought here. Empty on servers without billing and when signed out. */
 	billingPlans: () => typedError<PlanOffer[], CmdError>(__TAURI_INVOKE("billing_plans")),
 	/**  Opens the purchase page for a plan in the browser. */

@@ -13,6 +13,7 @@ mod events;
 mod instance;
 mod license;
 mod oauth;
+mod org;
 mod os;
 mod secrets;
 mod settings;
@@ -141,6 +142,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             updates::update_check,
             updates::update_install,
             license::plan_status,
+            org::org_request,
             billing::billing_plans,
             billing::billing_checkout,
             billing::billing_subscription,
