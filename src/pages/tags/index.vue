@@ -13,6 +13,8 @@ import TagDialog from '@/components/time/TagDialog.vue'
 import { errorMessage } from '@/lib/ipc'
 import { useProjectsStore } from '@/stores/projects'
 import { useTagsStore } from '@/stores/tags'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.tags' } })
 
@@ -53,6 +55,8 @@ async function confirmDelete() {
     toast.error(errorMessage(err))
   }
 }
+
+const { sort, apply: sortTags } = useSort<Tag>(null, { name: (t) => t.name, group: (t) => t.groupName })
 </script>
 
 <template>
@@ -74,13 +78,13 @@ async function confirmDelete() {
         <table class="w-full text-sm">
           <thead class="text-left text-xs text-muted-foreground">
             <tr class="border-b">
-              <th class="px-3 py-2 font-medium">{{ $t('tags.name') }}</th>
-              <th class="px-3 py-2 font-medium">{{ $t('tags.group') }}</th>
+              <SortHead :sort="sort" column="name" class="px-3 py-2 font-medium">{{ $t('tags.name') }}</SortHead>
+              <SortHead :sort="sort" column="group" class="px-3 py-2 font-medium">{{ $t('tags.group') }}</SortHead>
               <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="tag in section.list" :key="tag.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="workspaces.canEditShared ? 'cursor-pointer' : ''" @click="workspaces.canEditShared && open(tag)">
+            <tr v-for="tag in sortTags(section.list)" :key="tag.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="workspaces.canEditShared ? 'cursor-pointer' : ''" @click="workspaces.canEditShared && open(tag)">
               <td class="px-3 py-1.5">
                 <span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-full" :style="{ backgroundColor: tag.color }" />{{ tag.name }}</span>
               </td>

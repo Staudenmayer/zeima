@@ -28,6 +28,9 @@ const props = defineProps<{
   now: number
   /** Addon timeline items, e.g. calendar events. */
   events?: AddonTimelineItem[]
+  /** Other people (timesheet filter bar): each gets a column of its own in
+   * every day, next to the person's own. Read only. */
+  others?: { id: string; name: string; entries: TimeEntry[] }[]
   /** An edge was dragged: save the new start and end (end `null` while
    * running). Resolves to whether it was saved. Bound as `@resize`. */
   onResize?: (entry: TimeEntry, startAt: number, endAt: number | null) => Promise<boolean>
@@ -109,7 +112,7 @@ let suppressClick = false
  * running one, and not where the entry continues past midnight. */
 function canResize(day: DayRange, b: Block, edge: 'start' | 'end'): boolean {
   const e = b.entry
-  if (e.locked) return false
+  if (!b.mine || e.locked) return false
   if (edge === 'start') return e.startAt >= day.from
   return e.endAt !== null && e.endAt <= day.to
 }
@@ -181,7 +184,8 @@ watch(
   },
 )
 
-function onBlockClick(entry: TimeEntry, event: MouseEvent) {
+function onBlockClick(entry: TimeEntry, event: MouseEvent, mine = true) {
+  if (!mine) return
   if (suppressClick) {
     suppressClick = false
     return
@@ -202,31 +206,49 @@ function shownEntry(e: TimeEntry): TimeEntry {
   return preview.value?.id === e.id ? { ...e, startAt: preview.value.startAt, endAt: preview.value.endAt } : e
 }
 
-interface Block extends Lanes {
-  entry: TimeEntry
+interface Slot {
+  /** Which person's column inside the day (0: the person's own) and how many. */
+  slot: number
+  slots: number
 }
 
-interface EventBlock extends Lanes {
+interface Block extends Lanes, Slot {
+  entry: TimeEntry
+  mine: boolean
+  who: string
+}
+
+interface EventBlock extends Lanes, Slot {
   item: AddonTimelineItem
 }
 
+/** The people shown, own first. */
+const legend = computed(() => [t('timesheet.me'), ...(props.others ?? []).map((o) => o.name)])
+
 const columns = computed(() =>
   props.days.map((day) => {
-    const blocks: Block[] = layoutLanes(
-      props.entries
-        .map((e) => (preview.value?.id === e.id ? { ...e, startAt: preview.value.startAt, endAt: preview.value.endAt } : e))
-        .map((entry) => ({
-          entry,
-          start: Math.max(entry.startAt, day.from),
-          end: Math.min(entry.endAt ?? props.now, day.to),
-        })),
-    )
+    const slots = 1 + (props.others?.length ?? 0)
+    const place = (list: TimeEntry[], slot: number, mine: boolean, who: string): Block[] =>
+      layoutLanes(
+        list
+          .map((e) => (preview.value?.id === e.id ? { ...e, startAt: preview.value.startAt, endAt: preview.value.endAt } : e))
+          .filter((e) => e.startAt < day.to && (e.endAt ?? props.now) > day.from)
+          .map((entry) => ({
+            entry,
+            start: Math.max(entry.startAt, day.from),
+            end: Math.min(entry.endAt ?? props.now, day.to),
+          })),
+      ).map((b) => ({ ...b, slot, slots, mine, who }))
+    const blocks: Block[] = [
+      ...place(props.entries, 0, true, ''),
+      ...(props.others ?? []).flatMap((o, i) => place(o.entries, i + 1, false, o.name)),
+    ]
     const items = (props.events ?? []).filter((i) => i.startAt < day.to && i.endAt > day.from)
     const events: EventBlock[] = layoutLanes(
       items
         .filter((i) => !i.allDay)
         .map((item) => ({ item, start: Math.max(item.startAt, day.from), end: Math.min(item.endAt, day.to) })),
-    )
+    ).map((b) => ({ ...b, slot: 0, slots }))
     return { day, blocks, events, allDay: items.filter((i) => i.allDay) }
   }),
 )
@@ -243,6 +265,14 @@ function y(day: DayRange, ms: number) {
   return ((ms - day.from) / HOUR - hours.first) * hourPx.value
 }
 
+/** Horizontal place: the person's column of the day, then the lane in it. */
+function across(b: Lanes & Slot) {
+  return {
+    left: `calc(${((b.slot + b.lane / b.lanes) / b.slots) * 100}% + 2px)`,
+    width: `calc(${100 / (b.slots * b.lanes)}% - 4px)`,
+  }
+}
+
 function blockStyle(day: DayRange, b: Block) {
   const activity = b.entry.activityId ? activities.byId.get(b.entry.activityId) : undefined
   const project = b.entry.projectId ? projects.byId.get(b.entry.projectId) : undefined
@@ -251,8 +281,7 @@ function blockStyle(day: DayRange, b: Block) {
   return {
     top: `${top}px`,
     height: `${Math.max(y(day, b.end) - top, MIN_BLOCK_PX)}px`,
-    left: `calc(${(b.lane / b.lanes) * 100}% + 2px)`,
-    width: `calc(${100 / b.lanes}% - 4px)`,
+    ...across(b),
     // Solid fill; text in black or white, whichever reads better. Where the
     // entry continues on another day, the fill fades out at that edge.
     backgroundImage: fill(color ?? 'var(--muted)', continuesBefore(day, b), continuesAfter(day, b)),
@@ -280,8 +309,7 @@ function eventStyle(day: DayRange, b: EventBlock) {
   return {
     top: `${top}px`,
     height: `${Math.max(y(day, b.end) - top, MIN_BLOCK_PX)}px`,
-    left: `calc(${(b.lane / b.lanes) * 100}% + 2px)`,
-    width: `calc(${100 / b.lanes}% - 4px)`,
+    ...across(b),
     borderColor: color,
     backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)`,
   }
@@ -309,9 +337,10 @@ function timeRange(e: TimeEntry) {
   return `${format.time(e.startAt)}–${end === null ? '' : format.time(end)}`
 }
 
-function tooltip(e: TimeEntry) {
+function tooltip(e: TimeEntry, who = '') {
   const project = projectOf(e)
   return [
+    who,
     timeRange(e),
     activityOf(e)?.name,
     project ? (project.alias ? `${project.name} (${project.alias})` : project.name) : null,
@@ -425,6 +454,11 @@ function hourLabel(h: number) {
 <template>
   <div ref="scroller" data-calendar class="overflow-auto rounded-lg border" @wheel.passive="stopAiming" @pointerdown="stopAiming" @keydown="stopAiming">
     <div :class="days.length > 1 ? 'min-w-[640px]' : ''">
+      <!-- Who the columns in each day are -->
+      <div v-if="others?.length" class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5 text-xs text-muted-foreground">
+        <span>{{ $t('timesheet.columns') }}</span>
+        <span v-for="n in legend" :key="n" class="font-medium text-foreground">{{ n }}</span>
+      </div>
       <!-- Day headers -->
       <div ref="header" class="sticky top-0 z-10 flex border-b bg-background">
         <div class="w-12 shrink-0" />
@@ -494,11 +528,12 @@ function hourLabel(h: number) {
           </button>
           <button
             v-for="b in col.blocks"
-            :key="b.entry.id"
+            :key="`${b.who}/${b.entry.id}`"
             type="button"
             class="group/block absolute flex flex-col gap-0.5 overflow-hidden rounded-md px-1.5 py-0.5 text-left text-[11px] leading-tight shadow-xs transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:brightness-125"
             :class="[
               b.entry.endAt === null ? 'ring-1 ring-green-500/60' : '',
+              b.mine ? '' : 'cursor-default',
               preview?.id === b.entry.id ? 'z-[2] shadow-lg ring-2 ring-ring' : '',
               // Where the entry continues on another day: faded, square edge,
               // no shadow; content starts below the top fade.
@@ -506,8 +541,8 @@ function hourLabel(h: number) {
               continuesAfter(col.day, b) ? 'rounded-b-none shadow-none' : '',
             ]"
             :style="blockStyle(col.day, b)"
-            :title="preview ? undefined : tooltip(b.entry)"
-            @click="onBlockClick(b.entry, $event)"
+            :title="preview ? undefined : tooltip(b.entry, b.who)"
+            @click="onBlockClick(b.entry, $event, b.mine)"
           >
             <!-- Drag handles on the top and bottom edge -->
             <span

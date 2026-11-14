@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, UserPlus } from '@lucide/vue'
 import type { AddonTimelineItem, TimeEntry } from '@/bindings'
-import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useFormat } from '@/composables/useFormat'
 import { type Anchor, pointAnchor } from '@/lib/anchor'
 import { textOn } from '@/lib/colors'
@@ -17,8 +14,9 @@ import { useSettingsStore } from '@/stores/settings'
 // One day as a horizontal timeline: hours run left to right across the whole
 // width, entries are bars sized by duration. Entries that do not overlap use
 // the full height; overlapping ones share it. The hours shown are 07:00 to
-// 20:00, widened to fit entries and the current time. Managers can add other
-// people: each gets a row of their own under the person's own (read only).
+// 20:00, widened to fit entries and the current time. The people a manager
+// added (timesheet filter bar) each get a row of their own under the
+// person's own (read only).
 
 const props = defineProps<{
   day: DayRange
@@ -30,10 +28,6 @@ const props = defineProps<{
   events?: AddonTimelineItem[]
   /** Other people's rows, in the order shown. */
   others?: { id: string; name: string; entries: TimeEntry[] }[]
-  /** People that can be added (empty: no picker). */
-  candidates?: { id: string; name: string }[]
-  /** The ids of the people added. */
-  selected?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -43,8 +37,6 @@ const emit = defineEmits<{
   create: [at: number]
   /** Click on a timed timeline item: create an entry from it. */
   track: [item: AddonTimelineItem]
-  /** The people added changed. */
-  'update:selected': [ids: string[]]
 }>()
 
 const { t } = useI18n()
@@ -180,11 +172,6 @@ function onBlockClick(entry: TimeEntry, event: MouseEvent) {
   emit('edit', entry, pointAnchor(el, pointer ? event.clientY : el.getBoundingClientRect().top, pointer ? event.clientX : undefined))
 }
 
-const picked = computed(() => props.selected ?? [])
-function togglePerson(id: string) {
-  emit('update:selected', picked.value.includes(id) ? picked.value.filter((x) => x !== id) : [...picked.value, id])
-}
-
 function onTrackDblClick(event: MouseEvent) {
   const el = event.currentTarget as HTMLElement
   if (event.target !== el) return
@@ -200,28 +187,9 @@ function onTrackDblClick(event: MouseEvent) {
 <template>
   <div data-day-timeline class="flex min-h-80 flex-col overflow-auto rounded-lg border">
     <div class="flex min-w-[720px] flex-1 flex-col">
-      <div class="flex items-center justify-between gap-3 border-b px-3 py-1.5 text-xs">
+      <div class="flex items-baseline justify-between gap-3 border-b px-3 py-1.5 text-xs">
         <span class="font-medium">{{ format.day(day.from) }}</span>
-        <div class="flex items-center gap-3">
-          <span class="tabular-nums text-muted-foreground">{{ settings.formatDuration(total) }}</span>
-          <DropdownMenu v-if="candidates?.length">
-            <DropdownMenuTrigger as-child>
-              <Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs" :title="$t('timesheet.peopleHint')">
-                <UserPlus class="size-3.5" />
-                {{ picked.length ? $t('timesheet.mePlus', { n: picked.length }) : $t('timesheet.addPeople') }}
-                <ChevronDown class="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="max-h-64 min-w-56 overflow-y-auto">
-              <DropdownMenuCheckboxItem
-                v-for="c in candidates"
-                :key="c.id"
-                :model-value="picked.includes(c.id)"
-                @select.prevent="togglePerson(c.id)"
-              >{{ c.name }}</DropdownMenuCheckboxItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        <span class="tabular-nums text-muted-foreground">{{ settings.formatDuration(total) }}</span>
       </div>
       <ul v-if="allDay.length" class="flex flex-wrap gap-1 border-b px-3 py-1.5">
         <li

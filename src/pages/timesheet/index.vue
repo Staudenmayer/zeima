@@ -3,7 +3,7 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { useStorage } from '@vueuse/core'
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, List, Pencil, Play, Plus, Scissors, Trash2, X } from '@lucide/vue'
+import { CalendarDays, ChevronDown, UserPlus, ChevronLeft, ChevronRight, Clock, Copy, List, Pencil, Play, Plus, Scissors, Trash2, X } from '@lucide/vue'
 import { commands, type AddonTimelineItem, type EntryPatch, type TimeEntry } from '@/bindings'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -11,6 +11,7 @@ import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vu
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -50,6 +51,8 @@ import { useTimerStore } from '@/stores/timer'
 import { useAccountStore } from '@/stores/account'
 import { useOrgStore } from '@/stores/org'
 import { useWorkspaceStore } from '@/stores/workspace'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.timesheet', fill: true } })
 
@@ -121,7 +124,7 @@ const shownEntries = computed(() => filterEntries(entries.value))
 const shownTimeline = computed(() => (showsKind('events') ? timeline.value.filter(matches) : []))
 
 // Owners and managers can lay other people's days next to their own (day view).
-const canPickPeople = computed(() => workspaces.inOrg && (workspaces.role === 'owner' || workspaces.role === 'manager'))
+const canPickPeople = computed(() => workspaces.inOrg && ['owner', 'admin', 'manager'].includes(workspaces.role ?? ''))
 watch(
   () => (canPickPeople.value ? workspaces.active?.orgId : null),
   (orgId) => {
@@ -144,7 +147,7 @@ const shownOthers = computed(() => otherDays.value.map((o) => ({ ...o, entries: 
 let loadToken = 0
 async function loadOthers() {
   const token = ++loadToken
-  const ids = mode.value === 'day' && view.value === 'calendar' ? shownIds.value : []
+  const ids = shownIds.value
   const rows = await Promise.all(
     ids.map(async (id) => ({
       id,
@@ -154,7 +157,8 @@ async function loadOthers() {
   )
   if (token === loadToken) otherDays.value = rows
 }
-watch([shownIds, range, mode, view], () => void loadOthers(), { immediate: true })
+watch([shownIds, range], () => void loadOthers(), { immediate: true })
+const withPeople = computed(() => shownIds.value.length > 0)
 
 const title = computed(() =>
   mode.value === 'day'
@@ -183,8 +187,12 @@ const groups = computed(() =>
       entries: shownEntries.value.filter((e) => e.startAt >= day.from && e.startAt < day.to).reverse(),
       // Meetings and addon events of the day (as in the calendar), to track from here.
       events: shownTimeline.value.filter((i) => !i.allDay && i.startAt >= day.from && i.startAt < day.to),
+      // What the added people tracked that day (read only).
+      others: shownOthers.value
+        .flatMap((o) => o.entries.filter((e) => e.startAt >= day.from && e.startAt < day.to).map((entry) => ({ entry, name: o.name, ...entry, person: o.name })))
+        .sort((a, b) => b.entry.startAt - a.entry.startAt),
     }))
-    .filter((g) => mode.value === 'day' || g.entries.length > 0 || g.events.length > 0)
+    .filter((g) => mode.value === 'day' || g.entries.length > 0 || g.events.length > 0 || g.others.length > 0)
     .reverse(),
 )
 
@@ -371,6 +379,18 @@ async function confirmSplit() {
     toast.error(errorMessage(err))
   }
 }
+
+// Sorting a column orders the rows of each day (meetings, own entries and other people's entries each as a block).
+interface SortRow { startAt: number; endAt: number | null; activityId: string | null; projectId: string | null; tagIds: string[]; note: string; person?: string }
+const { sort, apply: sortRows } = useSort<SortRow>(null, {
+  person: (r) => r.person ?? t('timesheet.me'),
+  time: (r) => r.startAt,
+  activity: (r) => (r.activityId ? activities.byId.get(r.activityId)?.name : '') ?? '',
+  project: (r) => (r.projectId ? projects.byId.get(r.projectId)?.name : '') ?? '',
+  tags: (r) => r.tagIds.map((id) => tags.byId.get(id)?.name ?? '').join(' '),
+  note: (r) => r.note,
+  duration: (r) => (r.endAt ?? timer.now) - r.startAt,
+})
 </script>
 
 <template>
@@ -397,6 +417,22 @@ async function confirmSplit() {
 
   <!-- Filters: what the calendar, the table and the totals show. -->
   <div class="mb-3 flex flex-wrap items-center gap-2">
+    <DropdownMenu v-if="canPickPeople">
+      <DropdownMenuTrigger as-child>
+        <Button variant="outline" size="sm" :title="$t('timesheet.peopleHint')">
+          <UserPlus /> {{ shownIds.length ? $t('timesheet.mePlus', { n: shownIds.length }) : $t('timesheet.addPeople') }}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" class="max-h-72 min-w-56 overflow-y-auto">
+        <DropdownMenuCheckboxItem
+          v-for="c in candidates"
+          :key="c.id"
+          :model-value="shownIds.includes(c.id)"
+          @select.prevent="peopleIds = shownIds.includes(c.id) ? shownIds.filter((x) => x !== c.id) : [...shownIds, c.id]"
+        >{{ c.name }}</DropdownMenuCheckboxItem>
+        <DropdownMenuItem v-if="candidates.length === 0" disabled>{{ $t('timesheet.noPeople') }}</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
     <MultiFilter v-model="filter.kinds" :label="$t('timesheet.show')" :options="kindOptions" />
     <MultiFilter v-model="filter.activityIds" :label="$t('entry.activity')" :options="activityOptions" />
     <MultiFilter v-model="filter.projectIds" :label="$t('entry.project')" :options="projectOptions" />
@@ -421,9 +457,6 @@ async function confirmSplit() {
     :now="timer.now"
     :events="shownTimeline"
     :others="shownOthers"
-    :candidates="candidates"
-    :selected="shownIds"
-    @update:selected="peopleIds = $event"
     @edit="openPopover"
     @create="createAt"
     @track="track"
@@ -437,6 +470,7 @@ async function confirmSplit() {
     :totals="days.map((_, i) => totalOf(i))"
     :now="timer.now"
     :events="shownTimeline"
+    :others="shownOthers"
     @edit="openPopover"
     @create="openNew"
     @resize="resizeEntry"
@@ -444,7 +478,7 @@ async function confirmSplit() {
     @track="track"
   />
 
-  <EmptyState v-else-if="groups.every((g) => g.entries.length === 0 && g.events.length === 0)" :icon="Clock" :text="hasFilter ? $t('timesheet.noMatch') : $t('timesheet.empty')">
+  <EmptyState v-else-if="groups.every((g) => g.entries.length === 0 && g.events.length === 0 && g.others.length === 0)" :icon="Clock" :text="hasFilter ? $t('timesheet.noMatch') : $t('timesheet.empty')">
     <Button v-if="hasFilter" variant="outline" @click="clearFilter"><X /> {{ $t('reports.clearFilter') }}</Button>
     <Button v-else variant="outline" @click="openNew()"><Plus /> {{ $t('timesheet.addEntry') }}</Button>
   </EmptyState>
@@ -463,12 +497,13 @@ async function confirmSplit() {
               @update:model-value="setSelected(visibleEntries, $event === true)"
             />
           </th>
-          <th class="w-28 px-3 py-2 font-medium">{{ $t('timesheet.time') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('entry.project') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('entry.tags') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('entry.note') }}</th>
-          <th class="w-20 px-3 py-2 text-right font-medium">{{ $t('timesheet.duration') }}</th>
+          <SortHead v-if="withPeople" :sort="sort" column="person" class="w-32 px-3 py-2 font-medium">{{ $t('timesheet.person') }}</SortHead>
+          <SortHead :sort="sort" column="time" class="w-28 px-3 py-2 font-medium">{{ $t('timesheet.time') }}</SortHead>
+          <SortHead :sort="sort" column="activity" class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</SortHead>
+          <SortHead :sort="sort" column="project" class="px-3 py-2 font-medium">{{ $t('entry.project') }}</SortHead>
+          <SortHead :sort="sort" column="tags" class="px-3 py-2 font-medium">{{ $t('entry.tags') }}</SortHead>
+          <SortHead :sort="sort" column="note" class="px-3 py-2 font-medium">{{ $t('entry.note') }}</SortHead>
+          <SortHead :sort="sort" column="duration" class="w-20 px-3 py-2 text-right font-medium">{{ $t('timesheet.duration') }}</SortHead>
           <th class="w-40 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
         </tr>
       </thead>
@@ -483,7 +518,7 @@ async function confirmSplit() {
               @update:model-value="setSelected(group.entries, $event === true)"
             />
           </th>
-          <th colspan="7" class="px-3 py-1.5 text-left font-normal">
+          <th :colspan="withPeople ? 8 : 7" class="px-3 py-1.5 text-left font-normal">
             <div class="flex items-center justify-between gap-3">
               <span class="font-medium">{{ format.day(group.day.from) }}</span>
               <DayStatus v-if="group.work" :day="group.work" :holiday-name="holidayName(group.work.date)" />
@@ -495,13 +530,14 @@ async function confirmSplit() {
           </th>
         </tr>
         <tr
-          v-for="item in group.events"
+          v-for="item in sortRows(group.events)"
           :key="`${item.addonId}/${item.id}`"
           class="group cursor-pointer border-b border-dashed text-muted-foreground last:border-b-0 hover:bg-muted/30"
           :title="$t('timesheet.trackEvent')"
           @click="track(item)"
         >
           <td class="w-8 py-1.5 pr-0 pl-3" />
+          <td v-if="withPeople" class="px-3 py-1.5">{{ $t('timesheet.me') }}</td>
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ format.time(item.startAt) }}–{{ format.time(item.endAt) }}</td>
           <td class="max-w-44 px-3 py-1.5">
             <ActivityLabel v-if="item.activityId" :activity="activities.byId.get(item.activityId)" />
@@ -523,7 +559,7 @@ async function confirmSplit() {
           </td>
         </tr>
         <tr
-          v-for="entry in group.entries"
+          v-for="entry in sortRows(group.entries)"
           :key="entry.id"
           class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30"
           :class="selected.has(entry.id) ? 'bg-muted/50' : ''"
@@ -537,6 +573,7 @@ async function confirmSplit() {
               @update:model-value="setSelected([entry], $event === true)"
             />
           </td>
+          <td v-if="withPeople" class="whitespace-nowrap px-3 py-1.5">{{ $t('timesheet.me') }}</td>
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">
             {{ format.time(entry.startAt) }}–{{ entry.endAt === null ? '' : format.time(entry.endAt) }}
             <sup
@@ -570,8 +607,19 @@ async function confirmSplit() {
             </div>
           </td>
         </tr>
-        <tr v-if="group.entries.length === 0 && group.events.length === 0" class="border-b last:border-b-0">
-          <td colspan="8" class="px-3 py-6 text-center text-muted-foreground">{{ $t('timesheet.empty') }}</td>
+        <tr v-for="o in sortRows(group.others)" :key="`${o.name}/${o.entry.id}`" class="border-b text-muted-foreground last:border-b-0">
+          <td class="w-8 py-1.5 pr-0 pl-3" />
+          <td class="whitespace-nowrap px-3 py-1.5 font-medium text-foreground">{{ o.name }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ format.time(o.entry.startAt) }}–{{ o.entry.endAt === null ? '' : format.time(o.entry.endAt) }}</td>
+          <td class="max-w-44 px-3 py-1.5"><ActivityLabel :activity="o.entry.activityId ? activities.byId.get(o.entry.activityId) : null" /></td>
+          <td class="max-w-56 px-3 py-1.5"><ProjectDot :project="o.entry.projectId ? projects.byId.get(o.entry.projectId) : null" show-alias /></td>
+          <td class="px-3 py-1.5"><TagList :ids="o.entry.tagIds" /></td>
+          <td class="max-w-0 w-full truncate px-3 py-1.5" :title="o.entry.note">{{ o.entry.note }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums">{{ settings.formatDuration(durationMs(o.entry)) }}</td>
+          <td class="px-1 py-0.5" />
+        </tr>
+        <tr v-if="group.entries.length === 0 && group.events.length === 0 && group.others.length === 0" class="border-b last:border-b-0">
+          <td :colspan="withPeople ? 9 : 8" class="px-3 py-6 text-center text-muted-foreground">{{ $t('timesheet.empty') }}</td>
         </tr>
       </tbody>
     </table>

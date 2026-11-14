@@ -17,6 +17,8 @@ import { useAccountStore } from '@/stores/account'
 import { useOrgStore } from '@/stores/org'
 import { useProjectsStore } from '@/stores/projects'
 import { useWorkspaceStore } from '@/stores/workspace'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.meetings' } })
 
@@ -80,6 +82,16 @@ function openDialog(m: Meeting | null) {
 }
 const cancelling = ref<Meeting | null>(null)
 const cancelOpen = ref(false)
+
+// Sorting keeps the days; the meetings of each day change order.
+const { sort, apply: sortOccurrences } = useSort<MeetingOccurrence>(null, {
+  time: (o) => o.startAt,
+  title: (o) => o.meeting.title,
+  location: (o) => o.meeting.location || (o.meeting.onlineUrl ? 'online' : ''),
+  project: (o) => (o.meeting.projectId && projects.byId.get(o.meeting.projectId)?.name) || '',
+  attendees: (o) => o.meeting.attendeeIds.length,
+  answer: (o) => o.myStatus ?? '',
+})
 </script>
 
 <template>
@@ -97,12 +109,12 @@ const cancelOpen = ref(false)
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
-            <th class="w-28 px-3 py-2 font-medium">{{ $t('timesheet.time') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('meetings.title') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('meetings.location') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('meetings.projectColumn') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('meetings.attendees') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('meetings.answer') }}</th>
+            <SortHead :sort="sort" column="time" class="w-28 px-3 py-2 font-medium">{{ $t('timesheet.time') }}</SortHead>
+            <SortHead :sort="sort" column="title" class="px-3 py-2 font-medium">{{ $t('meetings.title') }}</SortHead>
+            <SortHead :sort="sort" column="location" class="px-3 py-2 font-medium">{{ $t('meetings.location') }}</SortHead>
+            <SortHead :sort="sort" column="project" class="px-3 py-2 font-medium">{{ $t('meetings.projectColumn') }}</SortHead>
+            <SortHead :sort="sort" column="attendees" class="px-3 py-2 font-medium">{{ $t('meetings.attendees') }}</SortHead>
+            <SortHead :sort="sort" column="answer" class="px-3 py-2 font-medium">{{ $t('meetings.answer') }}</SortHead>
             <th class="w-28 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
           </tr>
         </thead>
@@ -111,7 +123,7 @@ const cancelOpen = ref(false)
             <th colspan="7" class="px-3 py-1.5 text-left font-medium">{{ dayLabel(d.date) }}</th>
           </tr>
           <tr
-            v-for="o in d.list"
+            v-for="o in sortOccurrences(d.list)"
             :key="`${o.meeting.id}@${o.startAt}`"
             class="group border-b last:border-b-0 hover:bg-muted/30"
             :class="[o.meeting.cancelled ? 'opacity-60' : '', o.meeting.userId === me && !o.meeting.cancelled ? 'cursor-pointer' : '']"

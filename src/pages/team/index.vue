@@ -14,6 +14,8 @@ import { useTagsStore } from '@/stores/tags'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.team' } })
 
@@ -135,6 +137,13 @@ watch([preset, () => workspaces.active?.id], () => {
   opened.value = null
   void load()
 })
+
+const { sort, sorted: sortedDepartments } = useSort(departmentTotals, {
+  department: (g) => g.path,
+  people: (g) => g.count,
+  total: (g) => g.total,
+  billable: (g) => g.billable,
+})
 </script>
 
 <template>
@@ -158,14 +167,14 @@ watch([preset, () => workspaces.active?.id], () => {
         <table class="w-full text-sm">
           <thead class="text-left text-xs text-muted-foreground">
             <tr class="border-b">
-              <th class="px-3 py-2 font-medium">{{ $t('team.department') }}</th>
-              <th class="px-3 py-2 font-medium">{{ $t('team.peopleColumn') }}</th>
-              <th class="px-3 py-2 text-right font-medium">{{ $t('team.total') }}</th>
-              <th class="px-3 py-2 text-right font-medium">{{ $t('team.billable') }}</th>
+              <SortHead :sort="sort" column="department" class="px-3 py-2 font-medium">{{ $t('team.department') }}</SortHead>
+              <SortHead :sort="sort" column="people" class="px-3 py-2 font-medium">{{ $t('team.peopleColumn') }}</SortHead>
+              <SortHead :sort="sort" column="total" class="px-3 py-2 text-right font-medium">{{ $t('team.total') }}</SortHead>
+              <SortHead :sort="sort" column="billable" class="px-3 py-2 text-right font-medium">{{ $t('team.billable') }}</SortHead>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="g in departmentTotals" :key="g.path" class="border-b last:border-b-0 hover:bg-muted/30">
+            <tr v-for="g in sortedDepartments" :key="g.path" class="border-b last:border-b-0 hover:bg-muted/30">
               <td class="px-3 py-1.5 font-medium">{{ g.path }}</td>
               <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ $t('team.people', g.count) }}</td>
               <td class="px-3 py-1.5 text-right tabular-nums">{{ hours(g.total) }}</td>

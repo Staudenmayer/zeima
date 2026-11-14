@@ -11,6 +11,8 @@ import CostCenterDialog from '@/components/time/CostCenterDialog.vue'
 import CostCenterSelect from '@/components/time/CostCenterSelect.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 import { useFormat } from '@/composables/useFormat'
 import { call, errorMessage } from '@/lib/ipc'
 import { parseDate, startOfDay, toDateInput } from '@/lib/time'
@@ -104,13 +106,21 @@ async function setDefault(id: string | null) {
   }
 }
 
+// Sorted by a column, the tree is a flat list; otherwise children sit under their parent.
+const { sort, sorted: ordered } = useSort(tree, {
+  code: (r) => r.cc.code,
+  name: (r) => r.cc.name,
+  validity: (r) => r.cc.validFrom ?? r.cc.validTo ?? '',
+  status: (r) => (r.cc.active ? 0 : 1),
+})
+
 // Long lists are paged.
 const PAGE_SIZE = 6
 const page = ref(0)
-const pageCount = computed(() => Math.max(1, Math.ceil(tree.value.length / PAGE_SIZE)))
+const pageCount = computed(() => Math.max(1, Math.ceil(ordered.value.length / PAGE_SIZE)))
 const pageRows = computed(() => {
   const p = Math.min(page.value, pageCount.value - 1)
-  return tree.value.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE)
+  return ordered.value.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE)
 })
 const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
 </script>
@@ -146,10 +156,10 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
-            <th class="w-32 px-3 py-2 font-medium">{{ $t('costCenters.code') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('costCenters.name') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('costCenters.validity') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('costCenters.status') }}</th>
+            <SortHead :sort="sort" column="code" class="px-3 py-2">{{ $t('costCenters.code') }}</SortHead>
+            <SortHead :sort="sort" column="name" class="px-3 py-2">{{ $t('costCenters.name') }}</SortHead>
+            <SortHead :sort="sort" column="validity" class="px-3 py-2">{{ $t('costCenters.validity') }}</SortHead>
+            <SortHead :sort="sort" column="status" class="px-3 py-2">{{ $t('costCenters.status') }}</SortHead>
             <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
           </tr>
         </thead>
@@ -161,7 +171,7 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
             :class="cc.active ? '' : 'text-muted-foreground'"
             @click="workspaces.canEditShared && open(cc)"
           >
-            <td class="px-3 py-1.5 font-mono text-xs" :style="{ paddingLeft: `calc(0.75rem + ${depth}rem)` }">{{ cc.code }}</td>
+            <td class="whitespace-nowrap px-3 py-1.5 font-mono text-xs" :style="{ paddingLeft: `calc(0.75rem + ${sort.key ? 0 : depth}rem)` }">{{ cc.code }}</td>
             <td class="max-w-0 w-full truncate px-3 py-1.5">{{ cc.name }}</td>
             <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">{{ validity(cc) || '–' }}</td>
             <td class="whitespace-nowrap px-3 py-1.5">
@@ -181,7 +191,7 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
 
     <div v-if="pageCount > 1" class="-mt-2 flex items-center justify-between gap-3 text-sm">
       <span class="tabular-nums text-muted-foreground">
-        {{ $t('costCenters.pageOf', { page: pageNo + 1, pages: pageCount, count: tree.length }) }}
+        {{ $t('costCenters.pageOf', { page: pageNo + 1, pages: pageCount, count: ordered.length }) }}
       </span>
       <div class="flex gap-2">
         <Button size="sm" variant="outline" :disabled="pageNo === 0" @click="page = pageNo - 1">{{ $t('costCenters.previous') }}</Button>

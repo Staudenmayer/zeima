@@ -15,6 +15,8 @@ import { useApprovalsStore } from '@/stores/approvals'
 import { useOrgStore } from '@/stores/org'
 import { useWorkStore } from '@/stores/work'
 import { useWorkspaceStore } from '@/stores/workspace'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.approvals' } })
 
@@ -68,6 +70,13 @@ async function reject() {
   await decide(a, false, reason.value)
   rejecting.value = null
 }
+
+const { sort, sorted: sortedRequests } = useSort(requests, {
+  person: (a) => nameOf(a.userId),
+  period: (a) => a.startDate,
+  type: (a) => typeName(a),
+  note: (a) => a.note,
+})
 </script>
 
 <template>
@@ -82,15 +91,15 @@ async function reject() {
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
-            <th class="px-3 py-2 font-medium">{{ $t('approvals.person') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('absences.period') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('absences.type') }}</th>
-            <th class="px-3 py-2 font-medium">{{ $t('entry.note') }}</th>
+            <SortHead :sort="sort" column="person" class="px-3 py-2 font-medium">{{ $t('approvals.person') }}</SortHead>
+            <SortHead :sort="sort" column="period" class="px-3 py-2 font-medium">{{ $t('absences.period') }}</SortHead>
+            <SortHead :sort="sort" column="type" class="px-3 py-2 font-medium">{{ $t('absences.type') }}</SortHead>
+            <SortHead :sort="sort" column="note" class="px-3 py-2 font-medium">{{ $t('entry.note') }}</SortHead>
             <th class="w-48 px-1 py-2"><span class="sr-only">{{ $t('approvals.approve') }}</span></th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="a in requests" :key="a.id" class="border-b last:border-b-0 hover:bg-muted/30">
+          <tr v-for="a in sortedRequests" :key="a.id" class="border-b last:border-b-0 hover:bg-muted/30">
             <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ nameOf(a.userId) || $t('approvals.someone') }}</td>
             <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ range(a) }}</td>
             <td class="whitespace-nowrap px-3 py-1.5">{{ typeName(a) }}</td>

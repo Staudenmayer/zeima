@@ -21,6 +21,8 @@ import { call, errorMessage } from '@/lib/ipc'
 import { MINUTE, addDays, parseDate, toDateInput } from '@/lib/time'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkStore } from '@/stores/work'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.settings' } })
 
@@ -169,6 +171,8 @@ async function addAdjustment() {
     adjReason.value = ''
   }
 }
+
+const { sort, sorted: sortedAdjustments } = useSort(adjustments, { date: (a) => a.date, minutes: (a) => a.minutes, reason: (a) => a.reason })
 </script>
 
 <template>
@@ -316,14 +320,14 @@ async function addAdjustment() {
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">
-                <th class="px-3 py-2 font-medium">{{ $t('work.adjustmentDate') }}</th>
-                <th class="px-3 py-2 text-right font-medium">{{ $t('work.adjustmentMinutes') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('work.reason') }}</th>
+                <SortHead :sort="sort" column="date" class="px-3 py-2 font-medium">{{ $t('work.adjustmentDate') }}</SortHead>
+                <SortHead :sort="sort" column="minutes" class="px-3 py-2 text-right font-medium">{{ $t('work.adjustmentMinutes') }}</SortHead>
+                <SortHead :sort="sort" column="reason" class="px-3 py-2 font-medium">{{ $t('work.reason') }}</SortHead>
                 <th class="w-12 px-1 py-2"><span class="sr-only">{{ $t('common.delete') }}</span></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="a in adjustments" :key="a.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+              <tr v-for="a in sortedAdjustments" :key="a.id" class="group border-b last:border-b-0 hover:bg-muted/30">
                 <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ format.longDate(parseDate(a.date)) }}</td>
                 <td class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums">{{ settings.formatSigned(a.minutes * MINUTE) }}</td>
                 <td class="max-w-0 w-full truncate px-3 py-1.5">{{ a.reason }}</td>

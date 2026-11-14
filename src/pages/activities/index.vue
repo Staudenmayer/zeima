@@ -13,6 +13,8 @@ import PageHeader from '@/components/time/PageHeader.vue'
 import { nextColor } from '@/lib/colors'
 import { errorMessage } from '@/lib/ipc'
 import { useActivitiesStore } from '@/stores/activities'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.activities' } })
 
@@ -69,6 +71,8 @@ async function confirmDelete() {
     toast.error(errorMessage(err))
   }
 }
+
+const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a.name })
 </script>
 
 <template>
@@ -85,13 +89,13 @@ async function confirmDelete() {
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
-            <th class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</th>
+            <SortHead :sort="sort" column="name" class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</SortHead>
             <th class="w-28 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
           </tr>
         </thead>
         <tbody>
           <tr
-            v-for="activity in activities.active"
+            v-for="activity in sortActivities(activities.active)"
             :key="activity.id"
             class="group border-b last:border-b-0 hover:bg-muted/30"
             :class="workspaces.canEditShared ? 'cursor-pointer' : ''"
@@ -125,12 +129,12 @@ async function confirmDelete() {
         <table class="w-full text-sm">
           <thead class="text-left text-xs text-muted-foreground">
             <tr class="border-b">
-              <th class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</th>
+              <SortHead :sort="sort" column="name" class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</SortHead>
               <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="activity in archived" :key="activity.id" class="group border-b text-muted-foreground last:border-b-0 hover:bg-muted/30">
+            <tr v-for="activity in sortActivities(archived)" :key="activity.id" class="group border-b text-muted-foreground last:border-b-0 hover:bg-muted/30">
               <td class="px-3 py-1.5"><span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm opacity-60" :style="{ backgroundColor: activity.color }" />{{ activity.name }}</span></td>
               <td class="px-1 py-0.5" @click.stop>
                 <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">

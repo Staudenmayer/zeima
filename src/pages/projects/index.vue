@@ -17,6 +17,8 @@ import { errorMessage } from '@/lib/ipc'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useTagsStore } from '@/stores/tags'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.projects' } })
 
@@ -54,6 +56,14 @@ async function confirmDelete() {
 
 const tagCount = (id: string) => tags.all.filter((t) => t.projectId === id).length
 const budgetLabel = (p: Project) => (p.budgetMinutes === null ? null : `${settings.formatNumber(p.budgetMinutes / 60)} h`)
+
+const { sort, sorted: sortedList } = useSort(list, {
+  name: (p) => p.name,
+  client: (p) => p.client,
+  budget: (p) => p.budgetMinutes,
+  tags: (p) => tagCount(p.id),
+  status: (p) => p.status,
+})
 </script>
 
 <template>
@@ -73,16 +83,16 @@ const budgetLabel = (p: Project) => (p.budgetMinutes === null ? null : `${settin
     <table class="w-full text-sm">
       <thead class="text-left text-xs text-muted-foreground">
         <tr class="border-b">
-          <th class="px-3 py-2 font-medium">{{ $t('projects.name') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('projects.client') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('projects.budget') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('nav.tags') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('projects.status') }}</th>
+          <SortHead :sort="sort" column="name" class="px-3 py-2 font-medium">{{ $t('projects.name') }}</SortHead>
+          <SortHead :sort="sort" column="client" class="px-3 py-2 font-medium">{{ $t('projects.client') }}</SortHead>
+          <SortHead :sort="sort" column="budget" class="px-3 py-2 font-medium">{{ $t('projects.budget') }}</SortHead>
+          <SortHead :sort="sort" column="tags" class="px-3 py-2 font-medium">{{ $t('nav.tags') }}</SortHead>
+          <SortHead :sort="sort" column="status" class="px-3 py-2 font-medium">{{ $t('projects.status') }}</SortHead>
           <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="p in list" :key="p.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="(workspaces.canEditShared || p.managerId === account.status.user?.id) && open(p)">
+        <tr v-for="p in sortedList" :key="p.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="(workspaces.canEditShared || p.managerId === account.status.user?.id) && open(p)">
           <td class="px-3 py-1.5">
             <div class="flex items-center gap-2">
               <ProjectDot :project="p" show-alias />

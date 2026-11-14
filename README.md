@@ -6,6 +6,7 @@ tray. Tauri 2 + Vue 3, with a Rust core on SQLite.
 - Product and technical spec: [docs/SPEC.md](docs/SPEC.md)
 - Implementation plan: [docs/PLAN.md](docs/PLAN.md)
 - Decisions: [docs/adr/](docs/adr/)
+- Demo data for development: [docs/seed-demo-data.md](docs/seed-demo-data.md)
 
 ## Layout
 

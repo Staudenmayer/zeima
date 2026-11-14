@@ -33,6 +33,8 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useTagsStore } from '@/stores/tags'
 import { useTimerStore } from '@/stores/timer'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.reports' } })
 
@@ -198,6 +200,24 @@ const timesheetMonth = computed(() => toDateInput(range.value.from).slice(0, 7))
 function entryDuration(e: { startAt: number; endAt: number | null }) {
   return (e.endAt ?? timer.now) - e.startAt
 }
+
+// Sortable tables: the summary sorts the top level (its detail rows keep their order); the entries sort as a list.
+const { sort: summarySort, sorted: sortedRows } = useSort(() => report.value?.rows ?? [], {
+  group: (r) => labels.label(shownGroups.value[0]!, r.key),
+  hours: (r) => r.ms,
+  billable: (r) => r.billableMs,
+  entries: (r) => r.entryCount,
+})
+const { sort: entrySort, sorted: sortedEntries } = useSort(() => report.value?.entries ?? [], {
+  date: (e) => e.startAt,
+  time: (e) => e.startAt % 86_400_000,
+  activity: (e) => (e.activityId ? activities.byId.get(e.activityId)?.name : '') ?? '',
+  project: (e) => (e.projectId ? projects.byId.get(e.projectId)?.name : '') ?? '',
+  tags: (e) => e.tagIds.map((id) => tags.byId.get(id)?.name ?? '').join(' '),
+  costCenter: (e) => (e.costCenterId ? costCenters.byId.get(e.costCenterId)?.code : '') ?? '',
+  note: (e) => e.note,
+  duration: (e) => entryDuration(e),
+})
 </script>
 
 <template>
@@ -326,15 +346,15 @@ function entryDuration(e: { startAt: number; endAt: number | null }) {
     <table class="w-full text-sm">
       <thead class="text-left text-xs text-muted-foreground">
         <tr class="border-b">
-          <th class="px-3 py-2 font-medium">{{ $t(`reports.groups.${shownGroups[0]}`) }}</th>
+          <SortHead :sort="summarySort" column="group" class="px-3 py-2">{{ $t(`reports.groups.${shownGroups[0]}`) }}</SortHead>
           <th class="hidden w-1/4 px-3 py-2 sm:table-cell"><span class="sr-only">{{ $t('reports.share') }}</span></th>
-          <th class="w-24 px-3 py-2 text-right font-medium">{{ $t('reports.hours') }}</th>
-          <th class="w-28 px-3 py-2 text-right font-medium">{{ $t('reports.billable') }}</th>
-          <th class="w-20 px-3 py-2 text-right font-medium">{{ $t('reports.entries') }}</th>
+          <SortHead :sort="summarySort" column="hours" class="w-24 px-3 py-2 text-right font-medium">{{ $t('reports.hours') }}</SortHead>
+          <SortHead :sort="summarySort" column="billable" class="w-28 px-3 py-2 text-right font-medium">{{ $t('reports.billable') }}</SortHead>
+          <SortHead :sort="summarySort" column="entries" class="w-20 px-3 py-2 text-right font-medium">{{ $t('reports.entries') }}</SortHead>
         </tr>
       </thead>
       <tbody>
-        <template v-for="row in report.rows" :key="rowId(row)">
+        <template v-for="row in sortedRows" :key="rowId(row)">
           <tr
             class="border-b last:border-b-0 hover:bg-muted/30"
             :class="row.children.length ? 'cursor-pointer' : ''"
@@ -415,18 +435,18 @@ function entryDuration(e: { startAt: number; endAt: number | null }) {
     <table class="w-full text-sm">
       <thead class="text-left text-xs text-muted-foreground">
         <tr class="border-b">
-          <th class="px-3 py-2 font-medium">{{ $t('entry.date') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('timesheet.time') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('entry.project') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('entry.tags') }}</th>
-          <th v-if="costCenters.all.length" class="px-3 py-2 font-medium">{{ $t('costCenters.costCenter') }}</th>
-          <th class="px-3 py-2 font-medium">{{ $t('entry.note') }}</th>
-          <th class="px-3 py-2 text-right font-medium">{{ $t('timesheet.duration') }}</th>
+          <SortHead :sort="entrySort" column="date" class="px-3 py-2 font-medium">{{ $t('entry.date') }}</SortHead>
+          <SortHead :sort="entrySort" column="time" class="px-3 py-2 font-medium">{{ $t('timesheet.time') }}</SortHead>
+          <SortHead :sort="entrySort" column="activity" class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</SortHead>
+          <SortHead :sort="entrySort" column="project" class="px-3 py-2 font-medium">{{ $t('entry.project') }}</SortHead>
+          <SortHead :sort="entrySort" column="tags" class="px-3 py-2 font-medium">{{ $t('entry.tags') }}</SortHead>
+          <SortHead v-if="costCenters.all.length" :sort="entrySort" column="costCenter" class="px-3 py-2 font-medium">{{ $t('costCenters.costCenter') }}</SortHead>
+          <SortHead :sort="entrySort" column="note" class="px-3 py-2 font-medium">{{ $t('entry.note') }}</SortHead>
+          <SortHead :sort="entrySort" column="duration" class="px-3 py-2 text-right font-medium">{{ $t('timesheet.duration') }}</SortHead>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="e in report.entries" :key="e.id" class="border-b last:border-b-0 hover:bg-muted/30">
+        <tr v-for="e in sortedEntries" :key="e.id" class="border-b last:border-b-0 hover:bg-muted/30">
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ format.shortDate(e.startAt) }}</td>
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">
             {{ format.time(e.startAt) }}–{{ e.endAt === null ? '' : format.time(e.endAt) }}

@@ -13,6 +13,8 @@ import SettingsNav from '@/components/time/SettingsNav.vue'
 import { useFormat } from '@/composables/useFormat'
 import { call, errorMessage } from '@/lib/ipc'
 import { parseDate } from '@/lib/time'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.settings' } })
 
@@ -90,6 +92,9 @@ function backupDate(file: string) {
   const date = file.match(/\d{4}-\d{2}-\d{2}/)?.[0]
   return date ? format.longDate(parseDate(date)) : file
 }
+
+// The file name holds the date, so both columns sort the same way.
+const { sort, apply: sortBackups } = useSort<string>(null, { date: (f) => f, file: (f) => f })
 </script>
 
 <template>
@@ -155,12 +160,12 @@ function backupDate(file: string) {
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">
-                <th class="px-3 py-2 font-medium">{{ $t('settings.data.backupDate') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('settings.data.backupFile') }}</th>
+                <SortHead :sort="sort" column="date" class="px-3 py-2 font-medium">{{ $t('settings.data.backupDate') }}</SortHead>
+                <SortHead :sort="sort" column="file" class="px-3 py-2 font-medium">{{ $t('settings.data.backupFile') }}</SortHead>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="file in backups.files" :key="file" class="border-b last:border-b-0 hover:bg-muted/30">
+              <tr v-for="file in sortBackups(backups.files)" :key="file" class="border-b last:border-b-0 hover:bg-muted/30">
                 <td class="whitespace-nowrap px-3 py-1.5">{{ backupDate(file) }}</td>
                 <td class="px-3 py-1.5 font-mono text-xs text-muted-foreground">{{ file }}</td>
               </tr>

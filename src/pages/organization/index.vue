@@ -22,6 +22,8 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import type { OrgPolicy } from '@/bindings'
 import { useAccountStore } from '@/stores/account'
 import { CAN, type Department, type Invitation, type Member, type OrgRole, useOrgStore } from '@/stores/org'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.organization' } })
 
@@ -163,6 +165,32 @@ const actionLabel = (a: string) => {
 const actor = (id: string | null) => (id ? memberName(id) : '')
 
 const deleteOrgOpen = ref(false)
+
+// Sortable tables. The activity log is loaded page by page, newest first; its sort covers what is loaded.
+const { sort: memberSort, sorted: sortedMembers } = useSort(() => org.members, {
+  member: (m) => label(m),
+  role: (m) => m.role,
+  status: (m) => (m.active ? 0 : 1),
+})
+const { sort: presenceSort, sorted: sortedPresence } = useSort(() => org.presence, {
+  member: (p) => memberName(p.userId),
+  project: (p) => (p.projectId ? projects.byId.get(p.projectId)?.name : '') ?? '',
+  status: (p) => t(`org.presenceStates.${p.state}`),
+})
+const { sort: inviteSort, sorted: sortedInvitations } = useSort(() => org.invitations, {
+  email: (i) => i.email,
+  invited: (i) => i.createdAt,
+  role: (i) => i.role,
+})
+const { sort: policySort, sorted: sortedScopes } = useSort(policyScopes, {
+  scope: (s) => s.label,
+  rules: (s) => policySummary(policyOf(s.path)),
+})
+const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
+  when: (a) => a.at,
+  what: (a) => actionLabel(a.action),
+  who: (a) => actor(a.actorId),
+})
 </script>
 
 <template>
@@ -213,14 +241,14 @@ const deleteOrgOpen = ref(false)
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.member') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.role') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.status') }}</th>
+                <SortHead :sort="memberSort" column="member" class="px-3 py-2 font-medium">{{ $t('org.col.member') }}</SortHead>
+                <SortHead :sort="memberSort" column="role" class="px-3 py-2 font-medium">{{ $t('org.col.role') }}</SortHead>
+                <SortHead :sort="memberSort" column="status" class="px-3 py-2 font-medium">{{ $t('org.col.status') }}</SortHead>
                 <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="m in org.members" :key="m.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+              <tr v-for="m in sortedMembers" :key="m.id" class="group border-b last:border-b-0 hover:bg-muted/30">
                 <td class="px-3 py-1.5">
                   <p class="truncate font-medium">{{ label(m) }}</p>
                   <p v-if="m.name && m.email" class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
@@ -262,13 +290,13 @@ const deleteOrgOpen = ref(false)
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.member') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.project') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.status') }}</th>
+                <SortHead :sort="presenceSort" column="member" class="px-3 py-2 font-medium">{{ $t('org.col.member') }}</SortHead>
+                <SortHead :sort="presenceSort" column="project" class="px-3 py-2 font-medium">{{ $t('org.col.project') }}</SortHead>
+                <SortHead :sort="presenceSort" column="status" class="px-3 py-2 font-medium">{{ $t('org.col.status') }}</SortHead>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="p in org.presence" :key="p.userId" class="border-b last:border-b-0 hover:bg-muted/30">
+              <tr v-for="p in sortedPresence" :key="p.userId" class="border-b last:border-b-0 hover:bg-muted/30">
                 <td class="px-3 py-1.5 font-medium"><span class="flex items-center gap-2"><span class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: STATE_COLOR[p.state] }" />{{ memberName(p.userId) }}</span></td>
                 <td class="px-3 py-1.5 text-muted-foreground">{{ p.projectId ? projects.byId.get(p.projectId)?.name : '–' }}</td>
                 <td class="px-3 py-1.5 text-muted-foreground">{{ $t(`org.presenceStates.${p.state}`) }}</td>
@@ -285,14 +313,14 @@ const deleteOrgOpen = ref(false)
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">
-                <th class="px-3 py-2 font-medium">{{ $t('org.email') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.invited') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.role') }}</th>
+                <SortHead :sort="inviteSort" column="email" class="px-3 py-2 font-medium">{{ $t('org.email') }}</SortHead>
+                <SortHead :sort="inviteSort" column="invited" class="px-3 py-2 font-medium">{{ $t('org.col.invited') }}</SortHead>
+                <SortHead :sort="inviteSort" column="role" class="px-3 py-2 font-medium">{{ $t('org.col.role') }}</SortHead>
                 <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="i in org.invitations" :key="i.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+              <tr v-for="i in sortedInvitations" :key="i.id" class="group border-b last:border-b-0 hover:bg-muted/30">
                 <td class="px-3 py-1.5">{{ i.email }}</td>
                 <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ format.shortDate(i.createdAt) }}</td>
                 <td class="px-3 py-1.5"><Badge variant="secondary">{{ $t(`org.roles.${i.role}`) }}</Badge></td>
@@ -340,13 +368,13 @@ const deleteOrgOpen = ref(false)
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.scope') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.rules') }}</th>
+                <SortHead :sort="policySort" column="scope" class="px-3 py-2 font-medium">{{ $t('org.col.scope') }}</SortHead>
+                <SortHead :sort="policySort" column="rules" class="px-3 py-2 font-medium">{{ $t('org.col.rules') }}</SortHead>
                 <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="s in policyScopes" :key="s.path ?? 'org'" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="editPolicy(s)">
+              <tr v-for="s in sortedScopes" :key="s.path ?? 'org'" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="editPolicy(s)">
                 <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ s.label }}</td>
                 <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground">{{ policySummary(policyOf(s.path)) }}</td>
                 <td class="px-1 py-0.5" @click.stop>
@@ -367,13 +395,13 @@ const deleteOrgOpen = ref(false)
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.when') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.what') }}</th>
-                <th class="px-3 py-2 font-medium">{{ $t('org.col.who') }}</th>
+                <SortHead :sort="auditSort" column="when" class="px-3 py-2 font-medium">{{ $t('org.col.when') }}</SortHead>
+                <SortHead :sort="auditSort" column="what" class="px-3 py-2 font-medium">{{ $t('org.col.what') }}</SortHead>
+                <SortHead :sort="auditSort" column="who" class="px-3 py-2 font-medium">{{ $t('org.col.who') }}</SortHead>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="a in org.audit" :key="a.id" class="border-b last:border-b-0 hover:bg-muted/30">
+              <tr v-for="a in sortedAudit" :key="a.id" class="border-b last:border-b-0 hover:bg-muted/30">
                 <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">{{ format.shortDate(a.at) }} {{ format.time(a.at) }}</td>
                 <td class="px-3 py-1.5">{{ actionLabel(a.action) }}<span v-if="a.target" class="text-muted-foreground"> · {{ a.target.length === 36 ? memberName(a.target) : a.target }}</span></td>
                 <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ actor(a.actorId) }}</td>

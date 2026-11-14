@@ -19,6 +19,8 @@ import { useFormat } from '@/composables/useFormat'
 import { call, errorMessage } from '@/lib/ipc'
 import { parseDate, toDateInput } from '@/lib/time'
 import { useWorkStore } from '@/stores/work'
+import SortHead from '@/components/time/SortHead.vue'
+import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.absences' } })
 
@@ -94,6 +96,16 @@ async function addHoliday() {
   const ok = await run(call(commands.holidayCreate(holidayDate.value, holidayName.value)))
   if (ok) holidayName.value = ''
 }
+
+const { sort, sorted: sortedAbsences } = useSort(absences, {
+  period: (a) => a.startDate,
+  type: (a) => {
+    const t = work.absenceTypesById.get(a.typeId)
+    return t ? work.absenceTypeName(t) : ''
+  },
+  status: (a) => a.status,
+  note: (a) => a.note,
+})
 </script>
 
 <template>
@@ -142,15 +154,15 @@ async function addHoliday() {
         <table class="w-full text-sm">
           <thead class="text-left text-xs text-muted-foreground">
             <tr class="border-b">
-              <th class="px-3 py-2 font-medium">{{ $t('absences.period') }}</th>
-              <th class="px-3 py-2 font-medium">{{ $t('absences.type') }}</th>
-              <th class="px-3 py-2 font-medium">{{ $t('absences.statusColumn') }}</th>
-              <th class="px-3 py-2 font-medium">{{ $t('entry.note') }}</th>
+              <SortHead :sort="sort" column="period" class="px-3 py-2 font-medium">{{ $t('absences.period') }}</SortHead>
+              <SortHead :sort="sort" column="type" class="px-3 py-2 font-medium">{{ $t('absences.type') }}</SortHead>
+              <SortHead :sort="sort" column="status" class="px-3 py-2 font-medium">{{ $t('absences.statusColumn') }}</SortHead>
+              <SortHead :sort="sort" column="note" class="px-3 py-2 font-medium">{{ $t('entry.note') }}</SortHead>
               <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="a in absences" :key="a.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="open(a)">
+            <tr v-for="a in sortedAbsences" :key="a.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="open(a)">
               <td class="whitespace-nowrap px-3 py-1.5 font-medium tabular-nums">{{ range(a) }}</td>
               <td class="whitespace-nowrap px-3 py-1.5">
                 <span class="flex items-center gap-2">
