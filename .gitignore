@@ -34,5 +34,5 @@ addons/*/target/
 .env
 packages/core-wasm/pkg
 
-# Developer-local copies of the blueprints
+# Developer-local copy of deploy/dev.env.example
 deploy/dev.env
