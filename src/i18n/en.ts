@@ -727,6 +727,7 @@ export default {
   },
   meetings: {
     rooms: 'Rooms',
+    otherPlacePlaceholder: 'Where (optional)',
     otherPlace: 'Another place',
     booked: 'booked',
     roomTaken: 'The room is booked at that time. Pick another room or time.',

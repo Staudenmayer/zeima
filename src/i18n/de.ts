@@ -729,6 +729,7 @@ const de: typeof en = {
   },
   meetings: {
     rooms: 'Räume',
+    otherPlacePlaceholder: 'Wo (optional)',
     otherPlace: 'Anderer Ort',
     booked: 'belegt',
     roomTaken: 'Der Raum ist zu dieser Zeit belegt. Wähle einen anderen Raum oder eine andere Zeit.',

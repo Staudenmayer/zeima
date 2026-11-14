@@ -293,9 +293,11 @@ async function save() {
             {{ $t('meetings.busy', { name: nameOf(c.id), times: c.times.map((t) => (t.kind === 'absence' ? $t('meetings.absent') : `${clock(t.from)}–${clock(t.to)}`)).join(', ') }) }}
           </p>
         </div>
+        <!-- Place and online link side by side; the free-text place and the
+             warnings go under both, so the two fields stay level. -->
         <div class="grid grid-cols-2 gap-3">
           <div class="grid gap-2">
-            <Label for="m-loc">{{ $t('meetings.location') }}</Label>
+            <Label :for="rooms.length ? undefined : 'm-loc'">{{ $t('meetings.location') }}</Label>
             <Select v-if="rooms.length" :model-value="form.roomId ?? NO_ROOM" @update:model-value="(v) => (form.roomId = v === NO_ROOM ? null : String(v))">
               <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -305,10 +307,11 @@ async function save() {
                 </SelectItem>
               </SelectContent>
             </Select>
-            <Input v-if="!form.roomId" id="m-loc" v-model="form.location" maxlength="200" />
-            <p v-else-if="roomBooked.has(form.roomId)" class="text-xs text-amber-600">{{ $t('meetings.roomTaken') }}</p>
+            <Input v-else id="m-loc" v-model="form.location" maxlength="200" />
           </div>
           <div class="grid gap-2"><Label for="m-url">{{ $t('meetings.onlineUrl') }}</Label><Input id="m-url" v-model="form.url" type="url" placeholder="https://" /></div>
+          <Input v-if="rooms.length && !form.roomId" v-model="form.location" class="col-span-2" maxlength="200" :placeholder="$t('meetings.otherPlacePlaceholder')" :aria-label="$t('meetings.location')" />
+          <p v-else-if="form.roomId && roomBooked.has(form.roomId)" class="col-span-2 -mt-1 text-xs text-amber-600">{{ $t('meetings.roomTaken') }}</p>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div class="grid gap-2"><Label>{{ $t('meetings.activity') }}</Label><ActivitySelect v-model="form.activityId" /></div>
