@@ -536,3 +536,64 @@ async fn policies_apply_to_entries_in_a_shared_workspace_only() {
         PolicySettings::default()
     );
 }
+
+#[tokio::test]
+async fn the_team_summary_also_sums_tags_and_cost_centers_and_lists_a_persons_entries() {
+    use zeima_core::model::{ActivityInput, EntryInput, TagInput};
+    use zeima_core::summary::Range;
+    const HOUR: i64 = 3_600_000;
+    let (_, ada, ben) = setup().await;
+    let activity = ada
+        .create_activity(ActivityInput {
+            name: "Work".into(),
+            color: "#111111".into(),
+            archived: false,
+        })
+        .await
+        .unwrap();
+    let tag = ada
+        .create_tag(TagInput {
+            name: "dev".into(),
+            color: "#3b82f6".into(),
+            project_id: None,
+            group_name: None,
+        })
+        .await
+        .unwrap();
+    let entry = |hours: i64, tags: Vec<String>, note: &str| EntryInput {
+        activity_id: Some(activity.id.clone()),
+        project_id: None,
+        start_at: T0,
+        end_at: Some(T0 + hours * HOUR),
+        tz: Some("UTC".into()),
+        note: note.into(),
+        billable: None,
+        tag_ids: tags,
+        cost_center_id: None,
+    };
+    ada.create_entry(entry(2, vec![tag.id.clone()], "coding"))
+        .await
+        .unwrap();
+    ada.create_entry(entry(1, vec![], "plain")).await.unwrap();
+    let range = Range {
+        from: T0,
+        to: T0 + 24 * HOUR,
+    };
+    let team = ben.team_summary(range).await.unwrap();
+    assert_eq!(team.len(), 1);
+    assert_eq!(
+        team[0]
+            .tags
+            .iter()
+            .map(|t| (t.id.as_str(), t.ms))
+            .collect::<Vec<_>>(),
+        vec![(tag.id.as_str(), 2 * HOUR)]
+    );
+    assert!(team[0].cost_centers.is_empty());
+    let entries = ben.team_entries(ADA, range).await.unwrap();
+    assert_eq!(
+        entries.iter().map(|e| e.note.as_str()).collect::<Vec<_>>().len(),
+        2
+    );
+    assert!(ben.team_entries(BEN, range).await.unwrap().is_empty());
+}

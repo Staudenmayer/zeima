@@ -31,9 +31,19 @@ pub struct Activity {
     pub morning_pending: Mutex<bool>,
     morning_offered_on: Mutex<Option<NaiveDate>>,
     warned_max_on: Mutex<Option<NaiveDate>>,
+    /// The screen is locked or nobody has touched the machine for a few minutes
+    /// (for presence: colleagues see "away").
+    idle: std::sync::atomic::AtomicBool,
 }
 
+/// Idle time after which a person counts as away in the presence list.
+const AWAY_AFTER_MS: i64 = 5 * 60_000;
+
 impl Activity {
+    pub fn is_idle(&self) -> bool {
+        self.idle.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     pub fn morning_pending(&self) -> bool {
         *self.morning_pending.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -83,6 +93,10 @@ pub fn spawn(app: AppHandle) {
                 detector.set_idle_minutes(cfg.idle_minutes);
                 let snapshot = probe.snapshot();
                 let now = app.state::<AppState>().core.now_ms();
+                app.state::<Activity>().idle.store(
+                    snapshot.locked == Some(true) || snapshot.idle_ms.is_some_and(|ms| ms >= AWAY_AFTER_MS),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 let observation = Observation {
                     now,
                     idle_ms: snapshot.idle_ms,

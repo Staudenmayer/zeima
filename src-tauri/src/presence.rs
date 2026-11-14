@@ -25,7 +25,14 @@ struct Report {
 }
 
 /// What an organization hears, given the timer that runs in its workspace (if any).
-fn report_for(timer: Option<&TimerState>, share_project: bool) -> Report {
+fn report_for(timer: Option<&TimerState>, share_project: bool, idle: bool) -> Report {
+    // Away from the machine: whatever the timer does, the person is not there.
+    if idle {
+        return Report {
+            state: "away",
+            project_id: None,
+        };
+    }
     match timer {
         Some(TimerState::Running { entry }) => Report {
             state: "tracking",
@@ -56,10 +63,13 @@ async fn check(app: &AppHandle, last: &mut HashMap<String, (Report, Instant)>) {
         return;
     };
     let share = state.settings().share_project_presence;
+    let idle = app
+        .try_state::<crate::activity::Activity>()
+        .is_some_and(|a| a.is_idle());
     for w in workspaces.into_iter().filter(|w| w.kind == "org") {
         let Some(org_id) = w.org_id.clone() else { continue };
         let timer = state.core.scoped(&w.id, &user).timer_state().await.ok();
-        let report = report_for(timer.as_ref(), share);
+        let report = report_for(timer.as_ref(), share, idle);
         let due = last
             .get(&org_id)
             .is_none_or(|(sent, at)| *sent != report || at.elapsed() >= REPEAT_AFTER);
@@ -112,14 +122,14 @@ mod tests {
             entry: entry(Some("p1")),
         };
         assert_eq!(
-            report_for(Some(&running), false),
+            report_for(Some(&running), false, false),
             Report {
                 state: "tracking",
                 project_id: None
             }
         );
         assert_eq!(
-            report_for(Some(&running), true),
+            report_for(Some(&running), true, false),
             Report {
                 state: "tracking",
                 project_id: Some("p1".into())
@@ -128,15 +138,30 @@ mod tests {
     }
 
     #[test]
+    fn being_away_from_the_machine_overrides_the_timer() {
+        let running = TimerState::Running {
+            entry: entry(Some("p1")),
+        };
+        assert_eq!(
+            report_for(Some(&running), true, true),
+            Report {
+                state: "away",
+                project_id: None
+            }
+        );
+        assert_eq!(report_for(None, true, true).state, "away");
+    }
+
+    #[test]
     fn idle_or_elsewhere_is_just_online_and_a_pause_is_away() {
         assert_eq!(
-            report_for(None, true),
+            report_for(None, true, false),
             Report {
                 state: "online",
                 project_id: None
             }
         );
-        assert_eq!(report_for(Some(&TimerState::Idle), true).state, "online");
+        assert_eq!(report_for(Some(&TimerState::Idle), true, false).state, "online");
         let pause: Pause = serde_json::from_value(serde_json::json!({
             "id": "p", "workspaceId": "w", "userId": "u", "startAt": 1, "endAt": null, "kind": "manual",
             "resumeEntryId": null, "followupEntryId": null, "applied": false, "accepted": null,
@@ -148,7 +173,7 @@ mod tests {
             resume_entry: None,
         };
         assert_eq!(
-            report_for(Some(&paused), true),
+            report_for(Some(&paused), true, false),
             Report {
                 state: "away",
                 project_id: None

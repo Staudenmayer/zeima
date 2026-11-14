@@ -480,3 +480,14 @@ pub async fn policy_delete(app: AppHandle, state: State<'_, AppState>, id: Strin
     work_changed(&app).await;
     Ok(())
 }
+
+/// The finished entries of one person in the workspace (what the server sent).
+#[tauri::command]
+#[specta::specta]
+pub async fn team_entries(
+    state: State<'_, AppState>,
+    user_id: String,
+    range: zeima_core::summary::Range,
+) -> CmdResult<Vec<zeima_core::model::TimeEntry>> {
+    Ok(state.data().team_entries(&user_id, range).await?)
+}

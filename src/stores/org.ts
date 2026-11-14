@@ -135,6 +135,13 @@ export const useOrgStore = defineStore('org', () => {
     await loadPolicies()
   }
 
+  /** Names and presence only: what a widget needs, without loading the whole organization. */
+  async function loadGlance(orgId: string) {
+    activeId.value = orgId
+    people.value = await api<{ id: string; name: string | null }[]>('GET', `${base()}/people`).catch(() => [])
+    await loadPresence()
+  }
+
   async function loadPresence() {
     if (activeId.value) presence.value = await api<PresenceItem[]>('GET', `${base()}/presence`)
   }
@@ -196,7 +203,7 @@ export const useOrgStore = defineStore('org', () => {
 
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
-    policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
+    loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

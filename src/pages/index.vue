@@ -21,6 +21,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { useTagsStore } from '@/stores/tags'
 import { useTimerStore } from '@/stores/timer'
 import { useWorkStore } from '@/stores/work'
+import { useWorkspaceStore } from '@/stores/workspace'
+import OnlineNow from '@/components/time/OnlineNow.vue'
 
 definePage({ meta: { titleKey: 'nav.dashboard' } })
 
@@ -151,10 +153,12 @@ const byProject = computed(() => {
     pct: (p.ms / max) * 100,
   }))
 })
+const workspaces = useWorkspaceStore()
 </script>
 
 <template>
   <div class="grid gap-4 lg:grid-cols-2">
+    <section v-if="workspaces.inOrg" class="min-w-0 lg:col-span-2"><OnlineNow /></section>
     <section
       v-for="w in widgets"
       :key="w"

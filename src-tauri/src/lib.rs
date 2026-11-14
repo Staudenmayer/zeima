@@ -157,6 +157,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands_work::locations_list,
             commands_work::location_set,
             commands_work::team_summary,
+            commands_work::team_entries,
             commands_work::absence_requests,
             commands_work::absence_decide,
             commands_work::submissions_list,

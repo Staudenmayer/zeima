@@ -29,7 +29,7 @@ pub use policies::ACCOUNT_GROUPS_KEY;
 pub use submissions::{SubmissionStatus, TimesheetSubmission};
 pub use sync_apply::{ApplyReport, FieldView, RemoteRow, SyncConflict};
 pub use sync_outbox::{Outbox, BATCH as SYNC_BATCH, SYNCED_TABLES};
-pub use team::TeamMember;
+pub use team::{IdTotal, TeamMember};
 pub(crate) use work::invalidate_entry_days;
 pub use work::{default_schedule, Balance, HolidayView, ProfileSummary, VacationSummary, WorkScheduleInput};
 

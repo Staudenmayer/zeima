@@ -209,6 +209,8 @@ export const commands = {
 	 *  (what the person's role lets the server send).
 	 */
 	teamSummary: (range: Range) => typedError<TeamMember[], CmdError>(__TAURI_INVOKE("team_summary", { range })),
+	/**  The finished entries of one person in the workspace (what the server sent). */
+	teamEntries: (userId: string, range: Range) => typedError<TimeEntry[], CmdError>(__TAURI_INVOKE("team_entries", { userId, range })),
 	/**  Absence requests of other people waiting for a decision. */
 	absenceRequests: () => typedError<Absence[], CmdError>(__TAURI_INVOKE("absence_requests")),
 	absenceDecide: (id: string, approve: boolean, note: string) => typedError<Absence, CmdError>(__TAURI_INVOKE("absence_decide", { id, approve, note })),
@@ -775,6 +777,11 @@ export type Hook = "entry.started" | "entry.stopped" | "entry.created" | "entry.
 /**  Items shown in the timesheet calendar, e.g. calendar events. */
 "timeline.events";
 
+export type IdTotal = {
+	id: string,
+	ms: number,
+};
+
 export type ImportPreview = {
 	/**  Entries that would be added. */
 	newEntries: number,
@@ -1248,6 +1255,10 @@ export type TeamMember = {
 	billableMs: number,
 	/**  Per project, longest first. */
 	projects: ProjectTotal[],
+	/**  Per tag (an entry with two tags counts for both), longest first. */
+	tags: IdTotal[],
+	/**  Per cost center, longest first. */
+	costCenters: IdTotal[],
 };
 
 export type TimeEntry = {

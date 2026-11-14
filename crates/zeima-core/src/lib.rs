@@ -45,8 +45,8 @@ pub use repo::{
     WorkScheduleInput,
 };
 pub use repo::{ApplyReport, FieldView, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
+pub use repo::{IdTotal, SubmissionStatus, TeamMember, TimesheetSubmission};
 pub use repo::{ImportPreview, ImportReport, LocationKind, WorkLocation};
-pub use repo::{SubmissionStatus, TeamMember, TimesheetSubmission};
 
 #[cfg(feature = "db")]
 pub use db::{Core, WorkspaceInfo};
