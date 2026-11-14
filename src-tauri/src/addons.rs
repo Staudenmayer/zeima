@@ -856,8 +856,14 @@ mod tests {
         );
         core.set_default_tz("UTC").unwrap();
         let (manifest, wasm) = crate::commands_addons::read_package(&zip).unwrap();
-        let dir =
-            std::env::temp_dir().join(format!("time-addon-test-{}-{}", manifest.id, std::process::id()));
+        static LOADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        // Tests run in parallel and may load the same addon: one folder each.
+        let n = LOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "time-addon-test-{}-{}-{n}",
+            manifest.id,
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(&manifest.wasm), wasm).unwrap();
         core.save_addon(&manifest.id, &manifest.version, granted)
