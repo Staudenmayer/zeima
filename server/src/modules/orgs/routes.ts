@@ -13,6 +13,7 @@ import { HttpProblem, problems } from '../../plugins/errors.ts'
 import { PRESENCE_STATES } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { reconcileOrganization } from './reconcile.ts'
+import { freeBusy } from '../../meetings/freebusy.ts'
 import { audit, auditEntries, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
 
 const Role = Type.Union(ORG_ROLES.map((r) => Type.Literal(r)))
@@ -628,6 +629,42 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const { orgId } = request.params
       authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
       return reconcileOrganization(database(), keycloak(), orgId)
+    },
+  )
+
+  app.post(
+    '/orgs/:orgId/freebusy',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'When people are busy (for planning a meeting)',
+        description:
+          'Only times, never what for: meetings the person organizes or has not declined, and approved absences. ' +
+          'Every member may ask about every member. `timezone` is the zone whose days absences are read in.',
+        security: SECURITY,
+        params: OrgParams,
+        body: Type.Object({
+          userIds: Type.Array(Type.String({ format: 'uuid' }), { minItems: 1, maxItems: 50 }),
+          from: Type.Integer({ description: 'Unix ms' }),
+          to: Type.Integer({ description: 'Unix ms; at most 31 days after `from`' }),
+          timezone: Type.Optional(Type.String({ maxLength: 64 })),
+        }),
+        response: {
+          200: Type.Record(Type.String(), Type.Array(Type.Object({ from: Type.Integer(), to: Type.Integer(), kind: Type.Union([Type.Literal('meeting'), Type.Literal('absence')]) }))),
+          ...problems(400, 401, 403, 503),
+        },
+      },
+    },
+    async (request) => {
+      const { orgId } = request.params
+      actorIn({ user: request.user! }, orgId)
+      const { userIds, from, to, timezone } = request.body
+      if (to <= from || to - from > 31 * 86_400_000) throw new HttpProblem(400, 'bad_request', '`to` must be after `from`, within 31 days')
+      const workspace = await orgWorkspaceId(database(), orgId)
+      if (!workspace) return Object.fromEntries(userIds.map((u) => [u, []]))
+      // Only people of this organization.
+      const members = new Set((await listMembers(database(), orgId)).map((m) => m.id))
+      return freeBusy(database(), workspace, userIds.filter((u) => members.has(u)), from, to, timezone ?? 'UTC')
     },
   )
 

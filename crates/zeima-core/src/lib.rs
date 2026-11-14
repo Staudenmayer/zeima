@@ -16,6 +16,7 @@ pub mod ids;
 pub mod import;
 pub mod jurisdiction;
 pub mod locale;
+pub mod meeting;
 pub mod model;
 pub mod policy;
 pub mod report;
@@ -49,6 +50,7 @@ pub use repo::{IdTotal, SubmissionStatus, TeamMember, TimesheetSubmission};
 pub use repo::{
     ImportPreview, ImportReport, LocationKind, LocationPattern, Office, PatternDay, WorkLocation,
 };
+pub use repo::{Meeting, MeetingInput, MeetingOccurrence, MeetingResponse, RsvpStatus};
 
 #[cfg(feature = "db")]
 pub use db::{Core, WorkspaceInfo};

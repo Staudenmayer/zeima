@@ -710,3 +710,125 @@ async fn a_usual_week_fills_the_empty_days() {
         0
     );
 }
+
+#[tokio::test]
+async fn meetings_are_called_answered_and_repeat() {
+    use zeima_core::{MeetingInput, RsvpStatus};
+    const HOUR: i64 = 3_600_000;
+    const T_MON: i64 = 1_791_187_200_000; // 2026-10-05 08:00 UTC, a Monday
+    let (_, ada, ben) = setup().await;
+    ada.set_default_tz("UTC").unwrap();
+    let input = |rrule: Option<&str>, attendees: Vec<&str>| MeetingInput {
+        title: " Weekly sync ".into(),
+        start_at: T_MON,
+        end_at: T_MON + HOUR,
+        tz: None,
+        location: Some("Room 4".into()),
+        online_url: Some("https://meet.example.com/x".into()),
+        project_id: None,
+        note: "agenda".into(),
+        rrule: rrule.map(Into::into),
+        attendee_ids: attendees.into_iter().map(Into::into).collect(),
+    };
+    // Checks.
+    assert!(ada
+        .create_meeting(MeetingInput {
+            end_at: T_MON,
+            ..input(None, vec![])
+        })
+        .await
+        .is_err());
+    assert!(ada
+        .create_meeting(input(Some("FREQ=HOURLY"), vec![]))
+        .await
+        .is_err());
+    assert!(ada
+        .create_meeting(MeetingInput {
+            online_url: Some("ftp://x".into()),
+            ..input(None, vec![])
+        })
+        .await
+        .is_err());
+
+    let meeting = ada
+        .create_meeting(input(Some("FREQ=WEEKLY;COUNT=3"), vec![BEN, ADA, BEN]))
+        .await
+        .unwrap();
+    assert_eq!(
+        (meeting.title.as_str(), meeting.attendee_ids.clone()),
+        ("Weekly sync", vec![BEN.to_string()]),
+        "the organizer is not an attendee, and none twice"
+    );
+
+    // Three weeks of occurrences, for the organizer and the person asked.
+    let from = date("2026-10-01");
+    let to = date("2026-11-30");
+    assert_eq!(ada.list_meetings(from, to).await.unwrap().len(), 3);
+    assert_eq!(ben.list_meetings(from, to).await.unwrap().len(), 3);
+    assert_eq!(
+        ada.list_meetings(date("2026-10-12"), date("2026-10-12"))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    // Only those asked answer; the organizer cannot.
+    assert!(ada
+        .respond_to_meeting(&meeting.id, RsvpStatus::Accepted)
+        .await
+        .is_err());
+    ben.respond_to_meeting(&meeting.id, RsvpStatus::Tentative)
+        .await
+        .unwrap();
+    ben.respond_to_meeting(&meeting.id, RsvpStatus::Accepted)
+        .await
+        .unwrap();
+    let seen = ada.list_meetings(from, from).await.unwrap_or_default();
+    assert!(seen.is_empty());
+    let first = &ada.list_meetings(from, to).await.unwrap()[0];
+    assert_eq!(
+        (first.responses.len(), first.responses[0].status, first.my_status),
+        (1, RsvpStatus::Accepted, None)
+    );
+    assert_eq!(
+        ben.list_meetings(from, to).await.unwrap()[0].my_status,
+        Some(RsvpStatus::Accepted)
+    );
+
+    // Only the organizer changes or cancels.
+    assert!(ben
+        .update_meeting(&meeting.id, input(None, vec![]))
+        .await
+        .is_err());
+    assert!(ben.cancel_meeting(&meeting.id).await.is_err());
+    let moved = ada
+        .update_meeting(
+            &meeting.id,
+            MeetingInput {
+                start_at: T_MON + 2 * HOUR,
+                end_at: T_MON + 3 * HOUR,
+                ..input(None, vec![BEN])
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(moved.start_at, T_MON + 2 * HOUR);
+    assert_eq!(
+        ada.list_meetings(from, to).await.unwrap().len(),
+        1,
+        "no repeat any more"
+    );
+    let called_off = ada.cancel_meeting(&meeting.id).await.unwrap();
+    assert!(called_off.cancelled);
+    assert!(ben.list_meetings(from, to).await.unwrap()[0].meeting.cancelled);
+
+    let ics = ada.meeting_ics(&meeting.id).await.unwrap();
+    assert!(
+        ics.starts_with("BEGIN:VCALENDAR\r\n")
+            && ics.contains("SUMMARY:Weekly sync")
+            && ics.contains("LOCATION:Room 4")
+            && ics.contains("STATUS:CANCELLED"),
+        "{ics}"
+    );
+}

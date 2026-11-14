@@ -1,0 +1,234 @@
+[
+ {
+  "name": "single, inside",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": null,
+  "from": 1791151200000,
+  "to": 1791237600000,
+  "expected": [
+   [
+    1791183600000,
+    1791187200000
+   ]
+  ]
+ },
+ {
+  "name": "single, outside",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": null,
+  "from": 1791237600000,
+  "to": 1791324000000,
+  "expected": []
+ },
+ {
+  "name": "daily, three times",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=DAILY;COUNT=3",
+  "from": 1790805600000,
+  "to": 1793401200000,
+  "expected": [
+   [
+    1791183600000,
+    1791187200000
+   ],
+   [
+    1791270000000,
+    1791273600000
+   ],
+   [
+    1791356400000,
+    1791360000000
+   ]
+  ]
+ },
+ {
+  "name": "every other day until the 11th",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=DAILY;INTERVAL=2;UNTIL=20261011",
+  "from": 1790805600000,
+  "to": 1793487600000,
+  "expected": [
+   [
+    1791183600000,
+    1791187200000
+   ],
+   [
+    1791356400000,
+    1791360000000
+   ],
+   [
+    1791529200000,
+    1791532800000
+   ],
+   [
+    1791702000000,
+    1791705600000
+   ]
+  ]
+ },
+ {
+  "name": "weekly, three Mondays",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=WEEKLY;COUNT=3",
+  "from": 1790805600000,
+  "to": 1796079600000,
+  "expected": [
+   [
+    1791183600000,
+    1791187200000
+   ],
+   [
+    1791788400000,
+    1791792000000
+   ],
+   [
+    1792393200000,
+    1792396800000
+   ]
+  ]
+ },
+ {
+  "name": "weekly on Monday, Wednesday and Friday",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=WEEKLY;BYDAY=FR,MO,WE;COUNT=5",
+  "from": 1790805600000,
+  "to": 1796079600000,
+  "expected": [
+   [
+    1791183600000,
+    1791187200000
+   ],
+   [
+    1791356400000,
+    1791360000000
+   ],
+   [
+    1791529200000,
+    1791532800000
+   ],
+   [
+    1791788400000,
+    1791792000000
+   ],
+   [
+    1791961200000,
+    1791964800000
+   ]
+  ]
+ },
+ {
+  "name": "keeps the local time across the clock change",
+  "startAt": 1792393200000,
+  "endAt": 1792396800000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=WEEKLY;COUNT=3",
+  "from": 1790805600000,
+  "to": 1796079600000,
+  "expected": [
+   [
+    1792393200000,
+    1792396800000
+   ],
+   [
+    1793001600000,
+    1793005200000
+   ],
+   [
+    1793606400000,
+    1793610000000
+   ]
+  ]
+ },
+ {
+  "name": "monthly on the 31st skips short months",
+  "startAt": 1769864400000,
+  "endAt": 1769868000000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=MONTHLY;COUNT=3",
+  "from": 1767222000000,
+  "to": 1798671600000,
+  "expected": [
+   [
+    1769864400000,
+    1769868000000
+   ],
+   [
+    1774958400000,
+    1774962000000
+   ],
+   [
+    1780228800000,
+    1780232400000
+   ]
+  ]
+ },
+ {
+  "name": "only what overlaps the range",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=DAILY;COUNT=10",
+  "from": 1791444600000,
+  "to": 1791617400000,
+  "expected": [
+   [
+    1791442800000,
+    1791446400000
+   ],
+   [
+    1791529200000,
+    1791532800000
+   ],
+   [
+    1791615600000,
+    1791619200000
+   ]
+  ]
+ },
+ {
+  "name": "a meeting past midnight keeps its length",
+  "startAt": 1791230400000,
+  "endAt": 1791241200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=DAILY;COUNT=2",
+  "from": 1791151200000,
+  "to": 1791410400000,
+  "expected": [
+   [
+    1791230400000,
+    1791241200000
+   ],
+   [
+    1791316800000,
+    1791327600000
+   ]
+  ]
+ },
+ {
+  "name": "an unknown rule is a single meeting",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=HOURLY",
+  "from": 1790805600000,
+  "to": 1793487600000,
+  "expected": [
+   [
+    1791183600000,
+    1791187200000
+   ]
+  ]
+ }
+]

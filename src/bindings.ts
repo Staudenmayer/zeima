@@ -211,6 +211,13 @@ export const commands = {
 	locationPatternSet: (pattern: LocationPattern) => typedError<null, CmdError>(__TAURI_INVOKE("location_pattern_set", { pattern })),
 	/**  Sets the days without a location from the usual week; returns how many. */
 	locationPatternApply: (from: string, to: string) => typedError<number, CmdError>(__TAURI_INVOKE("location_pattern_apply", { from, to })),
+	meetingsList: (from: string, to: string) => typedError<MeetingOccurrence[], CmdError>(__TAURI_INVOKE("meetings_list", { from, to })),
+	meetingCreate: (input: MeetingInput) => typedError<Meeting, CmdError>(__TAURI_INVOKE("meeting_create", { input })),
+	meetingUpdate: (id: string, input: MeetingInput) => typedError<Meeting, CmdError>(__TAURI_INVOKE("meeting_update", { id, input })),
+	meetingCancel: (id: string) => typedError<Meeting, CmdError>(__TAURI_INVOKE("meeting_cancel", { id })),
+	meetingRespond: (id: string, status: RsvpStatus) => typedError<MeetingResponse, CmdError>(__TAURI_INVOKE("meeting_respond", { id, status })),
+	/**  Saves the meeting as an `.ics` file the person chooses (for any calendar program). */
+	meetingExportIcs: (id: string) => typedError<string | null, CmdError>(__TAURI_INVOKE("meeting_export_ics", { id })),
 	/**
 	 *  Time tracked by everyone this device has entries of in the workspace
 	 *  (what the person's role lets the server send).
@@ -836,6 +843,56 @@ export type LocationPattern = {
 /**  What managers see of the entries of the people they manage. */
 export type ManagerVisibility = "full" | "hide_notes" | "totals_only";
 
+export type Meeting = {
+	id: string,
+	/**  The organizer (account id). */
+	userId: string,
+	title: string,
+	startAt: number,
+	endAt: number,
+	tz: string,
+	location: string | null,
+	onlineUrl: string | null,
+	projectId: string | null,
+	note: string,
+	/**  `FREQ=WEEKLY;BYDAY=MO;COUNT=10` style; see [`crate::meeting`]. */
+	rrule: string | null,
+	/**  Account ids of the people asked (not the organizer). */
+	attendeeIds: string[],
+	cancelled: boolean,
+};
+
+export type MeetingInput = {
+	title: string,
+	startAt: number,
+	endAt: number,
+	tz: string | null,
+	location: string | null,
+	onlineUrl: string | null,
+	projectId: string | null,
+	note: string,
+	rrule: string | null,
+	attendeeIds: string[],
+};
+
+/**  One time a meeting happens, with the answers this device knows. */
+export type MeetingOccurrence = {
+	meeting: Meeting,
+	startAt: number,
+	endAt: number,
+	responses: MeetingResponse[],
+	/**  The person's own answer, if they gave one. */
+	myStatus: RsvpStatus | null,
+};
+
+export type MeetingResponse = {
+	id: string,
+	/**  Who answered (account id). */
+	userId: string,
+	meetingId: string,
+	status: RsvpStatus,
+};
+
 /**  Ask the main window to open a route (e.g. from the tray). */
 export type Navigate = {
 	path: string,
@@ -1150,6 +1207,8 @@ export type ReportRow = {
 	entryCount: number,
 	children: ReportRow[],
 };
+
+export type RsvpStatus = "accepted" | "declined" | "tentative";
 
 export type ScheduleModel = 
 /**  Fixed hours; deviations count towards the balance. */

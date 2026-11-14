@@ -552,3 +552,92 @@ pub async fn location_pattern_apply(
     work_changed(&app).await;
     Ok(n)
 }
+
+// --------------------------------------------------------------------------
+// Meetings (shared workspaces)
+// --------------------------------------------------------------------------
+
+#[tauri::command]
+#[specta::specta]
+pub async fn meetings_list(
+    state: State<'_, AppState>,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> CmdResult<Vec<zeima_core::MeetingOccurrence>> {
+    Ok(state.data().list_meetings(from, to).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn meeting_create(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: zeima_core::MeetingInput,
+) -> CmdResult<zeima_core::Meeting> {
+    let meeting = state.data().create_meeting(input).await?;
+    changed(&app, &[DataKind::Timeline]).await;
+    Ok(meeting)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn meeting_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    input: zeima_core::MeetingInput,
+) -> CmdResult<zeima_core::Meeting> {
+    let meeting = state.data().update_meeting(&id, input).await?;
+    changed(&app, &[DataKind::Timeline]).await;
+    Ok(meeting)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn meeting_cancel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<zeima_core::Meeting> {
+    let meeting = state.data().cancel_meeting(&id).await?;
+    changed(&app, &[DataKind::Timeline]).await;
+    Ok(meeting)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn meeting_respond(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    status: zeima_core::RsvpStatus,
+) -> CmdResult<zeima_core::MeetingResponse> {
+    let response = state.data().respond_to_meeting(&id, status).await?;
+    changed(&app, &[DataKind::Timeline]).await;
+    Ok(response)
+}
+
+/// Saves the meeting as an `.ics` file the person chooses (for any calendar program).
+#[tauri::command]
+#[specta::specta]
+pub async fn meeting_export_ics(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Option<String>> {
+    use tauri_plugin_dialog::DialogExt;
+    let ics = state.data().meeting_ics(&id).await?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("iCalendar", &["ics"])
+        .set_file_name("meeting.ics")
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let Some(path) = rx.await.ok().flatten().and_then(|p| p.into_path().ok()) else {
+        return Ok(None);
+    };
+    std::fs::write(&path, ics).map_err(|e| CmdError::other("io", e))?;
+    Ok(Some(path.display().to_string()))
+}

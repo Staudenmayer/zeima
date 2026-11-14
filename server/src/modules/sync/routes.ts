@@ -43,6 +43,8 @@ export const SYNCED_TABLES = [
   'work_location',
   'org_policy',
   'office',
+  'meeting',
+  'meeting_response',
 ] as const
 
 const Uuid = Type.String({ format: 'uuid' })

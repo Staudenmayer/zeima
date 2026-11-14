@@ -196,7 +196,11 @@ async fn local_row_fields(
         out.insert(camel(name), value);
     }
     // JSON columns hold several fields.
-    for (column, field) in [("daysJson", "days"), ("memberIdsJson", "memberIds")] {
+    for (column, field) in [
+        ("daysJson", "days"),
+        ("memberIdsJson", "memberIds"),
+        ("attendeeIdsJson", "attendeeIds"),
+    ] {
         if let Some(Value::String(text)) = out.remove(column) {
             out.insert(
                 field.to_string(),
@@ -680,6 +684,10 @@ impl Core {
                 }
                 if table == "project" && name == "memberIds" {
                     values.push(("member_ids_json".into(), Bind::Text(field.v.to_string())));
+                    continue;
+                }
+                if table == "meeting" && name == "attendeeIds" {
+                    values.push(("attendee_ids_json".into(), Bind::Text(field.v.to_string())));
                     continue;
                 }
                 let column = snake(name);

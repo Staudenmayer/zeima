@@ -1632,6 +1632,100 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/orgs/{orgId}/freebusy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * When people are busy (for planning a meeting)
+         * @description Only times, never what for: meetings the person organizes or has not declined, and approved absences. Every member may ask about every member. `timezone` is the zone whose days absences are read in.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        userIds: string[];
+                        /** @description Unix ms */
+                        from: number;
+                        /** @description Unix ms; at most 31 days after `from` */
+                        to: number;
+                        timezone?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: {
+                                from: number;
+                                to: number;
+                                kind: "meeting" | "absence";
+                            }[];
+                        };
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/orgs/{orgId}/audit": {
         parameters: {
             query?: never;
@@ -1866,7 +1960,7 @@ export interface paths {
                         /** Format: uuid */
                         deviceId: string;
                         changes: {
-                            table: "project" | "tag" | "time_entry" | "pause" | "activity" | "cost_center" | "cost_center_assignment" | "jurisdiction_selection" | "work_settings" | "work_schedule" | "absence_type" | "absence" | "custom_holiday" | "balance_adjustment" | "display_settings" | "timesheet_submission" | "work_location" | "org_policy" | "office";
+                            table: "project" | "tag" | "time_entry" | "pause" | "activity" | "cost_center" | "cost_center_assignment" | "jurisdiction_selection" | "work_settings" | "work_schedule" | "absence_type" | "absence" | "custom_holiday" | "balance_adjustment" | "display_settings" | "timesheet_submission" | "work_location" | "org_policy" | "office" | "meeting" | "meeting_response";
                             /** Format: uuid */
                             rowId: string;
                             op: "upsert" | "delete";

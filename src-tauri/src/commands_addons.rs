@@ -507,6 +507,31 @@ pub async fn addon_timeline(
             tag_ids: e.tag_ids,
         })
         .collect();
+    // The meetings of an organization's workspace are on the timeline too, so
+    // "track this event" works for them (those declined or called off are left out).
+    let core = state.data();
+    if core.ctx().shared {
+        let (from, to) = (from.round() as i64, to.round() as i64);
+        for o in core.meetings_between(from, to).await? {
+            if o.meeting.cancelled || o.my_status == Some(zeima_core::RsvpStatus::Declined) {
+                continue;
+            }
+            items.push(AddonTimelineItem {
+                addon_id: "zeima.meetings".into(),
+                id: format!("{}@{}", o.meeting.id, o.start_at),
+                note: o.meeting.title.clone(),
+                title: o.meeting.title,
+                start_at: o.start_at,
+                end_at: o.end_at,
+                all_day: false,
+                detail: o.meeting.location,
+                color: Some("#3b82f6".into()),
+                activity_id: None,
+                project_id: o.meeting.project_id,
+                tag_ids: Vec::new(),
+            });
+        }
+    }
     items.sort_by_key(|i| (i.start_at, i.end_at));
     Ok(items)
 }

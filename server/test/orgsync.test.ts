@@ -321,6 +321,60 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     })
   })
 
+  describe('meetings', () => {
+    const M = id(80), M2 = id(81), R_ANNA = id(82), R_BEN = id(83)
+    const start = Date.UTC(2026, 10, 9, 9) // Monday 9 Nov 2026, 09:00 UTC
+    const meeting = { userId: MANAGER, title: 'Sync', startAt: start, endAt: start + 3_600_000, tz: 'UTC', note: '', rrule: 'FREQ=WEEKLY;COUNT=2', attendeeIds: [ANNA], cancelled: false }
+    const answer = (fields: object) => ({ meetingId: M, status: 'accepted', ...fields })
+
+    it('are made by their organizer and seen only by those asked', async () => {
+      expect(await results(MANAGER, [upsert('meeting', M, 700, meeting)])).toEqual([{ status: 'applied' }])
+      expect(await results(ANNA, [upsert('meeting', M, 710, { title: 'Mine now' })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      for (const who of [MANAGER, ANNA]) expect(await pulledIds(who), who).toContain(M)
+      // Not even the owner and the admin see a meeting they are not asked to.
+      for (const who of [BEN, ADMIN, OWNER]) expect(await pulledIds(who), who).not.toContain(M)
+    })
+
+    it('are answered by the people asked, visible to those asked', async () => {
+      expect(await results(ANNA, [upsert('meeting_response', R_ANNA, 720, answer({ userId: ANNA }))])).toEqual([{ status: 'applied' }])
+      // Not by the organizer, not by someone who is not asked, not for someone else.
+      expect(await results(MANAGER, [upsert('meeting_response', id(84), 720, answer({ userId: MANAGER }))])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await results(BEN, [upsert('meeting_response', R_BEN, 720, answer({ userId: BEN }))])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await results(BEN, [upsert('meeting_response', id(85), 720, answer({ userId: ANNA }))])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      for (const who of [MANAGER, ANNA]) expect(await pulledIds(who), who).toContain(R_ANNA)
+      expect(await pulledIds(BEN)).not.toContain(R_ANNA)
+    })
+
+    it('tell others when someone is busy, and nothing more', async () => {
+      const ask = async (who: string, body: object) =>
+        app.inject({ method: 'POST', url: `/v1/orgs/${ORG}/freebusy`, headers: await headers(who), payload: body })
+      const week = { from: start - 3_600_000, to: start + 20 * 86_400_000 }
+      const res = await ask(BEN, { userIds: [ANNA, MANAGER, BEN], ...week })
+      expect(res.statusCode).toBe(200)
+      const busy = res.json() as Record<string, { from: number; to: number; kind: string }[]>
+      // Two Mondays for the organizer and for Anna, who accepted; Ben is free.
+      expect(busy[ANNA]!.filter((b) => b.kind === 'meeting').map((b) => b.from)).toEqual([start, start + 7 * 86_400_000])
+      expect(busy[MANAGER]!.filter((b) => b.kind === 'meeting')).toHaveLength(2)
+      expect(busy[BEN]).toEqual([])
+      expect(JSON.stringify(busy)).not.toContain('Sync')
+      // Declining frees the person; a cancelled meeting is nobody's.
+      await results(ANNA, [upsert('meeting_response', R_ANNA, 730, { status: 'declined' })])
+      const meetingsOf = async (who: string) => ((await ask(BEN, { userIds: [who], ...week })).json()[who] as { kind: string }[]).filter((b) => b.kind === 'meeting')
+      expect(await meetingsOf(ANNA)).toEqual([])
+      await results(MANAGER, [upsert('meeting', M2, 740, { ...meeting, startAt: start + 86_400_000, endAt: start + 86_400_000 + 3_600_000, rrule: null, attendeeIds: [], cancelled: true })])
+      expect(await meetingsOf(MANAGER)).toHaveLength(2)
+      // Approved absences are busy days; requests are not.
+      await results(ANNA, [upsert('absence', id(86), 750, { userId: ANNA, typeId: id(51), startDate: '2026-11-11', endDate: '2026-11-12', halfDay: null, note: '', status: 'requested', decidedBy: null, decisionNote: '' })])
+      const absenceDays = async () => ((await ask(BEN, { userIds: [ANNA], ...week })).json()[ANNA] as { from: number; to: number; kind: string }[]).filter((b) => b.kind === 'absence' && b.from === Date.UTC(2026, 10, 11))
+      expect(await absenceDays()).toEqual([])
+      await results(MANAGER, [upsert('absence', id(86), 760, { status: 'approved', decidedBy: MANAGER })])
+      expect(await absenceDays()).toEqual([{ from: Date.UTC(2026, 10, 11), to: Date.UTC(2026, 10, 13), kind: 'absence' }])
+      // Limits: a sane window, and members only.
+      expect((await ask(BEN, { userIds: [ANNA], from: 0, to: 400 * 86_400_000 })).statusCode).toBe(400)
+      expect((await app.inject({ method: 'POST', url: `/v1/orgs/${ORG}/freebusy`, headers: await headers(OUTSIDER), payload: { userIds: [ANNA], ...week } })).statusCode).toBe(403)
+    })
+  })
+
   it('does not change personal workspaces', async () => {
     const mine = id(300)
     expect((await app.inject({ method: 'POST', url: '/v1/workspaces', headers: await headers(ANNA), payload: { id: mine, name: 'Anna' } })).statusCode).toBe(200)

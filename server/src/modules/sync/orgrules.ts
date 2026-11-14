@@ -40,6 +40,8 @@ const READ: Record<string, string> = {
   work_settings: 'member.read',
   timesheet_submission: 'entry.approve',
   work_location: 'member.read',
+  meeting: 'member.read',
+  meeting_response: 'member.read',
 }
 
 /** Own rows everyone in the organization may read (where people work is for planning together). */
@@ -89,6 +91,21 @@ async function checkEntryPolicy(db: Db, actor: Actor, orgId: string, change: Cha
   const tags = plain(merged.tagIds)
   if (policy.requireTags && !(Array.isArray(tags) && tags.length > 0)) return { status: 'rejected', reason: 'policy_tags' }
   return null
+}
+
+/** A person answers only a meeting they are asked to (and not their own). */
+async function checkMeetingResponse(db: Db, orgId: string, me: string, merged: Record<string, unknown>): Promise<Outcome | null> {
+  const meetingId = plain(merged.meetingId)
+  const workspace = await orgWorkspaceId(db, orgId)
+  if (typeof meetingId !== 'string' || !workspace) return { status: 'rejected', reason: 'forbidden' }
+  const [row] = await db
+    .select({ fields: schema.syncRow.fields })
+    .from(schema.syncRow)
+    .where(and(eq(schema.syncRow.workspaceId, workspace), eq(schema.syncRow.tableName, 'meeting'), eq(schema.syncRow.rowId, meetingId)))
+  const fields = (row?.fields ?? {}) as Record<string, unknown>
+  const attendees = plain(fields.attendeeIds)
+  const asked = Array.isArray(attendees) && attendees.includes(me) && plain(fields.userId) !== me
+  return asked ? null : { status: 'rejected', reason: 'forbidden' }
 }
 
 const DECISION_FIELDS = ['decidedBy', 'decidedAt', 'decisionNote']
@@ -202,6 +219,7 @@ export async function checkOrgWrite(
   if (!owner) return { status: 'rejected', reason: 'forbidden' }
   if (change.table === 'timesheet_submission') return checkSubmission(db, actor, orgId, change, current, owner)
   if (change.table === 'absence') return checkAbsence(db, actor, orgId, change, current, owner)
+  if (change.table === 'meeting_response' && owner === actor.user.id) return checkMeetingResponse(db, orgId, actor.user.id, merged)
   const moved = change.fields?.userId
   if (current && typeof moved === 'string' && moved !== owner) return { status: 'rejected', reason: 'forbidden_field' }
   if (owner === actor.user.id) return change.table === 'time_entry' ? checkEntryPolicy(db, actor, orgId, change, merged) : null
@@ -225,6 +243,21 @@ function canSeeProject(user: Actor['user'], orgId: string, fields: Record<string
  * The rows of org workspaces the caller may see: shared rows for everyone,
  * own-table rows for their owner and for roles whose read right reaches them.
  */
+/** Meetings of a workspace by id, as their stored fields. */
+async function loadMeetings(db: Db, workspaceId: string): Promise<Map<string, Record<string, { v: unknown; h: string }>>> {
+  const rows = await db
+    .select({ rowId: schema.syncRow.rowId, fields: schema.syncRow.fields })
+    .from(schema.syncRow)
+    .where(and(eq(schema.syncRow.workspaceId, workspaceId), eq(schema.syncRow.tableName, 'meeting')))
+  return new Map(rows.map((r) => [r.rowId, r.fields as Record<string, { v: unknown; h: string }>]))
+}
+
+/** Whether the person organizes the meeting or is asked to it. */
+const isAsked = (fields: Record<string, { v: unknown }>, userId: string) => {
+  const attendees = plain(fields.attendeeIds)
+  return plain(fields.userId) === userId || (Array.isArray(attendees) && attendees.includes(userId))
+}
+
 /** The entry fields a manager does not get, by what the owner's policy shows. */
 const HIDDEN_BY_TOTALS = ['note', 'projectId', 'tagIds', 'activityId', 'costCenterId']
 
@@ -277,6 +310,7 @@ export async function visibleToCaller<T extends { workspaceId: string; table: st
   const sharing = new Map<string, Set<string>>()
   const hidden = new Map<string, Set<string>>()
   const policies = new Map<string, PolicyRow[]>()
+  const meetingCache = new Map<string, Map<string, Record<string, { v: unknown; h: string }>>>()
   const out: T[] = []
   for (const row of rows) {
     const orgId = workspaces.get(row.workspaceId)
@@ -303,6 +337,16 @@ export async function visibleToCaller<T extends { workspaceId: string; table: st
     }
     if (PUBLIC.has(row.table)) {
       out.push(row)
+      continue
+    }
+    if (row.table === 'meeting' || row.table === 'meeting_response') {
+      let meetings = meetingCache.get(row.workspaceId)
+      if (!meetings) {
+        meetings = await loadMeetings(db, row.workspaceId)
+        meetingCache.set(row.workspaceId, meetings)
+      }
+      const fields = row.table === 'meeting' ? row.fields : meetings.get(String(plain(row.fields.meetingId)))
+      if (fields && isAsked(fields, actor.id)) out.push(row)
       continue
     }
     const owner = typeof row.fields.userId?.v === 'string' ? (row.fields.userId.v as string) : null

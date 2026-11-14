@@ -14,6 +14,7 @@ mod commands_work;
 mod events;
 mod instance;
 mod license;
+mod meeting_prompt;
 mod oauth;
 mod org;
 mod os;
@@ -162,6 +163,12 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands_work::location_pattern_get,
             commands_work::location_pattern_set,
             commands_work::location_pattern_apply,
+            commands_work::meetings_list,
+            commands_work::meeting_create,
+            commands_work::meeting_update,
+            commands_work::meeting_cancel,
+            commands_work::meeting_respond,
+            commands_work::meeting_export_ics,
             commands_work::team_summary,
             commands_work::team_entries,
             commands_work::absence_requests,

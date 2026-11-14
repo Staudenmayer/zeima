@@ -2580,6 +2580,156 @@
         }
       }
     },
+    "/v1/orgs/{orgId}/freebusy": {
+      "post": {
+        "summary": "When people are busy (for planning a meeting)",
+        "tags": [
+          "organizations"
+        ],
+        "description": "Only times, never what for: meetings the person organizes or has not declined, and approved absences. Every member may ask about every member. `timezone` is the zone whose days absences are read in.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "userIds",
+                  "from",
+                  "to"
+                ],
+                "properties": {
+                  "userIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 50
+                  },
+                  "from": {
+                    "type": "integer",
+                    "description": "Unix ms"
+                  },
+                  "to": {
+                    "type": "integer",
+                    "description": "Unix ms; at most 31 days after `from`"
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "from",
+                        "to",
+                        "kind"
+                      ],
+                      "properties": {
+                        "from": {
+                          "type": "integer"
+                        },
+                        "to": {
+                          "type": "integer"
+                        },
+                        "kind": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "meeting"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "absence"
+                              ]
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/orgs/{orgId}/audit": {
       "get": {
         "summary": "The audit log, newest first",
@@ -3078,6 +3228,18 @@
                               "type": "string",
                               "enum": [
                                 "office"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "meeting"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "meeting_response"
                               ]
                             }
                           ]
