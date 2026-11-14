@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useWorkspaceStore } from '@/stores/workspace'
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { Pencil, Plus, Tags, Trash2 } from '@lucide/vue'
@@ -14,6 +15,8 @@ import { useProjectsStore } from '@/stores/projects'
 import { useTagsStore } from '@/stores/tags'
 
 definePage({ meta: { titleKey: 'nav.tags' } })
+
+const workspaces = useWorkspaceStore()
 
 const tags = useTagsStore()
 const projects = useProjectsStore()
@@ -54,11 +57,11 @@ async function confirmDelete() {
 
 <template>
   <PageHeader :title="$t('nav.tags')">
-    <Button @click="open(null)"><Plus /> {{ $t('tags.new') }}</Button>
+    <Button v-if="workspaces.canEditShared" @click="open(null)"><Plus /> {{ $t('tags.new') }}</Button>
   </PageHeader>
 
   <EmptyState v-if="tags.all.length === 0" :icon="Tags" :text="$t('tags.empty')">
-    <Button variant="outline" @click="open(null)"><Plus /> {{ $t('tags.new') }}</Button>
+    <Button v-if="workspaces.canEditShared" variant="outline" @click="open(null)"><Plus /> {{ $t('tags.new') }}</Button>
   </EmptyState>
 
   <div v-else class="grid gap-6">
@@ -73,8 +76,8 @@ async function confirmDelete() {
           <span class="flex-1">{{ tag.name }}</span>
           <span v-if="tag.groupName" class="text-xs text-muted-foreground">{{ $t('tags.group') }}: {{ tag.groupName }}</span>
           <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(tag)"><Pencil /></Button>
-            <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(tag)"><Trash2 /></Button>
+            <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(tag)"><Pencil /></Button>
+            <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(tag)"><Trash2 /></Button>
           </div>
         </li>
       </ul>

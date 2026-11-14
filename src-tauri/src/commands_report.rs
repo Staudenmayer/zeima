@@ -25,7 +25,7 @@ use crate::state::AppState;
 #[tauri::command]
 #[specta::specta]
 pub async fn cost_center_list(state: State<'_, AppState>) -> CmdResult<Vec<CostCenter>> {
-    Ok(state.core.list_cost_centers().await?)
+    Ok(state.data().list_cost_centers().await?)
 }
 
 #[tauri::command]
@@ -36,7 +36,7 @@ pub async fn cost_center_save(
     id: Option<String>,
     input: CostCenterInput,
 ) -> CmdResult<CostCenter> {
-    let cc = state.core.save_cost_center(id.as_deref(), input).await?;
+    let cc = state.data().save_cost_center(id.as_deref(), input).await?;
     changed(&app, &[DataKind::CostCenter]).await;
     Ok(cc)
 }
@@ -44,7 +44,7 @@ pub async fn cost_center_save(
 #[tauri::command]
 #[specta::specta]
 pub async fn cost_center_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_cost_center(&id).await?;
+    state.data().delete_cost_center(&id).await?;
     changed(&app, &[DataKind::CostCenter]).await;
     Ok(())
 }
@@ -52,7 +52,7 @@ pub async fn cost_center_delete(app: AppHandle, state: State<'_, AppState>, id: 
 #[tauri::command]
 #[specta::specta]
 pub async fn cost_center_assignment_list(state: State<'_, AppState>) -> CmdResult<Vec<CostCenterAssignment>> {
-    Ok(state.core.list_cost_center_assignments().await?)
+    Ok(state.data().list_cost_center_assignments().await?)
 }
 
 #[tauri::command]
@@ -64,7 +64,7 @@ pub async fn cost_center_assignment_save(
     input: CostCenterAssignmentInput,
 ) -> CmdResult<CostCenterAssignment> {
     let a = state
-        .core
+        .data()
         .save_cost_center_assignment(id.as_deref(), input)
         .await?;
     changed(&app, &[DataKind::CostCenter]).await;
@@ -78,7 +78,7 @@ pub async fn cost_center_assignment_delete(
     state: State<'_, AppState>,
     id: String,
 ) -> CmdResult<()> {
-    state.core.delete_cost_center_assignment(&id).await?;
+    state.data().delete_cost_center_assignment(&id).await?;
     changed(&app, &[DataKind::CostCenter]).await;
     Ok(())
 }
@@ -90,13 +90,13 @@ pub async fn cost_center_assignment_delete(
 #[tauri::command]
 #[specta::specta]
 pub async fn report(state: State<'_, AppState>, query: ReportQuery) -> CmdResult<Report> {
-    Ok(state.core.report(&query).await?)
+    Ok(state.data().report(&query).await?)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn budget_list(state: State<'_, AppState>) -> CmdResult<Vec<BudgetStatus>> {
-    Ok(state.core.budget_statuses().await?)
+    Ok(state.data().budget_statuses().await?)
 }
 
 // --------------------------------------------------------------------------
@@ -146,7 +146,7 @@ pub async fn report_export(
     format: ExportFormat,
     file_stem: String,
 ) -> CmdResult<Option<String>> {
-    let core = &state.core;
+    let core = &state.data();
     let formats = state.settings().formats();
     let report = core.report(&query).await?;
     let activities = core.list_activities(true).await?;

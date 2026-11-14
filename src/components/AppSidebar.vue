@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { SidebarProps } from '@/components/ui/sidebar'
 
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAccountStore } from '@/stores/account'
+import { useWorkspaceStore } from '@/stores/workspace'
 import {
   BarChart3,
   Clock,
@@ -18,6 +19,7 @@ import {
   Tags,
 } from '@lucide/vue'
 import LogoMark from '@/components/LogoMark.vue'
+import WorkspaceSwitcher from '@/components/WorkspaceSwitcher.vue'
 import NavMain from '@/components/NavMain.vue'
 import {
   Sidebar,
@@ -37,10 +39,14 @@ const props = withDefaults(defineProps<SidebarProps>(), {
 
 const { t } = useI18n()
 const account = useAccountStore()
+const workspaces = useWorkspaceStore()
 onMounted(async () => {
   await account.load()
   await account.loadSync()
+  await workspaces.load().catch(() => {})
 })
+// A sync may have brought in an organization's workspace.
+watch(() => account.sync?.lastSyncedAt, () => void workspaces.load().catch(() => {}))
 
 const tracking = computed(() => [
   { title: t('nav.dashboard'), url: '/', icon: LayoutDashboard },
@@ -80,11 +86,12 @@ const user = computed(() => ({
               </div>
               <div class="grid flex-1 text-left text-sm leading-tight">
                 <span class="truncate font-semibold">{{ $t('app.name') }}</span>
-                <span class="truncate text-xs text-muted-foreground">{{ $t('app.personal') }}</span>
+                <span class="truncate text-xs text-muted-foreground">{{ workspaces.inOrg ? workspaces.active?.name : $t('app.personal') }}</span>
               </div>
             </RouterLink>
           </SidebarMenuButton>
         </SidebarMenuItem>
+        <WorkspaceSwitcher />
       </SidebarMenu>
     </SidebarHeader>
     <SidebarContent>

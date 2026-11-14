@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useWorkspaceStore } from '@/stores/workspace'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -14,6 +15,8 @@ import { errorMessage } from '@/lib/ipc'
 import { useActivitiesStore } from '@/stores/activities'
 
 definePage({ meta: { titleKey: 'nav.activities' } })
+
+const workspaces = useWorkspaceStore()
 
 const { t } = useI18n()
 const activities = useActivitiesStore()
@@ -70,11 +73,11 @@ async function confirmDelete() {
 
 <template>
   <PageHeader :title="$t('nav.activities')">
-    <Button @click="open(null)"><Plus /> {{ $t('activities.new') }}</Button>
+    <Button v-if="workspaces.canEditShared" @click="open(null)"><Plus /> {{ $t('activities.new') }}</Button>
   </PageHeader>
 
   <EmptyState v-if="activities.active.length === 0" :icon="Shapes" :text="$t('activities.empty')">
-    <Button variant="outline" @click="open(null)"><Plus /> {{ $t('activities.new') }}</Button>
+    <Button v-if="workspaces.canEditShared" variant="outline" @click="open(null)"><Plus /> {{ $t('activities.new') }}</Button>
   </EmptyState>
 
   <div class="grid gap-6">
@@ -87,9 +90,9 @@ async function confirmDelete() {
         <span class="size-3 rounded-sm" :style="{ backgroundColor: activity.color }" />
         <span class="flex-1">{{ activity.name }}</span>
         <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(activity)"><Pencil /></Button>
-          <Button size="icon" variant="ghost" class="size-7" :title="$t('activities.archive')" @click="setArchived(activity, true)"><Archive /></Button>
-          <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
+          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(activity)"><Pencil /></Button>
+          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('activities.archive')" @click="setArchived(activity, true)"><Archive /></Button>
+          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
         </div>
       </li>
     </ul>
@@ -97,7 +100,7 @@ async function confirmDelete() {
     <section v-if="suggestions.length">
       <h2 class="mb-2 text-sm font-medium">{{ $t('activities.suggested') }}</h2>
       <div class="flex flex-wrap gap-2">
-        <Button v-for="name in suggestions" :key="name" size="sm" variant="outline" @click="addSuggestion(name)">
+        <Button v-if="workspaces.canEditShared" v-for="name in suggestions" :key="name" size="sm" variant="outline" @click="addSuggestion(name)">
           <Plus /> {{ name }}
         </Button>
       </div>
@@ -110,8 +113,8 @@ async function confirmDelete() {
           <span class="size-3 rounded-sm opacity-60" :style="{ backgroundColor: activity.color }" />
           <span class="flex-1">{{ activity.name }}</span>
           <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            <Button size="icon" variant="ghost" class="size-7" :title="$t('activities.unarchive')" @click="setArchived(activity, false)"><ArchiveRestore /></Button>
-            <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
+            <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('activities.unarchive')" @click="setArchived(activity, false)"><ArchiveRestore /></Button>
+            <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
           </div>
         </li>
       </ul>

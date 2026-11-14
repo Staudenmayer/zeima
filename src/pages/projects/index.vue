@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useWorkspaceStore } from '@/stores/workspace'
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { FolderKanban, Pencil, Plus, Trash2 } from '@lucide/vue'
@@ -17,6 +18,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { useTagsStore } from '@/stores/tags'
 
 definePage({ meta: { titleKey: 'nav.projects' } })
+
+const workspaces = useWorkspaceStore()
 
 const projects = useProjectsStore()
 const tags = useTagsStore()
@@ -57,11 +60,11 @@ const budgetLabel = (p: Project) => (p.budgetMinutes === null ? null : `${settin
       <Switch v-model="showArchived" />
       {{ $t('projects.showArchived') }}
     </label>
-    <Button @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
+    <Button v-if="workspaces.canEditShared" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
   </PageHeader>
 
   <EmptyState v-if="list.length === 0" :icon="FolderKanban" :text="$t('projects.empty')">
-    <Button variant="outline" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
+    <Button v-if="workspaces.canEditShared" variant="outline" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
   </EmptyState>
 
   <div v-else class="overflow-hidden rounded-lg border">
@@ -95,8 +98,8 @@ const budgetLabel = (p: Project) => (p.budgetMinutes === null ? null : `${settin
           </td>
           <td class="px-2 py-1 text-right">
             <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-              <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(p)"><Pencil /></Button>
-              <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(p)"><Trash2 /></Button>
+              <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(p)"><Pencil /></Button>
+              <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(p)"><Trash2 /></Button>
             </div>
           </td>
         </tr>

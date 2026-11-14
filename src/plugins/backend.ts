@@ -23,6 +23,7 @@ export async function connectBackend(router: Router) {
   await events.timerChanged.listen((e) => timer.set(e.payload))
   await events.dataChanged.listen(async (e) => {
     const kinds = e.payload.kinds
+    if (kinds.includes('entry')) await timer.load()
     if (kinds.includes('activity')) await activities.load()
     if (kinds.includes('project')) await projects.load()
     if (kinds.includes('tag')) await tags.load()

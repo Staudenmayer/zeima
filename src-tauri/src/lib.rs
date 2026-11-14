@@ -23,6 +23,7 @@ mod sync;
 mod tray;
 mod updates;
 mod windows;
+mod workspaces;
 
 use std::sync::{Arc, RwLock};
 
@@ -143,6 +144,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             updates::update_install,
             license::plan_status,
             org::org_request,
+            workspaces::workspace_list,
+            workspaces::workspace_switch,
             billing::billing_plans,
             billing::billing_checkout,
             billing::billing_subscription,
@@ -226,12 +229,14 @@ pub fn run() {
             }
             app.manage(AppState {
                 core: Arc::new(core),
+                active: RwLock::new(None),
                 settings: RwLock::new(settings),
                 work_settings: RwLock::new(work_settings),
             });
             app.manage(activity::Activity::default());
             app.manage(addons::Addons::default());
             addons::start(app.handle());
+            workspaces::restore(app.handle());
 
             tray::create(app.handle())?;
             if let (Some(label), Some(window)) = (instance::label(), app.get_webview_window("main")) {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useWorkspaceStore } from '@/stores/workspace'
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { Landmark, Pencil, Plus, Trash2 } from '@lucide/vue'
@@ -16,6 +17,8 @@ import { parseDate, startOfDay, toDateInput } from '@/lib/time'
 import { costCenterLabel, useCostCentersStore } from '@/stores/costCenters'
 
 definePage({ meta: { titleKey: 'nav.costCenters' } })
+
+const workspaces = useWorkspaceStore()
 
 const costCenters = useCostCentersStore()
 const format = useFormat()
@@ -114,11 +117,11 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
 
 <template>
   <PageHeader :title="$t('nav.costCenters')">
-    <Button @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
+    <Button v-if="workspaces.canEditShared" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
   </PageHeader>
 
   <EmptyState v-if="costCenters.all.length === 0" :icon="Landmark" :text="$t('costCenters.empty')">
-    <Button variant="outline" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
+    <Button v-if="workspaces.canEditShared" variant="outline" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
   </EmptyState>
 
   <div v-else class="grid gap-6">
@@ -153,8 +156,8 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
         <Badge v-if="cc.id === currentDefault?.costCenterId" variant="outline">{{ $t('costCenters.default') }}</Badge>
         <Badge v-if="!cc.active" variant="secondary">{{ $t('costCenters.inactive') }}</Badge>
         <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(cc)"><Pencil /></Button>
-          <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(cc)"><Trash2 /></Button>
+          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(cc)"><Pencil /></Button>
+          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(cc)"><Trash2 /></Button>
         </div>
       </li>
     </ul>

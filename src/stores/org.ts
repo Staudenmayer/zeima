@@ -162,7 +162,7 @@ export const useOrgStore = defineStore('org', () => {
 
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
-    load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
+    loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

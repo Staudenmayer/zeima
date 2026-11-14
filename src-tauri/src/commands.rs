@@ -67,7 +67,7 @@ pub async fn changed(app: &AppHandle, kinds: &[DataKind]) {
     .emit(app);
     if kinds.contains(&DataKind::Entry) {
         let state = app.state::<AppState>();
-        if let Ok(timer) = state.core.timer_state().await {
+        if let Ok(timer) = state.data().timer_state().await {
             // Tracking started: the morning check-in is no longer needed.
             if !matches!(timer, TimerState::Idle) {
                 if let Some(activity) = app.try_state::<Activity>() {
@@ -147,7 +147,7 @@ pub async fn app_info(app: AppHandle, state: State<'_, AppState>) -> CmdResult<A
 #[tauri::command]
 #[specta::specta]
 pub async fn project_list(state: State<'_, AppState>, include_archived: bool) -> CmdResult<Vec<Project>> {
-    Ok(state.core.list_projects(include_archived).await?)
+    Ok(state.data().list_projects(include_archived).await?)
 }
 
 #[tauri::command]
@@ -157,7 +157,7 @@ pub async fn project_create(
     state: State<'_, AppState>,
     input: ProjectInput,
 ) -> CmdResult<Project> {
-    let project = state.core.create_project(input).await?;
+    let project = state.data().create_project(input).await?;
     changed(&app, &[DataKind::Project]).await;
     Ok(project)
 }
@@ -170,7 +170,7 @@ pub async fn project_update(
     id: String,
     input: ProjectInput,
 ) -> CmdResult<Project> {
-    let project = state.core.update_project(&id, input).await?;
+    let project = state.data().update_project(&id, input).await?;
     changed(&app, &[DataKind::Project]).await;
     Ok(project)
 }
@@ -178,7 +178,7 @@ pub async fn project_update(
 #[tauri::command]
 #[specta::specta]
 pub async fn project_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_project(&id).await?;
+    state.data().delete_project(&id).await?;
     changed(&app, &[DataKind::Project, DataKind::Tag]).await;
     Ok(())
 }
@@ -186,7 +186,7 @@ pub async fn project_delete(app: AppHandle, state: State<'_, AppState>, id: Stri
 #[tauri::command]
 #[specta::specta]
 pub async fn project_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<Project>> {
-    Ok(state.core.recent_projects(limit).await?)
+    Ok(state.data().recent_projects(limit).await?)
 }
 
 // --------------------------------------------------------------------------
@@ -199,7 +199,7 @@ pub async fn activity_list(
     state: State<'_, AppState>,
     include_archived: bool,
 ) -> CmdResult<Vec<ActivityModel>> {
-    Ok(state.core.list_activities(include_archived).await?)
+    Ok(state.data().list_activities(include_archived).await?)
 }
 
 #[tauri::command]
@@ -209,7 +209,7 @@ pub async fn activity_create(
     state: State<'_, AppState>,
     input: ActivityInput,
 ) -> CmdResult<ActivityModel> {
-    let activity = state.core.create_activity(input).await?;
+    let activity = state.data().create_activity(input).await?;
     changed(&app, &[DataKind::Activity]).await;
     Ok(activity)
 }
@@ -222,7 +222,7 @@ pub async fn activity_update(
     id: String,
     input: ActivityInput,
 ) -> CmdResult<ActivityModel> {
-    let activity = state.core.update_activity(&id, input).await?;
+    let activity = state.data().update_activity(&id, input).await?;
     changed(&app, &[DataKind::Activity]).await;
     Ok(activity)
 }
@@ -230,7 +230,7 @@ pub async fn activity_update(
 #[tauri::command]
 #[specta::specta]
 pub async fn activity_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_activity(&id).await?;
+    state.data().delete_activity(&id).await?;
     changed(&app, &[DataKind::Activity]).await;
     Ok(())
 }
@@ -239,7 +239,7 @@ pub async fn activity_delete(app: AppHandle, state: State<'_, AppState>, id: Str
 #[tauri::command]
 #[specta::specta]
 pub async fn activity_recent(state: State<'_, AppState>, limit: u32) -> CmdResult<Vec<RecentActivity>> {
-    Ok(state.core.recent_activities(limit).await?)
+    Ok(state.data().recent_activities(limit).await?)
 }
 
 // --------------------------------------------------------------------------
@@ -249,13 +249,13 @@ pub async fn activity_recent(state: State<'_, AppState>, limit: u32) -> CmdResul
 #[tauri::command]
 #[specta::specta]
 pub async fn tag_list(state: State<'_, AppState>) -> CmdResult<Vec<Tag>> {
-    Ok(state.core.list_tags().await?)
+    Ok(state.data().list_tags().await?)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn tag_create(app: AppHandle, state: State<'_, AppState>, input: TagInput) -> CmdResult<Tag> {
-    let tag = state.core.create_tag(input).await?;
+    let tag = state.data().create_tag(input).await?;
     changed(&app, &[DataKind::Tag]).await;
     Ok(tag)
 }
@@ -268,7 +268,7 @@ pub async fn tag_update(
     id: String,
     input: TagInput,
 ) -> CmdResult<Tag> {
-    let tag = state.core.update_tag(&id, input).await?;
+    let tag = state.data().update_tag(&id, input).await?;
     changed(&app, &[DataKind::Tag]).await;
     Ok(tag)
 }
@@ -276,7 +276,7 @@ pub async fn tag_update(
 #[tauri::command]
 #[specta::specta]
 pub async fn tag_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_tag(&id).await?;
+    state.data().delete_tag(&id).await?;
     changed(&app, &[DataKind::Tag, DataKind::Entry]).await;
     Ok(())
 }
@@ -288,7 +288,7 @@ pub async fn tag_delete(app: AppHandle, state: State<'_, AppState>, id: String) 
 #[tauri::command]
 #[specta::specta]
 pub async fn entry_list(state: State<'_, AppState>, range: Range) -> CmdResult<Vec<TimeEntry>> {
-    Ok(state.core.list_entries(range).await?)
+    Ok(state.data().list_entries(range).await?)
 }
 
 #[tauri::command]
@@ -298,7 +298,7 @@ pub async fn entry_create(
     state: State<'_, AppState>,
     input: EntryInput,
 ) -> CmdResult<TimeEntry> {
-    let entry = state.core.create_entry(input).await?;
+    let entry = state.data().create_entry(input).await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(entry)
 }
@@ -311,7 +311,7 @@ pub async fn entry_update(
     id: String,
     input: EntryInput,
 ) -> CmdResult<TimeEntry> {
-    let entry = state.core.update_entry(&id, input).await?;
+    let entry = state.data().update_entry(&id, input).await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(entry)
 }
@@ -319,7 +319,7 @@ pub async fn entry_update(
 #[tauri::command]
 #[specta::specta]
 pub async fn entry_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_entry(&id).await?;
+    state.data().delete_entry(&id).await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(())
 }
@@ -333,7 +333,7 @@ pub async fn entry_bulk_update(
     ids: Vec<String>,
     patch: EntryPatch,
 ) -> CmdResult<BulkResult> {
-    let result = state.core.bulk_update_entries(&ids, patch).await?;
+    let result = state.data().bulk_update_entries(&ids, patch).await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(result)
 }
@@ -346,7 +346,7 @@ pub async fn entry_bulk_delete(
     state: State<'_, AppState>,
     ids: Vec<String>,
 ) -> CmdResult<BulkResult> {
-    let result = state.core.bulk_delete_entries(&ids).await?;
+    let result = state.data().bulk_delete_entries(&ids).await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(result)
 }
@@ -360,7 +360,7 @@ pub async fn entry_split(
     id: String,
     at: f64,
 ) -> CmdResult<(TimeEntry, TimeEntry)> {
-    let parts = state.core.split_entry(&id, at.round() as i64).await?;
+    let parts = state.data().split_entry(&id, at.round() as i64).await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(parts)
 }
@@ -368,7 +368,7 @@ pub async fn entry_split(
 #[tauri::command]
 #[specta::specta]
 pub async fn entry_duplicate(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<TimeEntry> {
-    let entry = state.core.duplicate_entry(&id).await?;
+    let entry = state.data().duplicate_entry(&id).await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(entry)
 }
@@ -376,7 +376,7 @@ pub async fn entry_duplicate(app: AppHandle, state: State<'_, AppState>, id: Str
 #[tauri::command]
 #[specta::specta]
 pub async fn summaries(state: State<'_, AppState>, ranges: Vec<Range>) -> CmdResult<Vec<Summary>> {
-    Ok(state.core.summaries(ranges).await?)
+    Ok(state.data().summaries(ranges).await?)
 }
 
 // --------------------------------------------------------------------------
@@ -386,7 +386,7 @@ pub async fn summaries(state: State<'_, AppState>, ranges: Vec<Range>) -> CmdRes
 #[tauri::command]
 #[specta::specta]
 pub async fn timer_state(state: State<'_, AppState>) -> CmdResult<TimerState> {
-    Ok(state.core.timer_state().await?)
+    Ok(state.data().timer_state().await?)
 }
 
 #[tauri::command]
@@ -396,7 +396,9 @@ pub async fn timer_start(
     state: State<'_, AppState>,
     start: StartTimer,
 ) -> CmdResult<TimerState> {
-    let timer = state.core.start_timer(start).await?;
+    // One timer at a time, across workspaces.
+    crate::workspaces::stop_other_timers(&state).await?;
+    let timer = state.data().start_timer(start).await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(timer)
 }
@@ -404,7 +406,7 @@ pub async fn timer_start(
 #[tauri::command]
 #[specta::specta]
 pub async fn timer_stop(app: AppHandle, state: State<'_, AppState>) -> CmdResult<TimerState> {
-    let timer = state.core.stop_timer().await?;
+    let timer = state.data().stop_timer().await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(timer)
 }
@@ -412,7 +414,7 @@ pub async fn timer_stop(app: AppHandle, state: State<'_, AppState>) -> CmdResult
 #[tauri::command]
 #[specta::specta]
 pub async fn timer_pause(app: AppHandle, state: State<'_, AppState>) -> CmdResult<TimerState> {
-    let timer = state.core.pause_timer().await?;
+    let timer = state.data().pause_timer().await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(timer)
 }
@@ -420,7 +422,7 @@ pub async fn timer_pause(app: AppHandle, state: State<'_, AppState>) -> CmdResul
 #[tauri::command]
 #[specta::specta]
 pub async fn timer_resume(app: AppHandle, state: State<'_, AppState>) -> CmdResult<TimerState> {
-    let timer = state.core.resume_timer().await?;
+    let timer = state.data().resume_timer().await?;
     changed(&app, &[DataKind::Entry]).await;
     Ok(timer)
 }
@@ -428,12 +430,12 @@ pub async fn timer_resume(app: AppHandle, state: State<'_, AppState>) -> CmdResu
 /// Pauses a running timer or resumes a paused one; does nothing when idle.
 pub async fn toggle_pause(app: &AppHandle) -> zeima_core::Result<()> {
     let state = app.state::<AppState>();
-    match state.core.timer_state().await? {
+    match state.data().timer_state().await? {
         TimerState::Running { .. } => {
-            state.core.pause_timer().await?;
+            state.data().pause_timer().await?;
         }
         TimerState::Paused { .. } => {
-            state.core.resume_timer().await?;
+            state.data().resume_timer().await?;
         }
         TimerState::Idle => return Ok(()),
     }

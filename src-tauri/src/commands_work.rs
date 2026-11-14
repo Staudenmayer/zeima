@@ -47,13 +47,13 @@ pub fn profile_suggest() -> Option<String> {
 #[tauri::command]
 #[specta::specta]
 pub async fn profile_summary(state: State<'_, AppState>, lang: String) -> CmdResult<ProfileSummary> {
-    Ok(state.core.profile_summary(&lang).await?)
+    Ok(state.data().profile_summary(&lang).await?)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn jurisdiction_get(state: State<'_, AppState>) -> CmdResult<Option<JurisdictionSelection>> {
-    Ok(state.core.jurisdiction().await?)
+    Ok(state.data().jurisdiction().await?)
 }
 
 #[tauri::command]
@@ -65,7 +65,7 @@ pub async fn jurisdiction_set(
     region: Option<String>,
 ) -> CmdResult<()> {
     state
-        .core
+        .data()
         .set_jurisdiction(&profile_id, region.as_deref())
         .await?;
     work_changed(&app).await;
@@ -79,7 +79,7 @@ pub async fn jurisdiction_set(
 #[tauri::command]
 #[specta::specta]
 pub async fn work_settings_get(state: State<'_, AppState>) -> CmdResult<WorkSettings> {
-    Ok(state.core.work_settings().await?)
+    Ok(state.data().work_settings().await?)
 }
 
 #[tauri::command]
@@ -89,7 +89,7 @@ pub async fn work_settings_set(
     state: State<'_, AppState>,
     settings: WorkSettings,
 ) -> CmdResult<WorkSettings> {
-    let saved = state.core.set_work_settings(settings).await?;
+    let saved = state.data().set_work_settings(settings).await?;
     state.set_work_settings(saved.clone());
     work_changed(&app).await;
     Ok(saved)
@@ -98,7 +98,7 @@ pub async fn work_settings_set(
 #[tauri::command]
 #[specta::specta]
 pub async fn schedule_list(state: State<'_, AppState>) -> CmdResult<Vec<WorkSchedule>> {
-    Ok(state.core.list_schedules().await?)
+    Ok(state.data().list_schedules().await?)
 }
 
 #[tauri::command]
@@ -109,7 +109,7 @@ pub async fn schedule_save(
     id: Option<String>,
     input: WorkScheduleInput,
 ) -> CmdResult<WorkSchedule> {
-    let schedule = state.core.save_schedule(id.as_deref(), input).await?;
+    let schedule = state.data().save_schedule(id.as_deref(), input).await?;
     work_changed(&app).await;
     Ok(schedule)
 }
@@ -117,7 +117,7 @@ pub async fn schedule_save(
 #[tauri::command]
 #[specta::specta]
 pub async fn schedule_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_schedule(&id).await?;
+    state.data().delete_schedule(&id).await?;
     work_changed(&app).await;
     Ok(())
 }
@@ -129,7 +129,7 @@ pub async fn schedule_delete(app: AppHandle, state: State<'_, AppState>, id: Str
 #[tauri::command]
 #[specta::specta]
 pub async fn absence_type_list(state: State<'_, AppState>) -> CmdResult<Vec<AbsenceType>> {
-    Ok(state.core.list_absence_types().await?)
+    Ok(state.data().list_absence_types().await?)
 }
 
 #[tauri::command]
@@ -140,7 +140,7 @@ pub async fn absence_type_save(
     id: Option<String>,
     input: AbsenceTypeInput,
 ) -> CmdResult<AbsenceType> {
-    let t = state.core.save_absence_type(id.as_deref(), input).await?;
+    let t = state.data().save_absence_type(id.as_deref(), input).await?;
     work_changed(&app).await;
     Ok(t)
 }
@@ -148,7 +148,7 @@ pub async fn absence_type_save(
 #[tauri::command]
 #[specta::specta]
 pub async fn absence_type_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_absence_type(&id).await?;
+    state.data().delete_absence_type(&id).await?;
     work_changed(&app).await;
     Ok(())
 }
@@ -160,7 +160,7 @@ pub async fn absence_list(
     from: NaiveDate,
     to: NaiveDate,
 ) -> CmdResult<Vec<Absence>> {
-    Ok(state.core.list_absences(from, to).await?)
+    Ok(state.data().list_absences(from, to).await?)
 }
 
 #[tauri::command]
@@ -171,7 +171,7 @@ pub async fn absence_save(
     id: Option<String>,
     input: AbsenceInput,
 ) -> CmdResult<Absence> {
-    let absence = state.core.save_absence(id.as_deref(), input).await?;
+    let absence = state.data().save_absence(id.as_deref(), input).await?;
     work_changed(&app).await;
     Ok(absence)
 }
@@ -179,7 +179,7 @@ pub async fn absence_save(
 #[tauri::command]
 #[specta::specta]
 pub async fn absence_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_absence(&id).await?;
+    state.data().delete_absence(&id).await?;
     work_changed(&app).await;
     Ok(())
 }
@@ -187,7 +187,7 @@ pub async fn absence_delete(app: AppHandle, state: State<'_, AppState>, id: Stri
 #[tauri::command]
 #[specta::specta]
 pub async fn vacation_summary(state: State<'_, AppState>, year: i32) -> CmdResult<VacationSummary> {
-    Ok(state.core.vacation_summary(year).await?)
+    Ok(state.data().vacation_summary(year).await?)
 }
 
 // --------------------------------------------------------------------------
@@ -201,7 +201,7 @@ pub async fn holiday_list(
     year: i32,
     lang: String,
 ) -> CmdResult<Vec<HolidayView>> {
-    Ok(state.core.holidays(year, &lang).await?)
+    Ok(state.data().holidays(year, &lang).await?)
 }
 
 #[tauri::command]
@@ -212,7 +212,7 @@ pub async fn holiday_create(
     date: NaiveDate,
     name: String,
 ) -> CmdResult<CustomHoliday> {
-    let h = state.core.create_custom_holiday(date, &name).await?;
+    let h = state.data().create_custom_holiday(date, &name).await?;
     work_changed(&app).await;
     Ok(h)
 }
@@ -220,7 +220,7 @@ pub async fn holiday_create(
 #[tauri::command]
 #[specta::specta]
 pub async fn holiday_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_custom_holiday(&id).await?;
+    state.data().delete_custom_holiday(&id).await?;
     work_changed(&app).await;
     Ok(())
 }
@@ -228,7 +228,7 @@ pub async fn holiday_delete(app: AppHandle, state: State<'_, AppState>, id: Stri
 #[tauri::command]
 #[specta::specta]
 pub async fn adjustment_list(state: State<'_, AppState>) -> CmdResult<Vec<BalanceAdjustment>> {
-    Ok(state.core.list_adjustments().await?)
+    Ok(state.data().list_adjustments().await?)
 }
 
 #[tauri::command]
@@ -238,7 +238,7 @@ pub async fn adjustment_create(
     state: State<'_, AppState>,
     input: BalanceAdjustmentInput,
 ) -> CmdResult<BalanceAdjustment> {
-    let a = state.core.create_adjustment(input).await?;
+    let a = state.data().create_adjustment(input).await?;
     work_changed(&app).await;
     Ok(a)
 }
@@ -246,7 +246,7 @@ pub async fn adjustment_create(
 #[tauri::command]
 #[specta::specta]
 pub async fn adjustment_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
-    state.core.delete_adjustment(&id).await?;
+    state.data().delete_adjustment(&id).await?;
     work_changed(&app).await;
     Ok(())
 }
@@ -258,13 +258,13 @@ pub async fn work_days(
     from: NaiveDate,
     to: NaiveDate,
 ) -> CmdResult<Vec<WorkDay>> {
-    Ok(state.core.work_days(from, to).await?)
+    Ok(state.data().work_days(from, to).await?)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn balance(state: State<'_, AppState>) -> CmdResult<Balance> {
-    Ok(state.core.balance().await?)
+    Ok(state.data().balance().await?)
 }
 
 // --------------------------------------------------------------------------
@@ -285,7 +285,7 @@ pub async fn prompt_state(
     activity: State<'_, Activity>,
 ) -> CmdResult<PromptState> {
     Ok(PromptState {
-        away: state.core.pending_away().await?,
+        away: state.data().pending_away().await?,
         morning: activity.morning_pending(),
     })
 }
@@ -298,7 +298,7 @@ pub async fn away_resolve(
     pause_id: String,
     resolution: AwayResolution,
 ) -> CmdResult<()> {
-    state.core.resolve_away(&pause_id, resolution).await?;
+    state.data().resolve_away(&pause_id, resolution).await?;
     changed(&app, &[DataKind::Entry, DataKind::Away]).await;
     Ok(())
 }
