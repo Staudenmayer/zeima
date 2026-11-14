@@ -44,4 +44,4 @@ pub use repo::{
 pub use repo::{ApplyReport, FieldView, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
 
 #[cfg(feature = "db")]
-pub use db::Core;
+pub use db::{Core, WorkspaceInfo};

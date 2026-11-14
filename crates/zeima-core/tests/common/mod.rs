@@ -27,6 +27,7 @@ pub async fn with_activity(core: Core) -> Core {
 }
 
 /// The activity created by [`with_activity`].
+#[allow(dead_code)]
 pub fn activity() -> Option<String> {
     ACTIVITY.with(|a| a.borrow().clone())
 }

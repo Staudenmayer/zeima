@@ -12,7 +12,7 @@ use sqlx::sqlite::{
     SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
     SqliteSynchronous,
 };
-use sqlx::{Sqlite, Transaction};
+use sqlx::{Row, Sqlite, Transaction};
 
 use crate::clock::Clock;
 use crate::events::DomainEvent;
@@ -30,15 +30,25 @@ pub struct Context {
     pub user_id: String,
 }
 
+/// A workspace on this device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceInfo {
+    pub id: String,
+    /// `personal` or `org`.
+    pub kind: String,
+    pub org_id: Option<String>,
+    pub name: String,
+}
+
 /// Entry point for all reads and writes. Every write goes through
 /// [`Core::begin`] so it is stamped and written to the change log.
 pub struct Core {
     pool: SqlitePool,
     ctx: Context,
-    hlc: Mutex<HlcClock>,
+    hlc: Arc<Mutex<HlcClock>>,
     clock: Arc<dyn Clock>,
-    default_tz: RwLock<String>,
-    week_start: RwLock<crate::locale::WeekStart>,
+    default_tz: Arc<RwLock<String>>,
+    week_start: Arc<RwLock<crate::locale::WeekStart>>,
     events: tokio::sync::broadcast::Sender<DomainEvent>,
 }
 
@@ -88,10 +98,10 @@ impl Core {
                 workspace_id: String::new(),
                 user_id: String::new(),
             },
-            hlc: Mutex::new(HlcClock::new(device_id)),
+            hlc: Arc::new(Mutex::new(HlcClock::new(device_id))),
             clock,
-            default_tz: RwLock::new("UTC".into()),
-            week_start: RwLock::new(crate::locale::WeekStart::Monday),
+            default_tz: Arc::new(RwLock::new("UTC".into())),
+            week_start: Arc::new(RwLock::new(crate::locale::WeekStart::Monday)),
             events: tokio::sync::broadcast::channel(256).0,
         };
         core.bootstrap_identity().await?;
@@ -167,6 +177,89 @@ impl Core {
 
     pub fn ctx(&self) -> &Context {
         &self.ctx
+    }
+
+    /// The same database, clock, settings and event stream, acting in
+    /// another workspace as another user (an organization's shared
+    /// workspace, where the user is the Keycloak account). Everything the
+    /// scoped handle reads or writes belongs to that workspace.
+    pub fn scoped(&self, workspace_id: &str, user_id: &str) -> Core {
+        Core {
+            pool: self.pool.clone(),
+            ctx: Context {
+                device_id: self.ctx.device_id.clone(),
+                workspace_id: workspace_id.to_string(),
+                user_id: user_id.to_string(),
+            },
+            hlc: self.hlc.clone(),
+            clock: self.clock.clone(),
+            default_tz: self.default_tz.clone(),
+            week_start: self.week_start.clone(),
+            events: self.events.clone(),
+        }
+    }
+
+    /// Records an organization's shared workspace and the user's account in
+    /// it, as the server reported them. Not written to the change log: they
+    /// come from the server and are not sent back. Idempotent.
+    pub async fn adopt_org_workspace(
+        &self,
+        workspace_id: &str,
+        org_id: &str,
+        name: &str,
+        user_id: &str,
+        display_name: &str,
+    ) -> Result<()> {
+        let now = self.clock.now_ms();
+        let hlc = format!("{now:015}-000000-server");
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO workspace (id, kind, org_id, name, created_at, updated_at, hlc, origin_device)
+             VALUES (?, 'org', ?, ?, ?, ?, ?, 'server')
+             ON CONFLICT (id) DO UPDATE SET name = excluded.name, org_id = excluded.org_id, deleted_at = NULL",
+        )
+        .bind(workspace_id)
+        .bind(org_id)
+        .bind(name)
+        .bind(now)
+        .bind(now)
+        .bind(&hlc)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "INSERT INTO app_user (id, display_name, created_at, updated_at, hlc, origin_device)
+             VALUES (?, ?, ?, ?, ?, 'server')
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(user_id)
+        .bind(display_name)
+        .bind(now)
+        .bind(now)
+        .bind(&hlc)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The workspaces on this device: the personal one and organizations'.
+    pub async fn workspaces(&self) -> Result<Vec<WorkspaceInfo>> {
+        let rows = sqlx::query(
+            "SELECT id, kind, org_id, name FROM workspace WHERE deleted_at IS NULL
+             ORDER BY (kind = 'personal') DESC, name COLLATE NOCASE, id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|r| {
+                Ok(WorkspaceInfo {
+                    id: r.try_get("id")?,
+                    kind: r.try_get("kind")?,
+                    org_id: r.try_get("org_id")?,
+                    name: r.try_get("name")?,
+                })
+            })
+            .collect()
     }
 
     pub fn now_ms(&self) -> i64 {
