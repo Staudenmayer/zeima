@@ -273,6 +273,7 @@ async function savePerson() {
   })
 }
 
+const { sort: deptSort, sorted: sortedDepartments } = useSort(() => org.departments, { name: (g) => g.path, people: (g) => g.memberIds.length })
 const { sort: policySort, sorted: sortedScopes } = useSort(policyScopes, {
   scope: (s) => s.label,
   rules: (s) => policySummary(policyOf(s.path)),
@@ -400,17 +401,33 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
       </TabsContent>
 
       <TabsContent value="departments">
-        <div v-if="canManage" class="mb-3"><Button variant="outline" @click="deptOpen = true"><Plus /> {{ $t('org.newDepartment') }}</Button></div>
-        <p v-if="org.departments.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('org.noDepartments') }}</p>
-        <ul v-else class="grid gap-2">
-          <li v-for="g in org.departments" :key="g.id" class="rounded-lg border p-3 text-sm" :style="{ marginLeft: `${(g.path.split('/').length - 1) * 1.5}rem` }">
-            <div class="flex items-center gap-2">
-              <span class="flex-1 font-medium">{{ g.name }}</span>
-              <span class="text-xs text-muted-foreground">{{ $t('org.peopleCount', g.memberIds.length) }}</span>
-              <Button v-if="canManage" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteDept(g)"><Trash2 /></Button>
-            </div>
-          </li>
-        </ul>
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <p class="text-sm text-muted-foreground">{{ $t('org.departmentsHint') }}</p>
+          <Button v-if="canManage" size="sm" @click="deptOpen = true"><Plus /> {{ $t('org.newDepartment') }}</Button>
+        </div>
+        <p v-if="org.departments.length === 0" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.noDepartments') }}</p>
+        <div v-else class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <SortHead :sort="deptSort" column="name" class="px-3 py-2 font-medium">{{ $t('team.department') }}</SortHead>
+                <SortHead :sort="deptSort" column="people" class="px-3 py-2 text-right font-medium">{{ $t('org.jobs.people') }}</SortHead>
+                <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.delete') }}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="g in sortedDepartments" :key="g.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+                <td class="px-3 py-1.5 font-medium" :style="{ paddingLeft: deptSort.key ? undefined : `calc(0.75rem + ${g.path.split('/').length - 1}rem)` }">{{ deptSort.key ? g.path : g.name }}</td>
+                <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ g.memberIds.length }}</td>
+                <td class="px-1 py-0.5" @click.stop>
+                  <div v-if="canManage" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteDept(g)"><Trash2 /></Button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </TabsContent>
 
       <TabsContent v-if="canManage" value="jobs">

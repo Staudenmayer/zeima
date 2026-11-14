@@ -850,6 +850,7 @@ export default {
     newDepartment: 'New department',
     departmentName: 'Name',
     parent: 'Inside',
+    departmentsHint: 'The departments of the organization, nested with a slash (dev/backend). Put people into them in the member list (click a person).',
     noDepartments: 'No departments yet. Departments let managers see their own team.',
     peopleCount: 'no people | 1 person | {n} people',
     addPerson: 'Add person…',

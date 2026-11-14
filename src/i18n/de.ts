@@ -852,6 +852,7 @@ const de: typeof en = {
     newDepartment: 'Neue Abteilung',
     departmentName: 'Name',
     parent: 'Innerhalb von',
+    departmentsHint: 'Die Abteilungen der Organisation, mit Schrägstrich verschachtelt (dev/backend). Ordne Personen in der Mitgliederliste zu (Person anklicken).',
     noDepartments: 'Noch keine Abteilungen. Mit Abteilungen sehen Manager ihr eigenes Team.',
     peopleCount: 'niemand | 1 Person | {n} Personen',
     addPerson: 'Person hinzufügen …',
