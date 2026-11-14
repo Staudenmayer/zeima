@@ -10,7 +10,7 @@ import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { ORG_ROLES, type OrgRole, SECURITY } from '../../plugins/auth.ts'
 import { type Actor, authorize, scopeOf } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
-import { audit, auditEntries, createOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
+import { audit, auditEntries, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
 
 const Role = Type.Union(ORG_ROLES.map((r) => Type.Literal(r)))
 const InviteRole = Type.Union([Type.Literal('admin'), Type.Literal('manager'), Type.Literal('member')])
@@ -115,7 +115,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     {
       schema: {
         tags: ['organizations'],
-        summary: 'Deletes the organization and its memberships (the members\' own data stays)',
+        summary: 'Deletes the organization, its memberships and its shared workspace (the members\' personal data stays)',
         security: SECURITY,
         params: OrgParams,
         response: { 204: Type.Null(), ...problems(401, 403, 502, 503) },
@@ -127,7 +127,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       authorize(actor, 'org.delete', { orgId })
       const db = database()
       await keycloak().deleteOrganization(orgId)
-      await db.delete(schema.organization).where(eq(schema.organization.id, orgId))
+      await deleteOrganization(db, orgId)
       return reply.code(204).send(null)
     },
   )

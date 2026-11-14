@@ -200,6 +200,8 @@ export const workspace = pgTable(
       sql`(${t.kind} = 'personal' AND ${t.ownerId} IS NOT NULL AND ${t.orgId} IS NULL)
           OR (${t.kind} = 'org' AND ${t.orgId} IS NOT NULL AND ${t.ownerId} IS NULL)`,
     ),
+    // One shared workspace per organization.
+    uniqueIndex('workspace_one_per_org').on(t.orgId).where(sql`${t.kind} = 'org'`),
   ],
 )
 

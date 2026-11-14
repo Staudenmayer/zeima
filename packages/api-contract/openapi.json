@@ -701,7 +701,7 @@
         }
       },
       "delete": {
-        "summary": "Deletes the organization and its memberships (the members' own data stays)",
+        "summary": "Deletes the organization, its memberships and its shared workspace (the members' personal data stays)",
         "tags": [
           "organizations"
         ],

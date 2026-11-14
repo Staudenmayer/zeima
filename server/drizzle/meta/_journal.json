@@ -50,6 +50,13 @@
       "when": 1794642687448,
       "tag": "0006_org_invitation",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794643356383,
+      "tag": "0007_workspace_one_per_org",
+      "breakpoints": true
     }
   ]
 }

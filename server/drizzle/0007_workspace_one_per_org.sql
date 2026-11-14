@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "workspace_one_per_org" ON "workspace" USING btree ("org_id") WHERE "workspace"."kind" = 'org';

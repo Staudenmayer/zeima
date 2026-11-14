@@ -382,7 +382,7 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        /** Deletes the organization and its memberships (the members' own data stays) */
+        /** Deletes the organization, its memberships and its shared workspace (the members' personal data stays) */
         delete: {
             parameters: {
                 query?: never;

@@ -35,7 +35,7 @@ export interface Actor {
   manager: boolean
 }
 
-export type Reason = 'locked' | 'forbidden_field'
+export type Reason = 'locked' | 'forbidden_field' | 'forbidden' | 'forbidden_table'
 
 export type Outcome = { status: 'applied' } | { status: 'ignored' } | { status: 'rejected'; reason: Reason }
 

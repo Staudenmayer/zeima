@@ -10,12 +10,14 @@
 // permission table. Sync state is kept in `sync_row` (see db/schema.ts).
 
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
-import { and, asc, eq, gt, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { Type } from 'typebox'
 import { callerOf, type Db, schema, withUser } from '../../db/index.ts'
 import type { AuthUser } from '../../plugins/auth.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
+import { ensureOrgWorkspace } from '../orgs/service.ts'
+import { checkOrgWrite, visibleToCaller } from './orgrules.ts'
 import { type Change, type Json, merge, type Outcome, type RowState } from '../../sync/merge.ts'
 
 /** Tables that sync, all scoped to a workspace. */
@@ -113,11 +115,18 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
         response: { 200: Type.Array(WorkspaceSchema), ...problems(401, 403) },
       },
     },
-    async (request) =>
-      withUser(db(), callerOf(request.user!), async (tx) => {
+    async (request) => {
+      // Organizations made before shared workspaces existed get theirs here.
+      const orgIds = Object.keys(request.user!.orgs)
+      if (orgIds.length) {
+        const known = await db().select({ id: schema.organization.id, name: schema.organization.name }).from(schema.organization).where(inArray(schema.organization.id, orgIds))
+        for (const org of known) await ensureOrgWorkspace(db(), org.id, org.name)
+      }
+      return withUser(db(), callerOf(request.user!), async (tx) => {
         const rows = await tx.select().from(schema.workspace).orderBy(asc(schema.workspace.createdAt), asc(schema.workspace.id))
         return rows.map((w) => ({ id: w.id, kind: w.kind as 'personal' | 'org', name: w.name, orgId: w.orgId }))
-      }),
+      })
+    },
   )
 
   app.post(
@@ -194,12 +203,20 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
         const [ws] = await tx.select().from(schema.workspace).where(eq(schema.workspace.id, workspaceId))
         if (!ws) throw new HttpProblem(404, 'not_found', 'no such workspace')
         const actor = { manager: isManager(user, ws) }
+        const orgActor = ws.kind === 'org' && ws.orgId ? { user, orgId: ws.orgId } : null
 
         const results: Outcome[] = []
         // Order matters inside a batch (a later change may depend on an earlier one).
         for (const change of changes) {
           const current = await loadRow(tx, workspaceId, change.table, change.rowId)
           const mergeable: Change = { ...change, fields: change.fields as Record<string, Json> | undefined }
+          if (orgActor) {
+            const refused = user.orgs[orgActor.orgId] ? await checkOrgWrite(tx, orgActor, orgActor.orgId, mergeable, current) : ({ status: 'rejected', reason: 'forbidden' } as const)
+            if (refused) {
+              results.push(refused)
+              continue
+            }
+          }
           const { state, outcome } = merge(current, mergeable, actor)
           if (outcome.status === 'applied') await saveRow(tx, workspaceId, change.table, change.rowId, state, current !== null)
           results.push(outcome)
@@ -264,8 +281,20 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
           .orderBy(asc(schema.syncRow.seq))
           .limit(limit + 1)
         const page = rows.slice(0, limit)
+        const orgWorkspaces = new Map(
+          (await tx.select({ id: schema.workspace.id, orgId: schema.workspace.orgId }).from(schema.workspace).where(eq(schema.workspace.kind, 'org'))).map((w) => [w.id, w.orgId!]),
+        )
+        const visible = orgWorkspaces.size
+          ? await visibleToCaller(
+              tx,
+              request.user!,
+              orgWorkspaces,
+              page.map((r) => ({ ...r, workspaceId: r.workspaceId, table: r.tableName, fields: r.fields as RowState['fields'] })),
+            )
+          : null
+        const shown = visible ? new Set(visible.map((r) => r.seq)) : null
         return {
-          rows: page.map((r) => ({
+          rows: page.filter((r) => !shown || shown.has(r.seq)).map((r) => ({
             workspaceId: r.workspaceId,
             table: r.tableName,
             rowId: r.rowId,

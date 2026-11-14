@@ -2,7 +2,7 @@
 // Keycloak first and then to the mirror tables, so a failed call leaves the
 // mirror as it was.
 
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import { schema } from '../../db/index.ts'
@@ -39,6 +39,39 @@ export async function audit(db: Db, entry: { orgId: string; actorId: string | nu
   })
 }
 
+/** The workspace the organization's shared data lives in (one per organization). */
+export async function ensureOrgWorkspace(db: Db, orgId: string, name: string): Promise<string> {
+  const now = Date.now()
+  await db
+    .insert(schema.workspace)
+    .values({
+      id: randomUUID(),
+      kind: 'org',
+      orgId,
+      name,
+      createdAt: now,
+      updatedAt: now,
+      hlc: `${String(now).padStart(15, '0')}-000000-server`,
+      originDevice: orgId,
+    })
+    .onConflictDoNothing()
+  const [row] = await db.select({ id: schema.workspace.id }).from(schema.workspace).where(and(eq(schema.workspace.orgId, orgId), eq(schema.workspace.kind, 'org')))
+  return row!.id
+}
+
+/** Deletes the organization and everything in its shared workspace. */
+export async function deleteOrganization(db: Db, orgId: string) {
+  await db.transaction(async (tx) => {
+    const ws = sql`(select id from workspace where org_id = ${orgId})`
+    await tx.execute(sql`delete from time_entry_tag where entry_id in (select id from time_entry where workspace_id in ${ws})`)
+    for (const table of ['pause', 'time_entry', 'tag', 'project', 'sync_row']) {
+      await tx.execute(sql`delete from ${sql.identifier(table)} where workspace_id in ${ws}`)
+    }
+    await tx.execute(sql`delete from workspace where org_id = ${orgId}`)
+    await tx.delete(schema.organization).where(eq(schema.organization.id, orgId))
+  })
+}
+
 export async function createOrganization(
   db: Db,
   kc: KeycloakAdmin,
@@ -53,6 +86,7 @@ export async function createOrganization(
     await db.transaction(async (tx) => {
       await tx.insert(schema.organization).values({ id, name, createdAt: Date.now() })
       await tx.insert(schema.kcOrgMember).values({ orgId: id, userId: creator.id, role: 'owner' })
+      await ensureOrgWorkspace(tx, id, name)
     })
   } catch (err) {
     await kc.deleteOrganization(id).catch(() => {})

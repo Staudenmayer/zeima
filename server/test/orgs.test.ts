@@ -51,6 +51,7 @@ describe.skipIf(!(await reachable()))('organizations', () => {
 
   const reset = async () => {
     kc.calls = []
+    await db.db.delete(schema.workspace).where(eq(schema.workspace.kind, 'org'))
     await db.db.delete(schema.organization)
     await db.db.delete(schema.orgInvitation)
     await db.db.delete(schema.entitlement)
