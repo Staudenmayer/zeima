@@ -20,17 +20,22 @@ type Kind = 'shared' | 'own' | 'never'
 
 /** The right a change to a shared table needs. */
 const SHARED: Record<string, string> = {
-  project: 'project.write',
-  tag: 'tag.write',
-  cost_center: 'cost_center.write',
-  cost_center_assignment: 'cost_center.write',
-  activity: 'policy.write',
-  absence_type: 'policy.write',
-  org_policy: 'policy.write',
-  office: 'policy.write',
-  room: 'policy.write',
-  custom_holiday: 'policy.write',
+  project: 'project',
+  tag: 'tag',
+  cost_center: 'cost_center',
+  cost_center_assignment: 'cost_center',
+  activity: 'policy',
+  absence_type: 'policy',
+  org_policy: 'policy',
+  office: 'policy',
+  room: 'policy',
+  custom_holiday: 'policy',
 }
+/** Changing a shared row takes `<kind>.write`, deleting it `<kind>.delete`. */
+const sharedAction = (table: string, op: string) => `${SHARED[table] ?? 'policy'}.${op === 'delete' ? 'delete' : 'write'}`
+
+/** The right that lets someone see a shared table at all (the others are everybody's). */
+const SHARED_READ: Record<string, string> = { project: 'project.read', cost_center: 'cost_center.read', cost_center_assignment: 'cost_center.read' }
 
 /** The right that lets someone see other people's rows of an own table. */
 const READ: Record<string, string> = {
@@ -162,10 +167,10 @@ export async function checkOrgWrite(
   const kind = kindOf(change.table, merged)
   if (kind === 'never') return { status: 'rejected', reason: 'forbidden_table' }
   if (kind === 'shared') {
-    const action = SHARED[change.table] ?? 'policy.write'
+    const action = sharedAction(change.table, change.op)
     if (can(actor, action, { orgId })) return null
     // A project's manager runs it: visibility and members, not who the manager is.
-    if (change.table === 'project' && current && plain(current.fields.managerId) === actor.user.id) {
+    if (change.table === 'project' && change.op !== 'delete' && current && plain(current.fields.managerId) === actor.user.id) {
       return change.fields && 'managerId' in change.fields && change.fields.managerId !== actor.user.id
         ? { status: 'rejected', reason: 'forbidden_field' }
         : null
@@ -282,6 +287,8 @@ export async function visibleToCaller<T extends { workspaceId: string; table: st
     const kind = kindOf(row.table, row.fields)
     if (kind === 'never') continue
     if (kind === 'shared') {
+      const readAction = SHARED_READ[row.table]
+      if (readAction && !actor.orgs[orgId]?.permissions[readAction]) continue
       if (row.table === 'project' && plain(row.fields.visibility) === 'members' && !canSeeProject(actor, orgId, row.fields)) continue
       // A tag of a project the person cannot see is not theirs to see either.
       const projectId = row.table === 'tag' ? plain(row.fields.projectId) : null

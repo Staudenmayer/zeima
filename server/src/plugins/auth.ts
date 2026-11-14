@@ -14,14 +14,18 @@ import { createRemoteJWKSet, errors as joseErrors, type JWTPayload, jwtVerify, t
 import { Type } from 'typebox'
 import type { Config } from '../config.ts'
 import { HttpProblem } from './errors.ts'
+import { defaultPermissions, isBuiltinRole, ORG_ROLES, type Permissions, type RoleKey } from './permissions.ts'
 
 export const SECURITY = [{ keycloak: [] as string[] }]
 
-export const ORG_ROLES = ['owner', 'admin', 'manager', 'member'] as const
-export type OrgRole = (typeof ORG_ROLES)[number]
+export { ORG_ROLES }
+export type OrgRole = RoleKey
 
 export interface OrgMembership {
+  /** A built-in role's name, or the id of a role the organization made. */
   role: OrgRole
+  /** What the role allows: the built-in defaults here, an organization's own changes added by `rolesPlugin`. */
+  permissions: Permissions
   /** Full paths of the department groups the user belongs to. */
   groups: string[]
 }
@@ -59,23 +63,28 @@ export const OrgIdHeader = Type.Object({
 /** Org memberships from the token's group paths. */
 export function orgsFromGroups(groups: readonly string[]): Record<string, OrgMembership> {
   const orgs: Record<string, OrgMembership> = {}
-  const rank = (r: OrgRole) => ORG_ROLES.indexOf(r)
+  const rank = (r: OrgRole) => (isBuiltinRole(r) ? ORG_ROLES.indexOf(r) : ORG_ROLES.length)
   for (const path of groups) {
     const [, root, orgId, kind, ...rest] = path.split('/')
     if (root !== 'orgs' || !orgId || !kind) continue
     let org = orgs[orgId]
     if (!org) {
-      org = { role: 'member', groups: [] }
+      org = { role: '', permissions: {}, groups: [] }
       orgs[orgId] = org
     }
-    if (kind === 'roles' && rest.length === 1 && (ORG_ROLES as readonly string[]).includes(rest[0]!)) {
-      const role = rest[0] as OrgRole
-      if (rank(role) < rank(org.role)) org.role = role
+    if (kind === 'roles' && rest.length === 1 && /^[A-Za-z0-9-]{1,64}$/.test(rest[0]!)) {
+      const role = rest[0]!
+      if (org.role === '' || rank(role) < rank(org.role)) org.role = role
     } else if (kind === 'groups' && rest.length > 0) {
       org.groups.push(path)
     }
   }
-  for (const org of Object.values(orgs)) org.groups.sort()
+  for (const org of Object.values(orgs)) {
+    // In the organization without a role group a person is a plain member.
+    if (org.role === '') org.role = 'member'
+    org.permissions = isBuiltinRole(org.role) ? defaultPermissions(org.role) : {}
+    org.groups.sort()
+  }
   return orgs
 }
 

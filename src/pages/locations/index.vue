@@ -169,7 +169,7 @@ const today = computed(() => iso(Date.now()))
       <span class="flex-1" />
       <Button size="sm" variant="outline" @click="applyPattern"><CalendarCheck /> {{ $t('locations.applyPattern') }}</Button>
       <Button size="sm" variant="ghost" @click="openPattern"><Settings2 /> {{ $t('locations.usualWeek') }}</Button>
-      <Button v-if="workspaces.canEditShared" size="sm" variant="ghost" @click="officesOpen = true"><Building /> {{ $t('locations.offices') }}</Button>
+      <Button v-if="workspaces.can('policy.write')" size="sm" variant="ghost" @click="officesOpen = true"><Building /> {{ $t('locations.offices') }}</Button>
     </div>
     <div class="overflow-x-auto rounded-lg border">
       <table class="w-full text-sm" :class="view === 'month' ? 'min-w-[70rem]' : 'min-w-[40rem]'">

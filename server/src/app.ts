@@ -18,6 +18,7 @@ import { HttpKeycloakAdmin, type KeycloakAdmin } from './keycloak/admin.ts'
 import { syncRoutes } from './modules/sync/routes.ts'
 import { meRoutes } from './modules/me/routes.ts'
 import { authPlugin } from './plugins/auth.ts'
+import { rolesPlugin } from './modules/orgs/roles.ts'
 import { realtimePlugin } from './plugins/realtime.ts'
 import { identityPlugin } from './plugins/identity.ts'
 import { docsPlugin } from './plugins/docs.ts'
@@ -64,6 +65,7 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
   app.decorate('licensing', new Licensing(config))
   app.decorate('keycloakAdmin', options.keycloakAdmin !== undefined ? options.keycloakAdmin : config.keycloak.admin ? new HttpKeycloakAdmin(config.keycloak.admin) : null)
   if (db) app.decorate('db', db)
+  await app.register(rolesPlugin)
   await app.register(healthRoutes, {
     checks: {
       ...(options.readiness ?? { keycloak: keycloakCheck(config.keycloak.jwksUrl) }),

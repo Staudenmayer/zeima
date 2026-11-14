@@ -7,7 +7,7 @@ import { and, eq, notInArray } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
-import { ORG_ROLES, type OrgRole } from '../../plugins/auth.ts'
+import { ORG_ROLES, type RoleKey } from '../../plugins/permissions.ts'
 
 export interface ReconcileResult {
   members: number
@@ -16,9 +16,11 @@ export interface ReconcileResult {
   groups: number
 }
 
-/** The highest role a person has, if any (owner > admin > manager > member). */
-function roleOf(userId: string, roles: Record<OrgRole, string[]>): OrgRole | null {
-  return ORG_ROLES.find((r) => roles[r].includes(userId)) ?? null
+/** The role a person has, if any: the highest built-in one (owner > admin > manager > member), else one of the organization's own. */
+function roleOf(userId: string, roles: Record<RoleKey, string[]>): RoleKey | null {
+  const builtin = ORG_ROLES.find((r) => roles[r]?.includes(userId))
+  if (builtin) return builtin
+  return Object.entries(roles).find(([, ids]) => ids.includes(userId))?.[0] ?? null
 }
 
 export async function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: string): Promise<ReconcileResult> {

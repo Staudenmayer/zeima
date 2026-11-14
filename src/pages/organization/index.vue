@@ -15,6 +15,7 @@ import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import PolicyDialog from '@/components/time/PolicyDialog.vue'
 import MultiSelect from '@/components/time/MultiSelect.vue'
 import PresenceDot from '@/components/time/PresenceDot.vue'
+import RoleDialog from '@/components/time/RoleDialog.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
@@ -23,7 +24,7 @@ import { errorMessage } from '@/lib/ipc'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { OrgPolicy } from '@/bindings'
 import { useAccountStore } from '@/stores/account'
-import { CAN, type Department, type Invitation, type Job, type Member, type OrgRole, useOrgStore } from '@/stores/org'
+import { covers, type Department, type Invitation, type Job, type Member, type OrgRole, type Role, useOrgStore } from '@/stores/org'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
 
@@ -34,13 +35,22 @@ const format = useFormat()
 const account = useAccountStore()
 const org = useOrgStore()
 
-const ROLES: OrgRole[] = ['owner', 'admin', 'manager', 'member']
-const canInvite = computed(() => !!org.role && CAN.invite(org.role))
-const canManage = computed(() => !!org.role && CAN.manage(org.role))
-const canAssign = computed(() => !!org.role && CAN.assignRoles(org.role))
-const isOwner = computed(() => !!org.role && CAN.delete(org.role))
+// What the person may do comes from their role's permissions (the server decides).
+const canInvite = computed(() => org.can('member.invite'))
+const canManage = computed(() => org.can('member.manage'))
+const canAssign = computed(() => org.can('role.assign'))
+const isOwner = computed(() => org.can('org.delete'))
+const canEditDepartments = computed(() => org.can('group.manage'))
+const canDeleteDepartments = computed(() => org.can('group.delete'))
+const canEditJobs = computed(() => org.can('job.edit'))
+const canDeleteJobs = computed(() => org.can('job.delete'))
+const canSeeRoles = computed(() => org.can('role.view'))
 /** Roles this person may hand out in an invitation. */
-const inviteRoles = computed<Invitation['role'][]>(() => (canAssign.value ? ['member', 'manager', 'admin'] : ['member']))
+/** The roles the person may give: only what they hold themselves, and the owner role only an owner. */
+const givableRoles = computed(() =>
+  org.roles.filter((r) => (r.key === 'owner' ? org.role === 'owner' : r.permissions !== null && covers(org.permissions, r.permissions))),
+)
+const inviteRoles = computed(() => (canAssign.value ? givableRoles.value : givableRoles.value.filter((r) => r.key === 'member')))
 
 const workspaces = useWorkspaceStore()
 
@@ -139,7 +149,7 @@ const label = (m: Member) => m.name || m.email || m.id
 
 /** Whether the signed-in person may change this member's role. */
 const canEditRole = (m: Member) => canAssign.value && m.id !== account.status.user?.id
-const canTouch = (m: Member) => canManage.value && (m.role !== 'owner' || isOwner.value) && m.id !== account.status.user?.id
+const canTouch = (m: Member) => (canManage.value || org.can('member.remove')) && (m.role !== 'owner' || isOwner.value) && m.id !== account.status.user?.id
 
 // -------------------------------------------------------------- departments
 const deptOpen = ref(false)
@@ -202,6 +212,27 @@ function askDeleteJob(j: Job) {
   deleteJobOpen.value = true
 }
 const { sort: jobSort, sorted: sortedJobs } = useSort(() => org.jobs, { name: (j) => j.name, description: (j) => j.description, people: (j) => j.people })
+
+// ------------------------------------------------------------------- roles
+const roleOpen = ref(false)
+const editingRole = ref<Role | null>(null)
+function openRole(r: Role | null) {
+  editingRole.value = r
+  roleOpen.value = true
+}
+const deletingRole = ref<Role | null>(null)
+const deleteRoleOpen = ref(false)
+function askDeleteRole(r: Role) {
+  deletingRole.value = r
+  deleteRoleOpen.value = true
+}
+const canEditRoles = computed(() => org.can('role.edit'))
+const canDeleteRoles = computed(() => org.can('role.delete'))
+const { sort: roleSort, sorted: sortedRoles } = useSort(() => org.roles, {
+  name: (r) => org.roleName(r.key),
+  people: (r) => r.people,
+  permissions: (r) => Object.keys(r.permissions ?? {}).length,
+})
 
 // ---------------------------------------------------------------- activity
 const actionLabel = (a: string) => {
@@ -324,7 +355,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
   <div v-else-if="org.info" class="grid gap-4">
     <div class="flex flex-wrap items-center gap-3 text-sm">
       <h2 class="text-lg font-medium">{{ org.info.name }}</h2>
-      <Badge variant="secondary">{{ $t(`org.roles.${org.info.role}`) }}</Badge>
+      <Badge variant="secondary">{{ org.roleName(org.info.role) }}</Badge>
       <span class="text-muted-foreground">
         {{
           org.info.seats.limit === null
@@ -338,9 +369,10 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
       <TabsList>
         <TabsTrigger value="members">{{ $t('org.tabs.members') }}</TabsTrigger>
         <TabsTrigger value="departments">{{ $t('org.tabs.departments') }}</TabsTrigger>
-        <TabsTrigger v-if="canManage" value="jobs">{{ $t('org.tabs.jobs') }}</TabsTrigger>
-        <TabsTrigger v-if="canManage" value="policies">{{ $t('org.tabs.policies') }}</TabsTrigger>
-        <TabsTrigger v-if="org.role && CAN.audit(org.role)" value="activity">{{ $t('org.tabs.activity') }}</TabsTrigger>
+        <TabsTrigger v-if="canEditJobs || canDeleteJobs" value="jobs">{{ $t('org.tabs.jobs') }}</TabsTrigger>
+        <TabsTrigger v-if="canSeeRoles" value="roles">{{ $t('org.tabs.roles') }}</TabsTrigger>
+        <TabsTrigger v-if="org.can('policy.write')" value="policies">{{ $t('org.tabs.policies') }}</TabsTrigger>
+        <TabsTrigger v-if="org.can('audit.read')" value="activity">{{ $t('org.tabs.activity') }}</TabsTrigger>
       </TabsList>
 
       <TabsContent value="members">
@@ -378,10 +410,10 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
                   <Select v-if="r.member && canEditRole(r.member)" :model-value="r.member.role" @update:model-value="(role) => run(() => org.updateMember(r.member!.id, { role: role as OrgRole }))">
                     <SelectTrigger class="h-8 w-32"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem v-for="role in ROLES" :key="role" :value="role">{{ $t(`org.roles.${role}`) }}</SelectItem>
+                      <SelectItem v-for="role in givableRoles" :key="role.key" :value="role.key">{{ org.roleName(role.key) }}</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Badge v-else variant="secondary">{{ $t(`org.roles.${r.role}`) }}</Badge>
+                  <Badge v-else variant="secondary">{{ org.roleName(r.role) }}</Badge>
                 </td>
                 <td class="px-3 py-1.5">
                   <span v-if="r.departments.length" class="flex flex-wrap gap-1"><Badge v-for="d in r.departments" :key="d" variant="secondary">{{ d }}</Badge></span>
@@ -421,7 +453,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
       <TabsContent value="departments">
         <div class="mb-3 flex items-center justify-between gap-3">
           <p class="text-sm text-muted-foreground">{{ $t('org.departmentsHint') }}</p>
-          <Button v-if="canManage" size="sm" @click="deptOpen = true"><Plus /> {{ $t('org.newDepartment') }}</Button>
+          <Button v-if="canEditDepartments" size="sm" @click="deptOpen = true"><Plus /> {{ $t('org.newDepartment') }}</Button>
         </div>
         <p v-if="org.departments.length === 0" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.noDepartments') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
@@ -434,13 +466,13 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="g in sortedDepartments" :key="g.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="canManage ? 'cursor-pointer' : ''" @click="canManage && openDept(g)">
+              <tr v-for="g in sortedDepartments" :key="g.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="canEditDepartments ? 'cursor-pointer' : ''" @click="canEditDepartments && openDept(g)">
                 <td class="px-3 py-1.5 font-medium" :style="{ paddingLeft: deptSort.key ? undefined : `calc(0.75rem + ${g.path.split('/').length - 1}rem)` }">{{ deptSort.key ? g.path : g.name }}</td>
                 <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ g.memberIds.length }}</td>
                 <td class="px-1 py-0.5" @click.stop>
-                  <div v-if="canManage" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openDept(g)"><Pencil /></Button>
-                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteDept(g)"><Trash2 /></Button>
+                  <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button v-if="canEditDepartments" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openDept(g)"><Pencil /></Button>
+                    <Button v-if="canDeleteDepartments" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteDept(g)"><Trash2 /></Button>
                   </div>
                 </td>
               </tr>
@@ -449,10 +481,10 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
         </div>
       </TabsContent>
 
-      <TabsContent v-if="canManage" value="jobs">
+      <TabsContent v-if="canEditJobs || canDeleteJobs" value="jobs">
         <div class="mb-3 flex items-center justify-between gap-3">
           <p class="text-sm text-muted-foreground">{{ $t('org.jobs.hint') }}</p>
-          <Button size="sm" @click="openJob()"><Plus /> {{ $t('org.jobs.new') }}</Button>
+          <Button v-if="canEditJobs" size="sm" @click="openJob()"><Plus /> {{ $t('org.jobs.new') }}</Button>
         </div>
         <p v-if="org.jobs.length === 0" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.jobs.none') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
@@ -466,14 +498,14 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="j in sortedJobs" :key="j.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="openJob(j)">
+              <tr v-for="j in sortedJobs" :key="j.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="canEditJobs ? 'cursor-pointer' : ''" @click="canEditJobs && openJob(j)">
                 <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ j.name }}</td>
                 <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="j.description">{{ j.description || '–' }}</td>
                 <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ j.people }}</td>
                 <td class="px-1 py-0.5" @click.stop>
                   <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openJob(j)"><Pencil /></Button>
-                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteJob(j)"><Trash2 /></Button>
+                    <Button v-if="canEditJobs" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openJob(j)"><Pencil /></Button>
+                    <Button v-if="canDeleteJobs" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteJob(j)"><Trash2 /></Button>
                   </div>
                 </td>
               </tr>
@@ -482,7 +514,42 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
         </div>
       </TabsContent>
 
-      <TabsContent v-if="canManage" value="policies">
+      <TabsContent v-if="canSeeRoles" value="roles">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <p class="text-sm text-muted-foreground">{{ $t('org.rolesHint') }}</p>
+          <Button v-if="canEditRoles" size="sm" @click="openRole(null)"><Plus /> {{ $t('org.roleNew') }}</Button>
+        </div>
+        <div class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <SortHead :sort="roleSort" column="name" class="px-3 py-2 font-medium">{{ $t('org.col.role') }}</SortHead>
+                <SortHead :sort="roleSort" column="permissions" class="px-3 py-2 text-right font-medium">{{ $t('org.permCount') }}</SortHead>
+                <SortHead :sort="roleSort" column="people" class="px-3 py-2 text-right font-medium">{{ $t('org.jobs.people') }}</SortHead>
+                <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in sortedRoles" :key="r.key" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="openRole(r)">
+                <td class="px-3 py-1.5">
+                  <p class="font-medium">{{ org.roleName(r.key) }} <Badge v-if="r.builtin" variant="outline" class="ml-1">{{ $t('org.roleBuiltin') }}</Badge></p>
+                  <p v-if="r.description" class="truncate text-xs text-muted-foreground">{{ r.description }}</p>
+                </td>
+                <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ r.permissions ? Object.keys(r.permissions).length : '–' }}</td>
+                <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ r.people }}</td>
+                <td class="px-1 py-0.5" @click.stop>
+                  <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button size="icon" variant="ghost" class="size-7" :title="canEditRoles && !r.locked ? $t('common.edit') : $t('org.roleView')" @click="openRole(r)"><Pencil /></Button>
+                    <Button v-if="canDeleteRoles && !r.builtin" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteRole(r)"><Trash2 /></Button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </TabsContent>
+
+      <TabsContent v-if="org.can('policy.write')" value="policies">
         <p v-if="!workspaces.inOrg" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.policy.switch') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
@@ -510,7 +577,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
         <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.policy.hint') }}</p>
       </TabsContent>
 
-      <TabsContent v-if="org.role && CAN.audit(org.role)" value="activity">
+      <TabsContent v-if="org.can('audit.read')" value="activity">
         <div class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
@@ -549,7 +616,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
           <Select v-model="inviteRole">
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem v-for="r in inviteRoles" :key="r" :value="r">{{ $t(`org.roles.${r}`) }}</SelectItem>
+              <SelectItem v-for="r in inviteRoles" :key="r.key" :value="r.key">{{ org.roleName(r.key) }}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -599,6 +666,13 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
     v-model:open="deleteJobOpen"
     :title="$t('org.jobs.deleteConfirm', { name: deletingJob?.name ?? '' })"
     @confirm="deletingJob && run(() => org.deleteJob(deletingJob!.id))"
+  />
+
+  <RoleDialog v-model:open="roleOpen" :role="editingRole" />
+  <ConfirmDialog
+    v-model:open="deleteRoleOpen"
+    :title="$t('org.roleDeleteConfirm', { name: deletingRole?.name ?? '' })"
+    @confirm="deletingRole && run(() => org.deleteRole(deletingRole!.key))"
   />
 
   <Dialog v-model:open="personOpen">

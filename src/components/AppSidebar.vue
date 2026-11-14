@@ -81,8 +81,8 @@ const tracking = computed(() => [
   ...(workspaces.inOrg ? [{ title: t('nav.meetings'), url: '/meetings', icon: CalendarDays }] : []),
   ...(workspaces.inOrg ? [{ title: t('nav.locations'), url: '/locations', icon: MapPinned }] : []),
   ...(workspaces.inOrg ? [{ title: t('nav.directory'), url: '/directory', icon: Contact }] : []),
-  // Owners and managers see other people's time; for the rest the page would show only themselves.
-  ...(workspaces.inOrg && (workspaces.role === 'owner' || workspaces.role === 'manager')
+  // Those who may see other people's time (their department's or all); for the rest the page would show only themselves.
+  ...(workspaces.inOrg && ['group', 'org'].includes(workspaces.scopeOf('entry.read') ?? '')
     ? [{ title: t('nav.team'), url: '/team', icon: Users }]
     : []),
 ])

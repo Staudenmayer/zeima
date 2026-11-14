@@ -87,6 +87,31 @@ export const kcGroupMember = pgTable(
   (t) => [primaryKey({ columns: [t.groupId, t.userId] })],
 )
 
+/**
+ * A role of an organization: what its holders may do (action → scope). The
+ * built-in roles (`key` owner, admin, manager, member) have a row only once
+ * an admin has changed them; the others are the organization's own. A
+ * person's role is a Keycloak group named by `key` or, for the own ones, by `id`.
+ */
+export const orgRole = pgTable(
+  'org_role',
+  {
+    id: uuid('id').primaryKey(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    /** `admin`, `manager` or `member` for a built-in role that was changed; null for the organization's own. */
+    key: text('key'),
+    name: text('name').notNull(),
+    description: text('description').notNull().default(''),
+    permissions: jsonb('permissions').$type<Record<string, string>>().notNull().default({}),
+  },
+  (t) => [
+    uniqueIndex('org_role_name').on(t.orgId, sql`lower(${t.name})`),
+    uniqueIndex('org_role_key').on(t.orgId, t.key).where(sql`${t.key} IS NOT NULL`),
+  ],
+)
+
 /** A job description the organization defines; people are given one (shown in the directory). */
 export const orgJob = pgTable(
   'org_job',
@@ -117,7 +142,6 @@ export const kcOrgMember = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.orgId, t.userId] }),
-    check('kc_org_member_role', sql`${t.role} IN ('owner', 'admin', 'manager', 'member')`),
   ],
 )
 
@@ -142,7 +166,6 @@ export const orgInvitation = pgTable(
   },
   (t) => [
     uniqueIndex('org_invitation_pending').on(t.orgId, t.email).where(sql`${t.acceptedAt} IS NULL`),
-    check('org_invitation_role', sql`${t.role} IN ('admin', 'manager', 'member')`),
   ],
 )
 

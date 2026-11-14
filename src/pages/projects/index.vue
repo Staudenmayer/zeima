@@ -72,11 +72,11 @@ const { sort, sorted: sortedList } = useSort(list, {
       <Switch v-model="showArchived" />
       {{ $t('projects.showArchived') }}
     </label>
-    <Button v-if="workspaces.canEditShared" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
+    <Button v-if="workspaces.can('project.write')" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
   </PageHeader>
 
   <EmptyState v-if="list.length === 0" :icon="FolderKanban" :text="$t('projects.empty')">
-    <Button v-if="workspaces.canEditShared" variant="outline" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
+    <Button v-if="workspaces.can('project.write')" variant="outline" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
   </EmptyState>
 
   <div v-else class="overflow-x-auto rounded-lg border">
@@ -92,7 +92,7 @@ const { sort, sorted: sortedList } = useSort(list, {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="p in sortedList" :key="p.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="(workspaces.canEditShared || p.managerId === account.status.user?.id) && open(p)">
+        <tr v-for="p in sortedList" :key="p.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="(workspaces.can('project.write') || p.managerId === account.status.user?.id) && open(p)">
           <td class="px-3 py-1.5">
             <div class="flex items-center gap-2">
               <ProjectDot :project="p" show-alias />
@@ -110,8 +110,8 @@ const { sort, sorted: sortedList } = useSort(list, {
           </td>
           <td class="px-1 py-0.5" @click.stop>
             <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-              <Button v-if="workspaces.canEditShared || p.managerId === account.status.user?.id" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(p)"><Pencil /></Button>
-              <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(p)"><Trash2 /></Button>
+              <Button v-if="workspaces.can('project.write') || p.managerId === account.status.user?.id" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(p)"><Pencil /></Button>
+              <Button v-if="workspaces.can('project.delete')" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(p)"><Trash2 /></Button>
             </div>
           </td>
         </tr>

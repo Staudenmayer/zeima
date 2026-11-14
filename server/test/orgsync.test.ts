@@ -345,4 +345,29 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     })
     expect(res.json().results).toEqual([{ status: 'applied' }, { status: 'applied' }])
   })
+  it('lets a role made of permissions edit but not delete when it has no delete permission', async () => {
+    const ROLE = id(950), P1 = id(951), P2 = id(952)
+    await db.db.insert(schema.orgRole).values({ id: ROLE, orgId: ORG, key: null, name: 'Editor', permissions: { 'project.write': 'org', 'project.read': 'org' } })
+    const was = ROLES[BEN]!
+    ROLES[BEN] = ROLE
+    const { forgetRoles } = await import('../src/modules/orgs/roles.ts')
+    forgetRoles(ORG)
+    try {
+      expect(await results(BEN, [upsert('project', P1, 2000, { name: 'Made by Ben' })])).toEqual([{ status: 'applied' }])
+      expect(await results(BEN, [{ table: 'project', rowId: P1, op: 'delete', hlc: hlc(2010) }])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await results(BEN, [upsert('tag', P2, 2020, { name: 'nope' })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      // Adding the delete permission takes effect at once.
+      await db.db.update(schema.orgRole).set({ permissions: { 'project.write': 'org', 'project.read': 'org', 'project.delete': 'org' } }).where(eq(schema.orgRole.id, ROLE))
+      forgetRoles(ORG)
+      expect(await results(BEN, [{ table: 'project', rowId: P1, op: 'delete', hlc: hlc(2030) }])).toEqual([{ status: 'applied' }])
+      // Without the right to see projects they do not arrive.
+      await db.db.update(schema.orgRole).set({ permissions: { 'tag.write': 'org' } }).where(eq(schema.orgRole.id, ROLE))
+      forgetRoles(ORG)
+      expect(await pulledIds(BEN)).not.toContain(P1)
+    } finally {
+      ROLES[BEN] = was
+      await db.db.delete(schema.orgRole).where(eq(schema.orgRole.id, ROLE))
+      forgetRoles(ORG)
+    }
+  })
 })

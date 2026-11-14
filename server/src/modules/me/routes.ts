@@ -2,7 +2,7 @@
 
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { Type } from 'typebox'
-import { ORG_ROLES, OrgIdHeader, SECURITY } from '../../plugins/auth.ts'
+import { OrgIdHeader, SECURITY } from '../../plugins/auth.ts'
 import { problems } from '../../plugins/errors.ts'
 
 const Me = Type.Object(
@@ -15,7 +15,8 @@ const Me = Type.Object(
     orgs: Type.Array(
       Type.Object({
         id: Type.String(),
-        role: Type.Union(ORG_ROLES.map((r) => Type.Literal(r))),
+        role: Type.String({ description: 'A built-in role\'s name (`admin`) or the id of a role the organization made' }),
+        permissions: Type.Record(Type.String(), Type.String(), { description: 'What the role allows: action → scope (`own`, `group`, `org`)' }),
         groups: Type.Array(Type.String(), { description: 'Department group paths' }),
       }),
     ),
@@ -45,7 +46,7 @@ export const meRoutes: FastifyPluginAsyncTypebox = async (app) => {
         locale: user.locale,
         roles: user.roles,
         orgs: Object.entries(user.orgs)
-          .map(([id, m]) => ({ id, role: m.role, groups: m.groups }))
+          .map(([id, m]) => ({ id, role: m.role, permissions: m.permissions, groups: m.groups }))
           .sort((a, b) => a.id.localeCompare(b.id)),
         activeOrgId: request.orgId,
       }

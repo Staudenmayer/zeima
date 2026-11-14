@@ -2,12 +2,42 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { commands, type OrgPolicy, type PolicySettings } from '@/bindings'
 import { call } from '@/lib/ipc'
+import i18n from '@/plugins/i18n'
 
-export type OrgRole = 'owner' | 'admin' | 'manager' | 'member'
+/** A built-in role's name (`admin`) or the id of a role the organization made. */
+export type OrgRole = string
+
+export type Scope = 'own' | 'group' | 'org'
+const RANK: Record<Scope, number> = { own: 0, group: 1, org: 2 }
+/** What a role allows: action → the widest scope. */
+export type Permissions = Record<string, Scope>
+
+/** Whether `have` holds everything in `want`, at least as wide (a role may only hand out what its giver holds). */
+export function covers(have: Permissions, want: Permissions): boolean {
+  return Object.entries(want).every(([action, scope]) => have[action] !== undefined && RANK[have[action]!] >= RANK[scope])
+}
 
 export interface OrgSummary {
   id: string
   role: OrgRole
+  permissions: Permissions
+}
+/** A role of the organization, with what it allows (only for those who view roles, and for one's own). */
+export interface Role {
+  key: string
+  name: string
+  description: string
+  builtin: boolean
+  locked: boolean
+  people: number
+  permissions: Permissions | null
+}
+/** What a role can be given: grouped by what it acts on, and by view, edit or delete. */
+export interface PermissionDef {
+  action: string
+  resource: string
+  kind: 'view' | 'edit' | 'delete'
+  scopes: Scope[]
 }
 export interface OrgInfo {
   id: string
@@ -26,7 +56,7 @@ export interface Member {
 export interface Invitation {
   id: string
   email: string
-  role: 'admin' | 'manager' | 'member'
+  role: OrgRole
   /** Departments the person is put into when they join. */
   groupIds: string[]
   /** The job description they get when they join. */
@@ -53,15 +83,6 @@ export interface AuditEntry {
   action: string
   target: string | null
   detail: Record<string, unknown>
-}
-
-/** What a role may do (packages/shared-fixtures/permissions.yaml; the server decides). */
-export const CAN = {
-  invite: (r: OrgRole) => r === 'owner' || r === 'admin',
-  manage: (r: OrgRole) => r === 'owner' || r === 'admin',
-  assignRoles: (r: OrgRole) => r === 'owner',
-  audit: (r: OrgRole) => r === 'owner' || r === 'admin',
-  delete: (r: OrgRole) => r === 'owner',
 }
 
 export interface DirectoryEntry {
@@ -105,6 +126,14 @@ export const useOrgStore = defineStore('org', () => {
   const loading = ref(false)
 
   const role = computed<OrgRole | null>(() => orgs.value.find((o) => o.id === activeId.value)?.role ?? null)
+  /** The roles of the organization, and what a role can be made of. */
+  const roles = ref<Role[]>([])
+  const catalog = ref<PermissionDef[]>([])
+  const permissions = computed<Permissions>(() => orgs.value.find((o) => o.id === activeId.value)?.permissions ?? {})
+  /** Whether the person may do `action` in this organization (the server decides; this shows or hides). */
+  const can = (action: string) => permissions.value[action] !== undefined
+  /** How wide: their own, their departments' or everyone's; null if not at all. */
+  const scopeOf = (action: string): Scope | null => permissions.value[action] ?? null
 
   /** Request to the server; the answer is parsed JSON, or null for "no content". */
   async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -132,12 +161,12 @@ export const useOrgStore = defineStore('org', () => {
       await loadOrgs()
       if (!activeId.value) return
       info.value = await api<OrgInfo>('GET', base())
-      const r = role.value!
+      await loadRoles().catch(() => {})
       people.value = await api<{ id: string; name: string | null }[]>('GET', `${base()}/people`).catch(() => [])
       const [m, g, i] = await Promise.all([
         api<Member[]>('GET', `${base()}/members`),
         api<Department[]>('GET', `${base()}/groups`),
-        CAN.invite(r) ? api<Invitation[]>('GET', `${base()}/invitations`) : Promise.resolve([]),
+        can('member.invite') ? api<Invitation[]>('GET', `${base()}/invitations`) : Promise.resolve([]),
       ])
       members.value = m
       departments.value = g
@@ -145,7 +174,7 @@ export const useOrgStore = defineStore('org', () => {
       audit.value = []
       auditDone.value = false
       await Promise.all([loadDirectory().catch(() => {}), loadJobs().catch(() => {})])
-      if (CAN.audit(r)) await loadMoreAudit()
+      if (can('audit.read')) await loadMoreAudit()
     } finally {
       loading.value = false
     }
@@ -230,6 +259,31 @@ export const useOrgStore = defineStore('org', () => {
     await load()
   }
 
+  async function loadRoles() {
+    if (!activeId.value) return
+    const answer = await api<{ roles: Role[]; catalog: PermissionDef[] }>('GET', `${base()}/roles`)
+    roles.value = answer.roles
+    catalog.value = answer.catalog
+  }
+  async function createRole(input: { name: string; description: string; permissions: Permissions }) {
+    await api('POST', `${base()}/roles`, input)
+    await Promise.all([loadRoles(), loadOrgs()])
+  }
+  async function updateRole(key: string, input: { name?: string; description?: string; permissions?: Permissions }) {
+    await api('PATCH', `${base()}/roles/${key}`, input)
+    await Promise.all([loadRoles(), loadOrgs()])
+  }
+  async function deleteRole(key: string) {
+    await api('DELETE', `${base()}/roles/${key}`)
+    await load()
+  }
+  /** A role's name: the built-in ones in the person's language, the organization's own as written. */
+  function roleName(key: string): string {
+    const k = `org.roles.${key}`
+    if (i18n.global.te(k)) return i18n.global.t(k)
+    return roles.value.find((r) => r.key === key)?.name ?? key
+  }
+
   async function updateMember(userId: string, change: { role?: OrgRole; active?: boolean }) {
     await api('PATCH', `${base()}/members/${userId}`, change)
     await load()
@@ -268,7 +322,7 @@ export const useOrgStore = defineStore('org', () => {
   }
 
   return {
-    orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
+    orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role, roles, catalog, permissions, can, scopeOf, loadRoles, createRole, updateRole, deleteRole, roleName,
     directory, loadDirectory, updateInvitation, jobs, loadJobs, createJob, updateJob, deleteJob, setJob, loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, renameDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }

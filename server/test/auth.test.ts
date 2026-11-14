@@ -2,6 +2,7 @@ import { generateKeyPair } from 'jose'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { App } from '../src/app.ts'
 import { orgsFromGroups } from '../src/plugins/auth.ts'
+import { defaultPermissions } from '../src/plugins/permissions.ts'
 import { testApp, token } from './helpers.ts'
 
 describe('orgsFromGroups', () => {
@@ -17,9 +18,10 @@ describe('orgsFromGroups', () => {
         '/other/group',
       ]),
     ).toEqual({
-      o1: { role: 'manager', groups: ['/orgs/o1/groups/dev/backend'] },
-      o2: { role: 'member', groups: ['/orgs/o2/groups/sales'] },
-      o3: { role: 'member', groups: [] },
+      o1: { role: 'manager', permissions: defaultPermissions('manager'), groups: ['/orgs/o1/groups/dev/backend'] },
+      o2: { role: 'member', permissions: defaultPermissions('member'), groups: ['/orgs/o2/groups/sales'] },
+      // A role the organization made: what it allows is looked up by the API, nothing until then.
+      o3: { role: 'emperor', permissions: {}, groups: [] },
     })
   })
 })
@@ -51,7 +53,7 @@ describe('bearer authentication', () => {
       name: 'Ada Lovelace',
       locale: 'de',
       roles: ['user', 'offline_access'],
-      orgs: [{ id: 'o1', role: 'admin', groups: ['/orgs/o1/groups/dev'] }],
+      orgs: [{ id: 'o1', role: 'admin', permissions: defaultPermissions('admin'), groups: ['/orgs/o1/groups/dev'] }],
       activeOrgId: null,
     })
   })

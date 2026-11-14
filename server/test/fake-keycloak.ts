@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import type { KcDepartment, KcUser, KeycloakAdmin } from '../src/keycloak/admin.ts'
-import type { OrgRole } from '../src/plugins/auth.ts'
+import type { RoleKey } from '../src/plugins/permissions.ts'
 
 export class FakeKeycloak implements KeycloakAdmin {
   calls: string[] = []
@@ -20,7 +20,7 @@ export class FakeKeycloak implements KeycloakAdmin {
   /** What the next `list…` calls report: Keycloak's view of an organization. */
   members: KcUser[] = []
   departments: KcDepartment[] = []
-  roles: Record<OrgRole, string[]> = { owner: [], admin: [], manager: [], member: [] }
+  roles: Record<RoleKey, string[]> = { owner: [], admin: [], manager: [], member: [] }
 
   async listMembers(_orgId: string) {
     return this.members
@@ -47,6 +47,12 @@ export class FakeKeycloak implements KeycloakAdmin {
   }
   async setRole(orgId: string, userId: string, role: string) {
     this.record('setRole', orgId, userId, role)
+  }
+  async createRole(orgId: string, key: string) {
+    this.record('createRole', orgId, key)
+  }
+  async deleteRole(orgId: string, key: string) {
+    this.record('deleteRole', orgId, key)
   }
   async invite(orgId: string, email: string) {
     this.record('invite', orgId, email)

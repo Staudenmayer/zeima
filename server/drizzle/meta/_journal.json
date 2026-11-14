@@ -85,6 +85,13 @@
       "when": 1794670582772,
       "tag": "0011_invitation_department_job",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794671270725,
+      "tag": "0012_org_roles",
+      "breakpoints": true
     }
   ]
 }

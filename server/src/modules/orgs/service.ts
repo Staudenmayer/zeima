@@ -7,14 +7,13 @@ import { and, asc, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
-import type { OrgRole } from '../../plugins/auth.ts'
 import { HttpProblem } from '../../plugins/errors.ts'
 
 export interface MemberRow {
   id: string
   email: string | null
   name: string | null
-  role: OrgRole
+  role: string
   active: boolean
   lastSeenAt: number | null
 }
@@ -183,7 +182,7 @@ export async function acceptInvitations(db: Db, kc: KeycloakAdmin, user: { id: s
     .from(schema.orgInvitation)
     .where(and(eq(schema.orgInvitation.email, email), isNull(schema.orgInvitation.acceptedAt)))
   for (const invitation of pending) {
-    const role = invitation.role as OrgRole
+    const role = invitation.role
     await kc.addMember(invitation.orgId, user.id)
     await kc.setRole(invitation.orgId, user.id, role)
     // The departments the inviter chose (those that still exist in the organization).

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { AuthUser, OrgRole } from '../src/plugins/auth.ts'
+import type { AuthUser } from '../src/plugins/auth.ts'
+import { type BuiltinRole as OrgRole, covers, defaultPermissions, cleanPermissions, CATALOG } from '../src/plugins/permissions.ts'
 import { type Actor, authorize, can, parseRules, rules, type Scope, scopeOf } from '../src/plugins/authz.ts'
 
 const ORG = 'org-1'
@@ -14,7 +15,7 @@ function actor(role: OrgRole | null, groups: string[] = [], orgId: string | null
     name: null,
     locale: null,
     roles: ['user'],
-    orgs: role ? { [ORG]: { role, groups } } : {},
+    orgs: role ? { [ORG]: { role, permissions: defaultPermissions(role), groups } } : {},
     client: 'zeima-desktop',
     expiresAt: Date.now() + 60_000,
   }
@@ -33,15 +34,26 @@ const MATRIX: Record<string, [owner: Scope | null, admin: Scope | null, manager:
   'absence.approve': [O, O, g, n],
   'project.read': [O, O, O, O],
   'project.write': [O, O, n, n],
+  'project.delete': [O, O, n, n],
   'cost_center.read': [O, O, O, O],
   'cost_center.write': [O, O, n, n],
+  'cost_center.delete': [O, O, n, n],
   'tag.write': [O, O, n, n],
+  'tag.delete': [O, O, n, n],
   'policy.write': [O, O, n, n],
+  'policy.delete': [O, O, n, n],
   'member.read': [O, O, g, o],
   'member.invite': [O, O, n, n],
   'member.manage': [O, O, n, n],
+  'member.remove': [O, O, n, n],
   'group.manage': [O, O, n, n],
-  'role.assign': [O, n, n, n],
+  'group.delete': [O, O, n, n],
+  'job.edit': [O, O, n, n],
+  'job.delete': [O, O, n, n],
+  'role.view': [O, O, n, n],
+  'role.edit': [O, O, n, n],
+  'role.assign': [O, O, n, n],
+  'role.delete': [O, O, n, n],
   'org.settings': [O, O, n, n],
   'addon.allowlist': [O, O, n, n],
   'audit.read': [O, O, n, n],
@@ -65,6 +77,43 @@ describe('permissions.yaml', () => {
     expect(() => parseRules('version: 1\nactions:\n  a: { boss: org }')).toThrow(/unknown role/)
     expect(() => parseRules('version: 1\nactions:\n  a: { owner: world }')).toThrow(/unknown scope/)
     expect(() => parseRules('actions: {}')).toThrow(/version: 1/)
+  })
+})
+
+describe('roles made of permissions', () => {
+  it('the catalog lists each grantable action once, with view, edit and delete', () => {
+    const actions = CATALOG.map((d) => d.action)
+    expect(new Set(actions).size).toBe(actions.length)
+    for (const kind of ['view', 'edit', 'delete']) expect(CATALOG.some((d) => d.kind === kind)).toBe(true)
+    // Everything in the default roles can be given to a role of one's own (except what everybody has).
+    for (const role of ROLES) for (const action of Object.keys(defaultPermissions(role))) {
+      if (action === 'entry.write' || action === 'absence.write') continue
+      expect(actions, action).toContain(action)
+    }
+  })
+
+  it('cleans permissions against the catalog', () => {
+    expect(cleanPermissions({ 'project.write': 'org', 'entry.read': 'group' })).toEqual({ 'project.write': 'org', 'entry.read': 'group' })
+    expect(() => cleanPermissions({ 'made.up': 'org' })).toThrow(/unknown permission/)
+    expect(() => cleanPermissions({ 'entry.read': 'world' })).toThrow(/unknown scope/)
+    expect(() => cleanPermissions({ 'project.write': 'own' })).toThrow(/cannot be/)
+  })
+
+  it('a role covers another only when it holds everything in it, at least as wide', () => {
+    const admin = defaultPermissions('admin')
+    expect(covers(admin, admin)).toBe(true)
+    expect(covers(admin, defaultPermissions('member'))).toBe(true)
+    // The manager reads the entries of the department; the admin only their own.
+    expect(covers(admin, defaultPermissions('manager'))).toBe(false)
+    expect(covers(defaultPermissions('owner'), admin)).toBe(true)
+    expect(covers(defaultPermissions('member'), admin)).toBe(false)
+  })
+
+  it('what a person holds decides, not their role name', () => {
+    const custom: Actor = { orgId: ORG, user: { ...actor('member').user, orgs: { [ORG]: { role: 'some-id', permissions: { 'project.write': 'org' }, groups: [] } } } }
+    expect(scopeOf(custom, 'project.write')).toBe('org')
+    expect(scopeOf(custom, 'project.delete')).toBeNull()
+    expect(scopeOf(custom, 'entry.write')).toBe('own')
   })
 })
 

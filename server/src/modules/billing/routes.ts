@@ -64,7 +64,7 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asyn
       const { orgId } = request.body
       const user = request.user!
       // Only an organization's owner buys for it.
-      if (orgId && user.orgs[orgId]?.role !== 'owner') throw new HttpProblem(403, 'forbidden', 'only an organization owner can buy for it')
+      if (orgId && !user.orgs[orgId]?.permissions['billing.manage']) throw new HttpProblem(403, 'forbidden', 'only an organization owner can buy for it')
       return { url: checkoutUrl(billing.storeUrl, plan, { userId: user.id, orgId, email: user.email }) }
     },
   )

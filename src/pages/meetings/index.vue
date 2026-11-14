@@ -98,7 +98,7 @@ const { sort, apply: sortOccurrences } = useSort<MeetingOccurrence>(null, {
 
 <template>
   <PageHeader :title="$t('nav.meetings')">
-    <Button v-if="workspaces.inOrg && workspaces.canEditShared" variant="outline" @click="roomsOpen = true"><DoorOpen /> {{ $t('meetings.rooms') }}</Button>
+    <Button v-if="workspaces.inOrg && workspaces.can('policy.write')" variant="outline" @click="roomsOpen = true"><DoorOpen /> {{ $t('meetings.rooms') }}</Button>
     <Button v-if="workspaces.inOrg" @click="openDialog(null)"><Plus /> {{ $t('meetings.new') }}</Button>
   </PageHeader>
 

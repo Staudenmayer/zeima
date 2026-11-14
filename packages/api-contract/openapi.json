@@ -373,6 +373,7 @@
                         "required": [
                           "id",
                           "role",
+                          "permissions",
                           "groups"
                         ],
                         "properties": {
@@ -380,32 +381,15 @@
                             "type": "string"
                           },
                           "role": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "owner"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "admin"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "manager"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "member"
-                                ]
-                              }
-                            ]
+                            "type": "string",
+                            "description": "A built-in role's name (`admin`) or the id of a role the organization made"
+                          },
+                          "permissions": {
+                            "type": "object",
+                            "description": "What the role allows: action → scope (`own`, `group`, `org`)",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
                           },
                           "groups": {
                             "type": "array",
@@ -598,32 +582,10 @@
                       "type": "string"
                     },
                     "role": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "owner"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "admin"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "manager"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "member"
-                          ]
-                        }
-                      ]
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z0-9-]+$"
                     },
                     "seats": {
                       "type": "object",
@@ -833,32 +795,10 @@
                         ]
                       },
                       "role": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "owner"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "admin"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "manager"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "member"
-                            ]
-                          }
-                        ]
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9-]+$"
                       },
                       "active": {
                         "type": "boolean"
@@ -929,32 +869,10 @@
                 "type": "object",
                 "properties": {
                   "role": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "owner"
-                        ]
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "admin"
-                        ]
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "manager"
-                        ]
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "member"
-                        ]
-                      }
-                    ]
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9-]+$"
                   },
                   "active": {
                     "type": "boolean"
@@ -1031,32 +949,10 @@
                       ]
                     },
                     "role": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "owner"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "admin"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "manager"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "member"
-                          ]
-                        }
-                      ]
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z0-9-]+$"
                     },
                     "active": {
                       "type": "boolean"
@@ -1294,26 +1190,10 @@
                         "type": "string"
                       },
                       "role": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "admin"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "manager"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "member"
-                            ]
-                          }
-                        ]
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9-]+$"
                       },
                       "groupIds": {
                         "type": "array",
@@ -1397,26 +1277,10 @@
                     "maxLength": 254
                   },
                   "role": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "enum": [
-                          "admin"
-                        ]
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "manager"
-                        ]
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          "member"
-                        ]
-                      }
-                    ]
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9-]+$"
                   },
                   "groupIds": {
                     "type": "array",
@@ -1482,26 +1346,10 @@
                       "type": "string"
                     },
                     "role": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "admin"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "manager"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "member"
-                          ]
-                        }
-                      ]
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z0-9-]+$"
                     },
                     "groupIds": {
                       "type": "array",
@@ -1679,26 +1527,10 @@
                       "type": "string"
                     },
                     "role": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "admin"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "manager"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "member"
-                          ]
-                        }
-                      ]
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z0-9-]+$"
                     },
                     "groupIds": {
                       "type": "array",
@@ -3337,6 +3169,652 @@
             }
           },
           "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/roles": {
+      "get": {
+        "summary": "The roles of the organization and the permissions they are made of",
+        "tags": [
+          "organizations"
+        ],
+        "description": "Every member may ask for the names. What each role allows is shown to those who view roles, and each person gets their own.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "roles",
+                    "catalog"
+                  ],
+                  "properties": {
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "key",
+                          "name",
+                          "description",
+                          "builtin",
+                          "locked",
+                          "people",
+                          "permissions"
+                        ],
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "description": "A built-in role's name (`admin`) or the id of one the organization made"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "builtin": {
+                            "type": "boolean"
+                          },
+                          "locked": {
+                            "type": "boolean",
+                            "description": "The owner role cannot be changed"
+                          },
+                          "people": {
+                            "type": "integer",
+                            "description": "How many members have it"
+                          },
+                          "permissions": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "description": "Action → the widest scope it is allowed for (`own`, `group` or `org`; an action missing is denied)",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "catalog": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "action",
+                          "resource",
+                          "kind",
+                          "scopes"
+                        ],
+                        "properties": {
+                          "action": {
+                            "type": "string"
+                          },
+                          "resource": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "view"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "edit"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "delete"
+                                ]
+                              }
+                            ]
+                          },
+                          "scopes": {
+                            "type": "array",
+                            "items": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "own"
+                                  ]
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "group"
+                                  ]
+                                },
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "org"
+                                  ]
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Creates a role with the given permissions",
+        "tags": [
+          "organizations"
+        ],
+        "description": "Only permissions the caller holds themselves can be given.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "permissions"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "description": "Action → the widest scope it is allowed for (`own`, `group` or `org`; an action missing is denied)",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "name",
+                    "description",
+                    "builtin",
+                    "locked",
+                    "people",
+                    "permissions"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "description": "A built-in role's name (`admin`) or the id of one the organization made"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "builtin": {
+                      "type": "boolean"
+                    },
+                    "locked": {
+                      "type": "boolean",
+                      "description": "The owner role cannot be changed"
+                    },
+                    "people": {
+                      "type": "integer",
+                      "description": "How many members have it"
+                    },
+                    "permissions": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "description": "Action → the widest scope it is allowed for (`own`, `group` or `org`; an action missing is denied)",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/roles/{roleKey}": {
+      "patch": {
+        "summary": "Changes a role",
+        "tags": [
+          "organizations"
+        ],
+        "description": "The owner role is fixed, and nobody changes the role they hold themselves. The built-in roles keep their names.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "permissions": {
+                    "type": "object",
+                    "description": "Action → the widest scope it is allowed for (`own`, `group` or `org`; an action missing is denied)",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "minProperties": 1
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "in": "path",
+            "name": "roleKey",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "name",
+                    "description",
+                    "builtin",
+                    "locked",
+                    "people",
+                    "permissions"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "description": "A built-in role's name (`admin`) or the id of one the organization made"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "builtin": {
+                      "type": "boolean"
+                    },
+                    "locked": {
+                      "type": "boolean",
+                      "description": "The owner role cannot be changed"
+                    },
+                    "people": {
+                      "type": "integer",
+                      "description": "How many members have it"
+                    },
+                    "permissions": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "description": "Action → the widest scope it is allowed for (`own`, `group` or `org`; an action missing is denied)",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Deletes a role the organization made; the people who had it become members",
+        "tags": [
+          "organizations"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9-]+$"
+            },
+            "in": "path",
+            "name": "roleKey",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
             "description": "Problem details (RFC 9457)",
             "content": {
               "application/problem+json": {

@@ -127,11 +127,11 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
 
 <template>
   <PageHeader :title="$t('nav.costCenters')">
-    <Button v-if="workspaces.canEditShared" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
+    <Button v-if="workspaces.can('cost_center.write')" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
   </PageHeader>
 
   <EmptyState v-if="costCenters.all.length === 0" :icon="Landmark" :text="$t('costCenters.empty')">
-    <Button v-if="workspaces.canEditShared" variant="outline" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
+    <Button v-if="workspaces.can('cost_center.write')" variant="outline" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
   </EmptyState>
 
   <div v-else class="grid gap-6">
@@ -169,7 +169,7 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
             :key="cc.id"
             class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30"
             :class="cc.active ? '' : 'text-muted-foreground'"
-            @click="workspaces.canEditShared && open(cc)"
+            @click="workspaces.can('cost_center.write') && open(cc)"
           >
             <td class="whitespace-nowrap px-3 py-1.5 font-mono text-xs" :style="{ paddingLeft: `calc(0.75rem + ${sort.key ? 0 : depth}rem)` }">{{ cc.code }}</td>
             <td class="max-w-0 w-full truncate px-3 py-1.5">{{ cc.name }}</td>
@@ -180,8 +180,8 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
             </td>
             <td class="px-1 py-0.5" @click.stop>
               <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(cc)"><Pencil /></Button>
-                <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(cc)"><Trash2 /></Button>
+                <Button v-if="workspaces.can('cost_center.write')" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(cc)"><Pencil /></Button>
+                <Button v-if="workspaces.can('cost_center.delete')" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(cc)"><Trash2 /></Button>
               </div>
             </td>
           </tr>

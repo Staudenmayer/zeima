@@ -1,7 +1,10 @@
 # Who may do what inside an organization (SPEC §5.9).
 #
 # `can(actor, action, resource)` looks up the actor's role in the active org
-# and gets a scope. No entry means denied.
+# and gets a scope. No entry means denied. The table below is the *default*
+# of the four built-in roles; an organization's admins can change the admin,
+# manager and member roles and add roles of their own (permissions per
+# resource: view, edit, delete), stored in the API's `org_role` table.
 #
 #   own    the resource belongs to the actor
 #   group  the resource's owner shares a department group with the actor
@@ -25,17 +28,30 @@ actions:
   # Shared org data
   project.read:      { owner: org, admin: org, manager: org, member: org }
   project.write:     { owner: org, admin: org }
+  project.delete:    { owner: org, admin: org }
   cost_center.read:  { owner: org, admin: org, manager: org, member: org }
   cost_center.write: { owner: org, admin: org }
+  cost_center.delete: { owner: org, admin: org }
   tag.write:         { owner: org, admin: org }
+  tag.delete:        { owner: org, admin: org }
   policy.write:      { owner: org, admin: org }
+  policy.delete:     { owner: org, admin: org }
 
   # People
   member.read:       { owner: org, admin: org, manager: group, member: own }
   member.invite:     { owner: org, admin: org }
   member.manage:     { owner: org, admin: org }
+  member.remove:     { owner: org, admin: org }
   group.manage:      { owner: org, admin: org }
-  role.assign:       { owner: org }
+  group.delete:      { owner: org, admin: org }
+  job.edit:          { owner: org, admin: org }
+  job.delete:        { owner: org, admin: org }
+
+  # Roles: an admin defines them and gives them out, but only grants what they hold themselves
+  role.view:         { owner: org, admin: org }
+  role.edit:         { owner: org, admin: org }
+  role.assign:       { owner: org, admin: org }
+  role.delete:       { owner: org, admin: org }
 
   # Organization
   org.settings:      { owner: org, admin: org }

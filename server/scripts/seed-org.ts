@@ -192,6 +192,18 @@ const HAS: Record<string, string> = {
   for (const [name, description] of JOBS) {
     if (!have.some((j) => j.name === name)) await api('ada', 'POST', '/jobs', { name, description })
   }
+  // A role of the organization's own: projects and cost centers, nothing else beyond what a member has.
+  const roles = (await (await api('ada', 'GET', '/roles')).json()) as { roles: { key: string; name: string }[] }
+  let lead = roles.roles.find((r) => r.name === 'Project lead')?.key
+  if (!lead) {
+    const made = await api('ada', 'POST', '/roles', {
+      name: 'Project lead',
+      description: 'Looks after projects and cost centers.',
+      permissions: { 'project.read': 'org', 'project.write': 'org', 'project.delete': 'org', 'cost_center.read': 'org', 'cost_center.write': 'org', 'member.read': 'org' },
+    })
+    lead = ((await made.json()) as { key: string }).key
+  }
+  await api('ada', 'PATCH', `/members/${ids.get('linus')}`, { role: lead })
   const all = (await (await api('ada', 'GET', '/jobs')).json()) as { id: string; name: string }[]
   for (const p of PEOPLE) {
     const job = all.find((j) => j.name === HAS[p.key])

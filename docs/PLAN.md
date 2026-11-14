@@ -191,6 +191,8 @@ What 2.0 deliberately does not include, and why:
 - [x] **Meetings visible to colleagues as "busy" only.** Every member can add people in the timesheet; the server's free/busy gives meetings and approved absences as Busy / Absent blocks, never the title, note or activity. (The server already answered this; the app now shows it in the day, week and table views.)
 - [x] **Meeting rooms with booking conflicts.** Admins keep a list of rooms (Meetings → Rooms); a meeting picks one; the server refuses overlapping bookings, repeats included, and the dialog marks rooms booked at the chosen time. Open: a booking refused after the fact (two people at once) is dropped silently on the device that sent it, and the Organization page has no rooms tab yet (they are kept from the Meetings page).
 
+**Roles made of permissions** (done in the repository): the four fixed roles are now defaults of a permission set (view, edit, delete per resource, with own/department/everyone reach for views); admins change them and create roles of their own, with the rule that nobody grants what they do not hold. Open: the click prototype and a per-role table of what the desktop hides for the people with only some permissions (the server already refuses everything).
+
 **Before tagging 2.0.0:** run `deploy/e2e/org-smoke.mjs` and `deploy/e2e/smoke.mjs` against the real stack; try two apps (Linux plus Windows or macOS) on one organization by hand: invite, switch workspace, track, request and approve an absence, create a meeting; fix the updater key password secret; then `node scripts/version.mjs set 2.0.0`, commit and tag (the repository is still at the old version).
 
 ---

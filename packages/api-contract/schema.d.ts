@@ -182,7 +182,12 @@ export interface paths {
                             roles: string[];
                             orgs: {
                                 id: string;
-                                role: "owner" | "admin" | "manager" | "member";
+                                /** @description A built-in role's name (`admin`) or the id of a role the organization made */
+                                role: string;
+                                /** @description What the role allows: action → scope (`own`, `group`, `org`) */
+                                permissions: {
+                                    [key: string]: string;
+                                };
                                 /** @description Department group paths */
                                 groups: string[];
                             }[];
@@ -331,7 +336,7 @@ export interface paths {
                         "application/json": {
                             id: string;
                             name: string;
-                            role: "owner" | "admin" | "manager" | "member";
+                            role: string;
                             seats: {
                                 /** @description From the plan; `null` is unlimited */
                                 limit: number | null;
@@ -474,7 +479,7 @@ export interface paths {
                             id: string;
                             email: string | null;
                             name: string | null;
-                            role: "owner" | "admin" | "manager" | "member";
+                            role: string;
                             active: boolean;
                             /** @description Unix ms */
                             lastSeenAt: number | null;
@@ -623,7 +628,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        role?: "owner" | "admin" | "manager" | "member";
+                        role?: string;
                         active?: boolean;
                     };
                 };
@@ -640,7 +645,7 @@ export interface paths {
                             id: string;
                             email: string | null;
                             name: string | null;
-                            role: "owner" | "admin" | "manager" | "member";
+                            role: string;
                             active: boolean;
                             /** @description Unix ms */
                             lastSeenAt: number | null;
@@ -742,7 +747,7 @@ export interface paths {
                         "application/json": {
                             id: string;
                             email: string;
-                            role: "admin" | "manager" | "member";
+                            role: string;
                             /** @description Departments the person is put into when they join */
                             groupIds: string[];
                             /** @description The job description they get when they join */
@@ -800,7 +805,7 @@ export interface paths {
                     "application/json": {
                         /** Format: email */
                         email: string;
-                        role?: "admin" | "manager" | "member";
+                        role?: string;
                         /** @description Departments to put the person into when they join */
                         groupIds?: string[];
                         jobId?: string | null;
@@ -817,7 +822,7 @@ export interface paths {
                         "application/json": {
                             id: string;
                             email: string;
-                            role: "admin" | "manager" | "member";
+                            role: string;
                             /** @description Departments the person is put into when they join */
                             groupIds: string[];
                             /** @description The job description they get when they join */
@@ -991,7 +996,7 @@ export interface paths {
                         "application/json": {
                             id: string;
                             email: string;
-                            role: "admin" | "manager" | "member";
+                            role: string;
                             /** @description Departments the person is put into when they join */
                             groupIds: string[];
                             /** @description The job description they get when they join */
@@ -2100,6 +2105,393 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{orgId}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The roles of the organization and the permissions they are made of
+         * @description Every member may ask for the names. What each role allows is shown to those who view roles, and each person gets their own.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            roles: {
+                                /** @description A built-in role's name (`admin`) or the id of one the organization made */
+                                key: string;
+                                name: string;
+                                description: string;
+                                builtin: boolean;
+                                /** @description The owner role cannot be changed */
+                                locked: boolean;
+                                /** @description How many members have it */
+                                people: number;
+                                permissions: {
+                                    [key: string]: string;
+                                } | null;
+                            }[];
+                            catalog: {
+                                action: string;
+                                resource: string;
+                                kind: "view" | "edit" | "delete";
+                                scopes: ("own" | "group" | "org")[];
+                            }[];
+                        };
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Creates a role with the given permissions
+         * @description Only permissions the caller holds themselves can be given.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        description?: string;
+                        /** @description Action → the widest scope it is allowed for (`own`, `group` or `org`; an action missing is denied) */
+                        permissions: {
+                            [key: string]: string;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description A built-in role's name (`admin`) or the id of one the organization made */
+                            key: string;
+                            name: string;
+                            description: string;
+                            builtin: boolean;
+                            /** @description The owner role cannot be changed */
+                            locked: boolean;
+                            /** @description How many members have it */
+                            people: number;
+                            permissions: {
+                                [key: string]: string;
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{orgId}/roles/{roleKey}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Deletes a role the organization made; the people who had it become members */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    orgId: string;
+                    roleKey: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Changes a role
+         * @description The owner role is fixed, and nobody changes the role they hold themselves. The built-in roles keep their names.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    orgId: string;
+                    roleKey: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name?: string;
+                        description?: string;
+                        /** @description Action → the widest scope it is allowed for (`own`, `group` or `org`; an action missing is denied) */
+                        permissions?: {
+                            [key: string]: string;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description A built-in role's name (`admin`) or the id of one the organization made */
+                            key: string;
+                            name: string;
+                            description: string;
+                            builtin: boolean;
+                            /** @description The owner role cannot be changed */
+                            locked: boolean;
+                            /** @description How many members have it */
+                            people: number;
+                            permissions: {
+                                [key: string]: string;
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
         trace?: never;
     };
     "/v1/orgs/{orgId}/presence": {

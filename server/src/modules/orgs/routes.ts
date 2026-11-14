@@ -8,21 +8,38 @@ import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { Type } from 'typebox'
 import { type Db, schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
-import { ORG_ROLES, type OrgRole, SECURITY } from '../../plugins/auth.ts'
-import { type Actor, authorize, scopeOf } from '../../plugins/authz.ts'
+import { SECURITY } from '../../plugins/auth.ts'
+import { CATALOG, cleanPermissions, covers, isBuiltinRole, type Permissions, SCOPES } from '../../plugins/permissions.ts'
+import { type Actor, authorize, can, scopeOf } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
 import { PRESENCE_STATES } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { reconcileOrganization } from './reconcile.ts'
+import { forgetRoles, loadRoles, roleOf } from './roles.ts'
 import { freeBusy } from '../../meetings/freebusy.ts'
 import { roomBookings } from '../../meetings/rooms.ts'
 import { audit, auditEntries, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
 
-const Role = Type.Union(ORG_ROLES.map((r) => Type.Literal(r)))
-const InviteRole = Type.Union([Type.Literal('admin'), Type.Literal('manager'), Type.Literal('member')])
+/** A role: a built-in one's name (`admin`) or the id of one the organization made. */
+const Role = Type.String({ minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9-]+$' })
+const InviteRole = Role
 const OrgParams = Type.Object({ orgId: Type.String({ format: 'uuid' }) })
 const MemberParams = Type.Object({ orgId: Type.String({ format: 'uuid' }), userId: Type.String({ format: 'uuid' }) })
 const Nullable = <T extends ReturnType<typeof Type.String>>(t: T) => Type.Union([t, Type.Null()])
+
+/**
+ * Whether the actor may give `role` to someone: it must exist, only an owner
+ * makes owners, and nobody hands out permissions they do not hold themselves.
+ */
+async function mayGiveRole(db: Db, actor: Actor, orgId: string, role: string) {
+  const target = await roleOf(db, orgId, role)
+  if (!target) throw new HttpProblem(404, 'not_found', 'no such role')
+  const mine = actor.user.orgs[orgId]!
+  if (role === 'owner' && mine.role !== 'owner') throw new HttpProblem(403, 'forbidden', 'only an owner can make owners')
+  if (!covers(mine.permissions, target.permissions)) {
+    throw new HttpProblem(403, 'forbidden', 'this role has permissions you do not have yourself')
+  }
+}
 
 /** The departments and the job description must belong to the organization. */
 async function checkDepartmentsAndJob(db: Db, orgId: string, groupIds: readonly string[], jobId: string | null) {
@@ -210,6 +227,12 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
 
       if (role !== undefined && role !== target.role) {
         authorize(actor, 'role.assign', { orgId })
+        await mayGiveRole(db, actor, orgId, role)
+        // Nor may someone take a role from a person who holds more than they do.
+        const current = await roleOf(db, orgId, target.role)
+        if (current && !covers(actor.user.orgs[orgId]!.permissions, current.permissions)) {
+          throw new HttpProblem(403, 'forbidden', 'this person has permissions you do not have')
+        }
         if (target.role === 'owner' && (await ownerCount(db, orgId)) <= 1) {
           throw new HttpProblem(409, 'last_owner', 'an organization needs at least one owner; make someone else an owner first')
         }
@@ -256,8 +279,8 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const db = database()
       const target = await memberOf(db, orgId, userId)
       if (!target) throw new HttpProblem(404, 'not_found', 'not a member of this organization')
-      // People may leave an organization themselves; removing others takes member.manage.
-      if (userId !== actor.user.id) authorize(actor, 'member.manage', { orgId })
+      // People may leave an organization themselves; removing others takes member.remove.
+      if (userId !== actor.user.id) authorize(actor, 'member.remove', { orgId })
       if (target.role === 'owner') {
         if (userId !== actor.user.id && actor.user.orgs[orgId]!.role !== 'owner') {
           throw new HttpProblem(403, 'forbidden', 'only an owner can remove an owner')
@@ -322,6 +345,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const role = request.body.role ?? 'member'
       if (role !== 'member') authorize(actor, 'role.assign', { orgId })
       const db = database()
+      await mayGiveRole(db, actor, orgId, role)
       const kc = keycloak()
       const email = request.body.email.trim().toLowerCase()
 
@@ -579,7 +603,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request, reply) => {
       const { orgId, groupId } = request.params
       const actor = actorIn({ user: request.user! }, orgId)
-      authorize(actor, 'group.manage', { orgId })
+      authorize(actor, 'group.delete', { orgId })
       const db = database()
       const [group] = await db.select().from(schema.kcGroup).where(and(eq(schema.kcGroup.id, groupId), eq(schema.kcGroup.orgId, orgId)))
       if (!group) throw new HttpProblem(404, 'not_found', 'department not found')
@@ -707,7 +731,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
     async (request, reply) => {
       const { orgId } = request.params
-      authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
+      authorize(actorIn({ user: request.user! }, orgId), 'job.edit', { orgId })
       const id = randomUUID()
       try {
         await database().insert(schema.orgJob).values({ id, orgId, name: request.body.name.trim(), description: request.body.description?.trim() ?? '' })
@@ -734,7 +758,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
     async (request) => {
       const { orgId, jobId } = request.params
-      authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
+      authorize(actorIn({ user: request.user! }, orgId), 'job.edit', { orgId })
       const db = database()
       const set: { name?: string; description?: string } = {}
       if (request.body.name !== undefined) set.name = request.body.name.trim()
@@ -763,7 +787,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
     async (request, reply) => {
       const { orgId, jobId } = request.params
-      authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
+      authorize(actorIn({ user: request.user! }, orgId), 'job.delete', { orgId })
       const removed = await database().delete(schema.orgJob).where(and(eq(schema.orgJob.id, jobId), eq(schema.orgJob.orgId, orgId))).returning({ id: schema.orgJob.id })
       if (removed.length === 0) throw new HttpProblem(404, 'not_found', 'no such job description')
       return reply.code(204).send(null)
@@ -844,6 +868,199 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         if (!job) throw new HttpProblem(404, 'not_found', 'no such job description')
       }
       await db.update(schema.kcOrgMember).set({ jobId }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
+      return reply.code(204).send(null)
+    },
+  )
+
+  // ------------------------------------------------------------------ roles
+  const RoleParams = Type.Object({ orgId: Type.String({ format: 'uuid' }), roleKey: Role })
+  const PermissionMap = Type.Record(Type.String(), Type.String(), {
+    description: 'Action → the widest scope it is allowed for (`own`, `group` or `org`; an action missing is denied)',
+  })
+  const RoleOut = Type.Object({
+    key: Type.String({ description: 'A built-in role\'s name (`admin`) or the id of one the organization made' }),
+    name: Type.String(),
+    description: Type.String(),
+    builtin: Type.Boolean(),
+    locked: Type.Boolean({ description: 'The owner role cannot be changed' }),
+    people: Type.Integer({ description: 'How many members have it' }),
+    permissions: Type.Union([PermissionMap, Type.Null()]),
+  })
+  const CatalogEntry = Type.Object({
+    action: Type.String(),
+    resource: Type.String(),
+    kind: Type.Union([Type.Literal('view'), Type.Literal('edit'), Type.Literal('delete')]),
+    scopes: Type.Array(Type.Union(SCOPES.map((x) => Type.Literal(x)))),
+  })
+  const RoleBody = Type.Object({
+    name: Type.String({ minLength: 1, maxLength: 60 }),
+    description: Type.Optional(Type.String({ maxLength: 300 })),
+    permissions: PermissionMap,
+  })
+
+  async function rolesOut(orgId: string, actor: Actor) {
+    const db = database()
+    const counts = await db
+      .select({ role: schema.kcOrgMember.role, n: sql<number>`count(*)::int` })
+      .from(schema.kcOrgMember)
+      .where(eq(schema.kcOrgMember.orgId, orgId))
+      .groupBy(schema.kcOrgMember.role)
+    const people = new Map(counts.map((c) => [c.role, c.n]))
+    const seeAll = can(actor, 'role.view', { orgId })
+    return (await loadRoles(db, orgId)).map((r) => ({
+      key: r.key,
+      name: r.name,
+      description: r.description,
+      builtin: r.builtin,
+      locked: r.locked,
+      people: people.get(r.key) ?? 0,
+      // What a role allows is for those who look after roles, and for their own.
+      permissions: seeAll || actor.user.orgs[orgId]!.role === r.key ? r.permissions : null,
+    }))
+  }
+
+  app.get(
+    '/orgs/:orgId/roles',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'The roles of the organization and the permissions they are made of',
+        description: 'Every member may ask for the names. What each role allows is shown to those who view roles, and each person gets their own.',
+        security: SECURITY,
+        params: OrgParams,
+        response: { 200: Type.Object({ roles: Type.Array(RoleOut), catalog: Type.Array(CatalogEntry) }), ...problems(401, 403, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      return { roles: await rolesOut(orgId, actor), catalog: CATALOG }
+    },
+  )
+
+  /** A role's permissions may not exceed the giver's own (nobody grants more than they hold). */
+  const checkGrant = (actor: Actor, orgId: string, raw: Record<string, unknown>): Permissions => {
+    let permissions: Permissions
+    try {
+      permissions = cleanPermissions(raw)
+    } catch (err) {
+      throw new HttpProblem(400, 'bad_request', (err as Error).message)
+    }
+    if (!covers(actor.user.orgs[orgId]!.permissions, permissions)) {
+      throw new HttpProblem(403, 'forbidden', 'a role cannot have permissions you do not have yourself')
+    }
+    return permissions
+  }
+
+  app.post(
+    '/orgs/:orgId/roles',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Creates a role with the given permissions',
+        description: 'Only permissions the caller holds themselves can be given.',
+        security: SECURITY,
+        params: OrgParams,
+        body: RoleBody,
+        response: { 201: RoleOut, ...problems(400, 401, 403, 409, 502, 503) },
+      },
+    },
+    async (request, reply) => {
+      const { orgId } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      authorize(actor, 'role.edit', { orgId })
+      const db = database()
+      const permissions = checkGrant(actor, orgId, request.body.permissions)
+      const name = request.body.name.trim()
+      if ((await loadRoles(db, orgId)).some((r) => r.name.toLowerCase() === name.toLowerCase())) {
+        throw new HttpProblem(409, 'conflict', 'a role with this name exists')
+      }
+      const id = randomUUID()
+      await keycloak().createRole(orgId, id)
+      await db.insert(schema.orgRole).values({ id, orgId, key: null, name, description: request.body.description?.trim() ?? '', permissions })
+      forgetRoles(orgId)
+      await audit(db, { orgId, actorId: actor.user.id, action: 'role.create', target: name })
+      return reply.code(201).send((await rolesOut(orgId, actor)).find((r) => r.key === id)!)
+    },
+  )
+
+  app.patch(
+    '/orgs/:orgId/roles/:roleKey',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Changes a role',
+        description: 'The owner role is fixed, and nobody changes the role they hold themselves. The built-in roles keep their names.',
+        security: SECURITY,
+        params: RoleParams,
+        body: Type.Partial(RoleBody, { minProperties: 1 }),
+        response: { 200: RoleOut, ...problems(400, 401, 403, 404, 409, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId, roleKey } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      authorize(actor, 'role.edit', { orgId })
+      const db = database()
+      const role = await roleOf(db, orgId, roleKey)
+      if (!role) throw new HttpProblem(404, 'not_found', 'no such role')
+      if (role.locked) throw new HttpProblem(403, 'forbidden', 'the owner role cannot be changed')
+      if (actor.user.orgs[orgId]!.role === roleKey) throw new HttpProblem(403, 'forbidden', 'you cannot change the role you have yourself')
+      const permissions = request.body.permissions ? checkGrant(actor, orgId, request.body.permissions) : role.permissions
+      // Changing what a role allows takes in everyone who has it: the changer must cover what it allowed before too.
+      if (!covers(actor.user.orgs[orgId]!.permissions, role.permissions)) {
+        throw new HttpProblem(403, 'forbidden', 'this role has permissions you do not have yourself')
+      }
+      const name = role.builtin ? role.name : (request.body.name?.trim() ?? role.name)
+      if (!role.builtin && name.toLowerCase() !== role.name.toLowerCase() && (await loadRoles(db, orgId)).some((r) => r.name.toLowerCase() === name.toLowerCase())) {
+        throw new HttpProblem(409, 'conflict', 'a role with this name exists')
+      }
+      const description = request.body.description?.trim() ?? role.description
+      if (role.builtin) {
+        await db
+          .insert(schema.orgRole)
+          .values({ id: randomUUID(), orgId, key: roleKey, name, description, permissions })
+          .onConflictDoUpdate({ target: [schema.orgRole.orgId, schema.orgRole.key], targetWhere: sql`${schema.orgRole.key} IS NOT NULL`, set: { description, permissions } })
+      } else {
+        await db.update(schema.orgRole).set({ name, description, permissions }).where(and(eq(schema.orgRole.id, roleKey), eq(schema.orgRole.orgId, orgId)))
+      }
+      forgetRoles(orgId)
+      await audit(db, { orgId, actorId: actor.user.id, action: 'role.update', target: name })
+      return (await rolesOut(orgId, actor)).find((r) => r.key === roleKey)!
+    },
+  )
+
+  app.delete(
+    '/orgs/:orgId/roles/:roleKey',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Deletes a role the organization made; the people who had it become members',
+        security: SECURITY,
+        params: RoleParams,
+        response: { 204: Type.Null(), ...problems(401, 403, 404, 409, 502, 503) },
+      },
+    },
+    async (request, reply) => {
+      const { orgId, roleKey } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      authorize(actor, 'role.delete', { orgId })
+      const db = database()
+      const role = await roleOf(db, orgId, roleKey)
+      if (!role) throw new HttpProblem(404, 'not_found', 'no such role')
+      if (isBuiltinRole(roleKey)) throw new HttpProblem(409, 'builtin', 'the built-in roles cannot be deleted')
+      if (actor.user.orgs[orgId]!.role === roleKey) throw new HttpProblem(403, 'forbidden', 'you cannot delete the role you have yourself')
+      const holders = await db
+        .select({ userId: schema.kcOrgMember.userId })
+        .from(schema.kcOrgMember)
+        .where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.role, roleKey)))
+      const kc = keycloak()
+      for (const h of holders) await kc.setRole(orgId, h.userId, 'member')
+      await db.update(schema.kcOrgMember).set({ role: 'member' }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.role, roleKey)))
+      await kc.deleteRole(orgId, roleKey)
+      await db.delete(schema.orgRole).where(and(eq(schema.orgRole.id, roleKey), eq(schema.orgRole.orgId, orgId)))
+      forgetRoles(orgId)
+      await audit(db, { orgId, actorId: actor.user.id, action: 'role.delete', target: role.name })
       return reply.code(204).send(null)
     },
   )
@@ -1036,4 +1253,3 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
   )
 }
 
-export type { OrgRole }

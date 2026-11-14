@@ -8,8 +8,7 @@
 //   /orgs/<orgId>/groups/<…>           departments
 
 import type { Config } from '../config.ts'
-import type { OrgRole } from '../plugins/auth.ts'
-import { ORG_ROLES } from '../plugins/auth.ts'
+import { ORG_ROLES, type RoleKey } from '../plugins/permissions.ts'
 import { HttpProblem } from '../plugins/errors.ts'
 
 export interface KeycloakAdmin {
@@ -21,7 +20,11 @@ export interface KeycloakAdmin {
   /** Removes the user from the organization and from all its groups. */
   removeMember(orgId: string, userId: string): Promise<void>
   /** Puts the user in the group of `role` and out of the other role groups. */
-  setRole(orgId: string, userId: string, role: OrgRole): Promise<void>
+  setRole(orgId: string, userId: string, role: RoleKey): Promise<void>
+  /** Makes the Keycloak group of a role the organization defined (named by the role's id). */
+  createRole(orgId: string, key: RoleKey): Promise<void>
+  /** Removes the group of a role the organization defined. */
+  deleteRole(orgId: string, key: RoleKey): Promise<void>
   /** Sends an invitation by email; the invitee joins the organization when they sign up. */
   invite(orgId: string, email: string): Promise<void>
   /** Disables (or re-enables) the user's account; their data stays. */
@@ -33,7 +36,7 @@ export interface KeycloakAdmin {
   /** The departments under `/orgs/<orgId>/groups`, each with its members; paths are full. */
   listDepartments(orgId: string): Promise<KcDepartment[]>
   /** The people in each role group of the organization. */
-  listRoleMembers(orgId: string): Promise<Record<OrgRole, string[]>>
+  listRoleMembers(orgId: string): Promise<Record<RoleKey, string[]>>
   deleteGroup(groupId: string): Promise<void>
   /** Renames a department (its subgroups follow). */
   renameGroup(groupId: string, name: string): Promise<void>
@@ -185,15 +188,32 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
     }
   }
 
-  async setRole(orgId: string, userId: string, role: OrgRole): Promise<void> {
-    for (const other of ORG_ROLES) {
-      const id = await this.groupId(['orgs', orgId, 'roles', other], other === role)
-      if (!id) continue
-      await this.call(other === role ? 'PUT' : 'DELETE', `/users/${userId}/groups/${id}`).catch((err: unknown) => {
-        if (other !== role && err instanceof HttpProblem && err.status === 404) return
+  /** The role groups of the organization by role key. */
+  private async roleGroups(orgId: string): Promise<{ key: string; id: string }[]> {
+    const parent = await this.groupId(['orgs', orgId, 'roles'], false)
+    if (!parent) return []
+    return (await this.all<GroupRep>(`/groups/${parent}/children?briefRepresentation=true`)).map((g) => ({ key: g.name, id: g.id }))
+  }
+
+  async setRole(orgId: string, userId: string, role: RoleKey): Promise<void> {
+    const target = await this.groupId(['orgs', orgId, 'roles', role], true)
+    for (const other of await this.roleGroups(orgId)) {
+      if (other.key === role) continue
+      await this.call('DELETE', `/users/${userId}/groups/${other.id}`).catch((err: unknown) => {
+        if (err instanceof HttpProblem && err.status === 404) return
         throw err
       })
     }
+    await this.call('PUT', `/users/${userId}/groups/${target}`)
+  }
+
+  async createRole(orgId: string, key: RoleKey): Promise<void> {
+    await this.groupId(['orgs', orgId, 'roles', key], true)
+  }
+
+  async deleteRole(orgId: string, key: RoleKey): Promise<void> {
+    const id = await this.groupId(['orgs', orgId, 'roles', key], false)
+    if (id) await this.call('DELETE', `/groups/${id}`)
   }
 
   async invite(orgId: string, email: string): Promise<void> {
@@ -245,12 +265,9 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
     return out
   }
 
-  async listRoleMembers(orgId: string): Promise<Record<OrgRole, string[]>> {
-    const out = { owner: [], admin: [], manager: [], member: [] } as Record<OrgRole, string[]>
-    for (const role of ORG_ROLES) {
-      const id = await this.groupId(['orgs', orgId, 'roles', role], false)
-      if (id) out[role] = (await this.all<{ id: string }>(`/groups/${id}/members`)).map((m) => m.id)
-    }
+  async listRoleMembers(orgId: string): Promise<Record<RoleKey, string[]>> {
+    const out: Record<RoleKey, string[]> = { owner: [], admin: [], manager: [], member: [] }
+    for (const { key, id } of await this.roleGroups(orgId)) out[key] = (await this.all<{ id: string }>(`/groups/${id}/members`)).map((m) => m.id)
     return out
   }
 

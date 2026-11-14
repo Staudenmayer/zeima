@@ -236,13 +236,16 @@ describe.skipIf(!(await reachable()))('organizations', () => {
   })
 
   describe('invitations', () => {
-    it('invites with a role; only owners may invite admins and managers', async () => {
+    it('invites with a role, but only one whose permissions the inviter holds', async () => {
       await reset()
       const ok = await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'New@Example.com' })
       expect(ok.statusCode).toBe(201)
       expect(ok.json()).toMatchObject({ email: 'new@example.com', role: 'member' })
       expect(kc.calls).toEqual([`invite ${ORG} new@example.com`])
-      expect((await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'boss@example.com', role: 'admin' })).statusCode).toBe(403)
+      // An admin may hand out the admin role, not the manager role (it reads more entries) and not the owner's.
+      expect((await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'boss@example.com', role: 'manager' })).statusCode).toBe(403)
+      expect((await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'boss@example.com', role: 'owner' })).statusCode).toBe(403)
+      expect((await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'boss@example.com', role: 'nonsense' })).statusCode).toBe(404)
       expect((await call('POST', `/v1/orgs/${ORG}/invitations`, OWNER, 'owner', { email: 'boss@example.com', role: 'admin' })).statusCode).toBe(201)
       expect((await call('POST', `/v1/orgs/${ORG}/invitations`, MEMBER, 'member', { email: 'x@example.com' })).statusCode).toBe(403)
       const list = await call('GET', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin')
@@ -532,6 +535,89 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect((await call('GET', `/v1/orgs/${ORG}/directory`, OTHER, null)).statusCode).toBe(403)
       await db.db.update(schema.kcUser).set({ active: false }).where(eq(schema.kcUser.id, MEMBER))
       expect((await dir(OWNER, 'owner')).some((r) => r.id === MEMBER)).toBe(false)
+    })
+  })
+
+  describe('roles made of permissions', () => {
+    const roles = (uid: string, role: string | null, method: 'GET' | 'POST', payload?: object) => call(method, `/v1/orgs/${ORG}/roles`, uid, role, payload)
+    const editor = { 'role.view': 'org', 'role.edit': 'org', 'role.assign': 'org', 'role.delete': 'org', 'member.read': 'org', 'project.write': 'org' }
+
+    it('are created by admins with only permissions the admin holds', async () => {
+      await reset()
+      // Everyone sees the names; what they allow only those who view roles.
+      const asMember = (await roles(MEMBER, 'member', 'GET')).json() as { roles: { key: string; permissions: object | null }[]; catalog: { action: string }[] }
+      expect(asMember.roles.map((r) => r.key)).toEqual(['owner', 'admin', 'manager', 'member'])
+      expect(asMember.roles.find((r) => r.key === 'admin')!.permissions).toBeNull()
+      expect(asMember.roles.find((r) => r.key === 'member')!.permissions).not.toBeNull()
+      expect(asMember.catalog.length).toBeGreaterThan(20)
+      const asAdmin = (await roles(ADMIN, 'admin', 'GET')).json() as { roles: { key: string; permissions: Record<string, string> }[] }
+      expect(asAdmin.roles.find((r) => r.key === 'admin')!.permissions['project.write']).toBe('org')
+
+      expect((await roles(MEMBER, 'member', 'POST', { name: 'Lead', permissions: {} })).statusCode).toBe(403)
+      expect((await roles(ADMIN, 'admin', 'POST', { name: 'Lead', permissions: { 'made.up': 'org' } })).statusCode).toBe(400)
+      expect((await roles(ADMIN, 'admin', 'POST', { name: 'Lead', permissions: { 'project.write': 'own' } })).statusCode).toBe(400)
+      // An admin does not hold billing, so cannot give it away.
+      expect((await roles(ADMIN, 'admin', 'POST', { name: 'Lead', permissions: { 'billing.manage': 'org' } })).statusCode).toBe(403)
+      kc.calls = []
+      const made = await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', description: 'Runs projects', permissions: editor })
+      expect(made.statusCode).toBe(201)
+      expect(made.json()).toMatchObject({ name: 'Project lead', builtin: false, locked: false, people: 0 })
+      expect(kc.calls).toEqual([`createRole ${ORG} ${made.json().key}`])
+      expect((await roles(OWNER, 'owner', 'POST', { name: 'project LEAD', permissions: {} })).statusCode).toBe(409)
+    })
+
+    it('apply to the people who have them, through their token', async () => {
+      await reset()
+      const key = (await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', permissions: { 'project.write': 'org', 'role.view': 'org' } })).json().key as string
+      // The token only names the role; the API looks up what it allows.
+      const lead = (url: string, method: 'GET' | 'PUT' = 'GET', payload?: object) => call(method, url, MEMBER, key, payload)
+      expect((await lead(`/v1/orgs/${ORG}/roles`)).statusCode).toBe(200)
+      expect(((await lead(`/v1/orgs/${ORG}/roles`)).json().roles as { key: string; permissions: object | null }[]).find((r) => r.key === 'admin')!.permissions).not.toBeNull()
+      expect((await lead(`/v1/orgs/${ORG}/invitations`)).statusCode).toBe(403)
+      const me = await call('GET', '/v1/me', MEMBER, key)
+      expect(me.json().orgs[0]).toMatchObject({ role: key, permissions: { 'project.write': 'org' } })
+      // Changing the role takes effect at once.
+      expect((await call('PATCH', `/v1/orgs/${ORG}/roles/${key}`, ADMIN, 'admin', { permissions: { 'role.view': 'org' } })).statusCode).toBe(200)
+      expect((await call('GET', '/v1/me', MEMBER, key)).json().orgs[0].permissions).toEqual({ 'role.view': 'org' })
+    })
+
+    it('are given out under the same rule, and the built-in ones can be changed except the owner', async () => {
+      await reset()
+      const key = (await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', permissions: { 'project.write': 'org' } })).json().key as string
+      const assign = (uid: string, role: string, target: string, to: string) => call('PATCH', `/v1/orgs/${ORG}/members/${target}`, uid, role, { role: to })
+      expect((await assign(ADMIN, 'admin', MEMBER, key)).statusCode).toBe(200)
+      expect(kc.calls).toContain(`setRole ${ORG} ${MEMBER} ${key}`)
+      expect((await assign(ADMIN, 'admin', MEMBER, 'owner')).statusCode).toBe(403)
+      expect((await assign(MEMBER, 'member', MANAGER, 'member')).statusCode).toBe(403)
+      // A role with more than the giver holds cannot be given by them.
+      const big = (await roles(OWNER, 'owner', 'POST', { name: 'Billing', permissions: { 'billing.manage': 'org' } })).json().key as string
+      expect((await assign(ADMIN, 'admin', MEMBER, big)).statusCode).toBe(403)
+      expect((await assign(OWNER, 'owner', MEMBER, big)).statusCode).toBe(200)
+      // ...nor taken from a person who holds more.
+      expect((await assign(ADMIN, 'admin', MEMBER, 'member')).statusCode).toBe(403)
+
+      const patch = (uid: string, role: string, k: string, body: object) => call('PATCH', `/v1/orgs/${ORG}/roles/${k}`, uid, role, body)
+      expect((await patch(OWNER, 'owner', 'owner', { permissions: {} })).statusCode).toBe(403)
+      expect((await patch(ADMIN, 'admin', 'admin', { permissions: {} })).statusCode).toBe(403) // not their own role
+      const changed = await patch(OWNER, 'owner', 'member', { permissions: { 'project.read': 'org' } })
+      expect(changed.statusCode).toBe(200)
+      expect(changed.json()).toMatchObject({ key: 'member', builtin: true, name: 'Member' })
+      expect((await call('GET', '/v1/me', OTHER, 'member')).json().orgs[0].permissions).toEqual({ 'project.read': 'org' })
+      expect((await patch(OWNER, 'owner', 'member', { name: 'Other name' })).json().name).toBe('Member')
+      expect((await patch(OWNER, 'owner', id(5000), { permissions: {} })).statusCode).toBe(404)
+    })
+
+    it('are deleted by those who may; the built-in ones stay and the people fall back to member', async () => {
+      await reset()
+      const key = (await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', permissions: { 'project.write': 'org' } })).json().key as string
+      await db.db.update(schema.kcOrgMember).set({ role: key }).where(eq(schema.kcOrgMember.userId, MEMBER))
+      expect((await call('DELETE', `/v1/orgs/${ORG}/roles/${key}`, MEMBER, 'member')).statusCode).toBe(403)
+      expect((await call('DELETE', `/v1/orgs/${ORG}/roles/admin`, OWNER, 'owner')).statusCode).toBe(409)
+      kc.calls = []
+      expect((await call('DELETE', `/v1/orgs/${ORG}/roles/${key}`, ADMIN, 'admin')).statusCode).toBe(204)
+      expect(kc.calls).toEqual([`setRole ${ORG} ${MEMBER} member`, `deleteRole ${ORG} ${key}`])
+      expect((await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.userId, MEMBER)))[0]!.role).toBe('member')
+      expect((await call('DELETE', `/v1/orgs/${ORG}/roles/${key}`, ADMIN, 'admin')).statusCode).toBe(404)
     })
   })
 

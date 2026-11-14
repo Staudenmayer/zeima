@@ -61,11 +61,11 @@ const { sort, apply: sortTags } = useSort<Tag>(null, { name: (t) => t.name, grou
 
 <template>
   <PageHeader :title="$t('nav.tags')">
-    <Button v-if="workspaces.canEditShared" @click="open(null)"><Plus /> {{ $t('tags.new') }}</Button>
+    <Button v-if="workspaces.can('tag.write')" @click="open(null)"><Plus /> {{ $t('tags.new') }}</Button>
   </PageHeader>
 
   <EmptyState v-if="tags.all.length === 0" :icon="Tags" :text="$t('tags.empty')">
-    <Button v-if="workspaces.canEditShared" variant="outline" @click="open(null)"><Plus /> {{ $t('tags.new') }}</Button>
+    <Button v-if="workspaces.can('tag.write')" variant="outline" @click="open(null)"><Plus /> {{ $t('tags.new') }}</Button>
   </EmptyState>
 
   <div v-else class="grid gap-6">
@@ -84,15 +84,15 @@ const { sort, apply: sortTags } = useSort<Tag>(null, { name: (t) => t.name, grou
             </tr>
           </thead>
           <tbody>
-            <tr v-for="tag in sortTags(section.list)" :key="tag.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="workspaces.canEditShared ? 'cursor-pointer' : ''" @click="workspaces.canEditShared && open(tag)">
+            <tr v-for="tag in sortTags(section.list)" :key="tag.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="workspaces.can('tag.write') ? 'cursor-pointer' : ''" @click="workspaces.can('tag.write') && open(tag)">
               <td class="px-3 py-1.5">
                 <span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-full" :style="{ backgroundColor: tag.color }" />{{ tag.name }}</span>
               </td>
               <td class="px-3 py-1.5 text-muted-foreground">{{ tag.groupName || '–' }}</td>
               <td class="px-1 py-0.5" @click.stop>
                 <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                  <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(tag)"><Pencil /></Button>
-                  <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(tag)"><Trash2 /></Button>
+                  <Button v-if="workspaces.can('tag.write')" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(tag)"><Pencil /></Button>
+                  <Button v-if="workspaces.can('tag.delete')" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(tag)"><Trash2 /></Button>
                 </div>
               </td>
             </tr>

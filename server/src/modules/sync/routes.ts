@@ -78,8 +78,9 @@ const MAX_PULL = 500
 /** May the caller change rows of this workspace as a manager would (lock, edit locked)? */
 function isManager(user: AuthUser, ws: { kind: string; orgId: string | null }): boolean {
   if (ws.kind === 'personal') return true
-  const role = ws.orgId ? user.orgs[ws.orgId]?.role : undefined
-  return role === 'owner' || role === 'admin' || role === 'manager'
+  // Whoever may edit locked entries of others (some of them) acts as a manager here.
+  const scope = ws.orgId ? user.orgs[ws.orgId]?.permissions['entry.write_locked'] : undefined
+  return scope !== undefined
 }
 
 type Tx = Db
