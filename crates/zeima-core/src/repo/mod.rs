@@ -15,6 +15,7 @@ mod sync_groups;
 mod sync_ids;
 mod sync_outbox;
 mod tags;
+mod team;
 mod work;
 
 pub use addons::AddonRecord;
@@ -22,6 +23,7 @@ pub use budget::BudgetStatus;
 pub use submissions::{SubmissionStatus, TimesheetSubmission};
 pub use sync_apply::{ApplyReport, FieldView, RemoteRow, SyncConflict};
 pub use sync_outbox::{Outbox, BATCH as SYNC_BATCH, SYNCED_TABLES};
+pub use team::TeamMember;
 pub(crate) use work::invalidate_entry_days;
 pub use work::{default_schedule, Balance, HolidayView, ProfileSummary, VacationSummary, WorkScheduleInput};
 

@@ -404,3 +404,14 @@ pub async fn absence_decide(
     work_changed(&app).await;
     Ok(absence)
 }
+
+/// Time tracked by everyone this device has entries of in the workspace
+/// (what the person's role lets the server send).
+#[tauri::command]
+#[specta::specta]
+pub async fn team_summary(
+    state: State<'_, AppState>,
+    range: zeima_core::summary::Range,
+) -> CmdResult<Vec<zeima_core::TeamMember>> {
+    Ok(state.data().team_summary(range).await?)
+}

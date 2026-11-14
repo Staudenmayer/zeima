@@ -301,3 +301,79 @@ async fn an_approved_timesheet_can_be_reopened_by_someone_else() {
         SubmissionStatus::Submitted
     );
 }
+
+#[tokio::test]
+async fn the_team_summary_adds_up_each_persons_projects() {
+    use zeima_core::model::{
+        ActivityInput, BudgetPeriod, EntryInput, ProjectInput, ProjectStatus, ProjectVisibility,
+    };
+    use zeima_core::summary::Range;
+    const HOUR: i64 = 3_600_000;
+    let (_, ada, ben) = setup().await;
+    let activity = ada
+        .create_activity(ActivityInput {
+            name: "Work".into(),
+            color: "#111111".into(),
+            archived: false,
+        })
+        .await
+        .unwrap();
+    let project = ada
+        .create_project(ProjectInput {
+            name: "Site".into(),
+            alias: None,
+            color: "#3b82f6".into(),
+            parent_id: None,
+            client: None,
+            budget_minutes: None,
+            budget_period: BudgetPeriod::Total,
+            budget_warn_pct: 80,
+            billable_default: true,
+            status: ProjectStatus::Active,
+            cost_center_id: None,
+            visibility: ProjectVisibility::Org,
+            manager_id: None,
+            member_ids: vec![],
+        })
+        .await
+        .unwrap();
+    let entry = |project: Option<&str>, start: i64, hours: i64| EntryInput {
+        activity_id: Some(activity.id.clone()),
+        project_id: project.map(Into::into),
+        start_at: start,
+        end_at: Some(start + hours * HOUR),
+        tz: Some("UTC".into()),
+        note: String::new(),
+        billable: None,
+        tag_ids: vec![],
+        cost_center_id: None,
+    };
+    ada.create_entry(entry(Some(&project.id), T0, 3)).await.unwrap();
+    ada.create_entry(entry(None, T0 + 4 * HOUR, 1)).await.unwrap();
+    // Ben's entry starts before the range: only the part inside counts.
+    ben.create_entry(entry(Some(&project.id), T0 - 2 * HOUR, 4))
+        .await
+        .unwrap();
+
+    let team = ada
+        .team_summary(Range {
+            from: T0,
+            to: T0 + 24 * HOUR,
+        })
+        .await
+        .unwrap();
+    assert_eq!(team.len(), 2);
+    assert_eq!(
+        (team[0].user_id.as_str(), team[0].total_ms, team[0].billable_ms),
+        (ADA, 4 * HOUR, 3 * HOUR)
+    );
+    assert_eq!(
+        team[0]
+            .projects
+            .iter()
+            .map(|p| (p.project_id.as_deref(), p.ms))
+            .collect::<Vec<_>>(),
+        vec![(Some(project.id.as_str()), 3 * HOUR), (None, HOUR)]
+    );
+    assert_eq!((team[1].user_id.as_str(), team[1].total_ms), (BEN, 2 * HOUR));
+}

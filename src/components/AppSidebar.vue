@@ -11,6 +11,7 @@ import {
   FolderKanban,
   Building2,
   ClipboardCheck,
+  Users,
   Landmark,
   LayoutDashboard,
   Palmtree,
@@ -59,6 +60,10 @@ const tracking = computed(() => [
   { title: t('nav.reports'), url: '/reports', icon: BarChart3 },
   { title: t('nav.absences'), url: '/absences', icon: Palmtree },
   ...(workspaces.inOrg ? [{ title: t('nav.approvals'), url: '/approvals', icon: ClipboardCheck }] : []),
+  // Owners and managers see other people's time; for the rest the page would show only themselves.
+  ...(workspaces.inOrg && (workspaces.role === 'owner' || workspaces.role === 'manager')
+    ? [{ title: t('nav.team'), url: '/team', icon: Users }]
+    : []),
 ])
 
 const system = computed(() => [

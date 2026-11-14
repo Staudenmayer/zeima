@@ -188,6 +188,11 @@ export const commands = {
 	 *  details become the error, with its `code`.
 	 */
 	orgRequest: (method: string, path: string, body: string | null) => typedError<string | null, CmdError>(__TAURI_INVOKE("org_request", { method, path, body })),
+	/**
+	 *  Time tracked by everyone this device has entries of in the workspace
+	 *  (what the person's role lets the server send).
+	 */
+	teamSummary: (range: Range) => typedError<TeamMember[], CmdError>(__TAURI_INVOKE("team_summary", { range })),
 	/**  Absence requests of other people waiting for a decision. */
 	absenceRequests: () => typedError<Absence[], CmdError>(__TAURI_INVOKE("absence_requests")),
 	absenceDecide: (id: string, approve: boolean, note: string) => typedError<Absence, CmdError>(__TAURI_INVOKE("absence_decide", { id, approve, note })),
@@ -1139,6 +1144,15 @@ export type TagInput = {
 	color: string,
 	projectId: string | null,
 	groupName: string | null,
+};
+
+export type TeamMember = {
+	/**  Account id. */
+	userId: string,
+	totalMs: number,
+	billableMs: number,
+	/**  Per project, longest first. */
+	projects: ProjectTotal[],
 };
 
 export type TimeEntry = {

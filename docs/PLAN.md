@@ -171,7 +171,7 @@ Order is by dependency:
 4. **Online users**: server WebSocket presence hub, client presence reporter (based on timer state and the idle/lock watchers), privacy opt-in for project sharing, `team/online` panel + dashboard widget
 5. **Work location**: `office`, `work_location` tables; weekly planner; morning tray prompt; `team/locations` grid (users × days) with office capacity
 6. **Meetings**: scheduling UI with free/busy grid, write-through to the organizer's calendar (Graph/Google), RSVP sync, "track this meeting" prompt per attendee, RRULE recurrence
-7. Manager dashboards: group totals, **project-level breakdown per member** (projects, tags, cost centers, entries), overtime outliers, pending approvals
+7. Manager dashboards *(first part ✅: a Team page for owners and managers shows tracked and billable time per person and the project breakdown for this/last week or month, plus the number of timesheets waiting (`Core::team_summary`); it shows what the server sends the role. Open: tags, cost centers and single entries per member, group totals, overtime outliers)*: group totals, **project-level breakdown per member** (projects, tags, cost centers, entries), overtime outliers, pending approvals
 
 > 🎯 **Release 2.0 (Team/Org)**: launches in the cloud first. The self-hosted Docker release follows once it has run on the cloud for one stable cycle (same version, same binary).
 
