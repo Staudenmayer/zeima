@@ -1,6 +1,7 @@
 mod account;
 mod activity;
 mod addons;
+mod approvals;
 mod background;
 mod backup;
 mod billing;
@@ -149,6 +150,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands_work::submissions_list,
             commands_work::submission_submit,
             commands_work::submission_decide,
+            commands_work::submission_reopen,
             commands_work::submission_withdraw,
             workspaces::workspace_list,
             workspaces::workspace_switch,

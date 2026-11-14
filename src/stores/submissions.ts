@@ -18,9 +18,13 @@ export const useSubmissionsStore = defineStore('submissions', () => {
     await call(commands.submissionDecide(id, approve, note))
     await load()
   }
+  async function reopen(id: string, note: string) {
+    await call(commands.submissionReopen(id, note))
+    await load()
+  }
   async function withdraw(id: string) {
     await call(commands.submissionWithdraw(id))
     await load()
   }
-  return { all, load, submit, decide, withdraw }
+  return { all, load, submit, decide, reopen, withdraw }
 })

@@ -626,6 +626,8 @@ const de: typeof en = {
     approvedToast: 'Freigegeben; die Einträge sind gesperrt',
     withdraw: 'Zurückziehen',
     again: 'Erneut einreichen',
+    reopen: 'Wieder öffnen',
+    reopenedToast: 'Wieder geöffnet; die Einträge sind entsperrt',
     decided: 'Entschieden',
     someone: 'Jemand',
     reason: 'Begründung: {reason}',

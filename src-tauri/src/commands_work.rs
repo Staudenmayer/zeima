@@ -365,6 +365,19 @@ pub async fn submission_decide(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn submission_reopen(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    note: String,
+) -> CmdResult<TimesheetSubmission> {
+    let submission = state.data().reopen_submission(&id, &note).await?;
+    work_changed(&app).await;
+    Ok(submission)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn submission_withdraw(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state.data().withdraw_submission(&id).await?;
     work_changed(&app).await;

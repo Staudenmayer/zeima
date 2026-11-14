@@ -238,6 +238,53 @@ impl Core {
         Ok(sub)
     }
 
+    /// Reopens an approved timesheet: it goes back to the person as rejected
+    /// (with the reason) and the server unlocks the period's entries.
+    pub async fn reopen_submission(&self, id: &str, note: &str) -> Result<TimesheetSubmission> {
+        self.require_shared()?;
+        let mut tx = self.begin().await?;
+        let row = sqlx::query(concat!(
+            "SELECT ",
+            columns!(),
+            " FROM timesheet_submission WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL"
+        ))
+        .bind(id)
+        .bind(&tx.ctx().workspace_id)
+        .fetch_optional(tx.conn())
+        .await?
+        .ok_or_else(|| not_found("timesheet", id))?;
+        let mut sub = from_row(&row)?;
+        if sub.user_id == tx.ctx().user_id {
+            return Err(Error::validation("id", "you cannot reopen your own timesheet"));
+        }
+        if sub.status != SubmissionStatus::Approved {
+            return Err(Error::Conflict(
+                "Only an approved timesheet can be reopened.".into(),
+            ));
+        }
+        let s = tx.stamp();
+        sub.status = SubmissionStatus::Rejected;
+        sub.decided_by = Some(tx.ctx().user_id.clone());
+        sub.decided_at = Some(s.now);
+        sub.decision_note = note.trim().to_string();
+        sqlx::query(
+            "UPDATE timesheet_submission SET status = 'rejected', decided_by = ?, decided_at = ?, decision_note = ?,
+                updated_at = ?, hlc = ?, origin_device = ? WHERE id = ?",
+        )
+        .bind(&sub.decided_by)
+        .bind(sub.decided_at)
+        .bind(&sub.decision_note)
+        .bind(s.now)
+        .bind(&s.hlc)
+        .bind(&s.device)
+        .bind(id)
+        .execute(tx.conn())
+        .await?;
+        tx.log_upsert("timesheet_submission", id, &s, &sub).await?;
+        tx.commit().await?;
+        Ok(sub)
+    }
+
     /// Takes back a timesheet that is still waiting.
     pub async fn withdraw_submission(&self, id: &str) -> Result<()> {
         self.require_shared()?;

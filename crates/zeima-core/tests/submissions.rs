@@ -267,3 +267,37 @@ async fn absences_in_a_shared_workspace_are_requests_someone_else_decides() {
         .unwrap();
     assert_eq!(a.status, AbsenceStatus::Approved);
 }
+
+#[tokio::test]
+async fn an_approved_timesheet_can_be_reopened_by_someone_else() {
+    let (_, ada, ben) = setup().await;
+    let sub = ada
+        .submit_timesheet(date("2026-10-05"), date("2026-10-11"), "")
+        .await
+        .unwrap();
+    assert!(
+        matches!(ben.reopen_submission(&sub.id, "").await, Err(Error::Conflict(_))),
+        "only approved ones"
+    );
+    ben.decide_submission(&sub.id, true, "").await.unwrap();
+    assert!(
+        matches!(
+            ada.reopen_submission(&sub.id, "").await,
+            Err(Error::Validation { .. })
+        ),
+        "not one's own"
+    );
+    let reopened = ben.reopen_submission(&sub.id, "a day is missing").await.unwrap();
+    assert_eq!(
+        (reopened.status, reopened.decision_note.as_str()),
+        (SubmissionStatus::Rejected, "a day is missing")
+    );
+    // The person can submit it again.
+    assert_eq!(
+        ada.submit_timesheet(date("2026-10-05"), date("2026-10-11"), "")
+            .await
+            .unwrap()
+            .status,
+        SubmissionStatus::Submitted
+    );
+}

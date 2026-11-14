@@ -186,6 +186,9 @@ const { t } = useI18n()
         <li v-for="s in decided" :key="s.id" class="flex items-center gap-3 px-3 py-2 text-sm">
           <span class="flex-1">{{ nameOf(s.userId) || $t('approvals.someone') }} · {{ period(s) }}</span>
           <Badge :variant="statusVariant(s)">{{ $t(`approvals.status.${s.status}`) }}</Badge>
+          <Button v-if="s.status === 'approved'" size="sm" variant="ghost" @click="run(() => submissions.reopen(s.id, ''), $t('approvals.reopenedToast'))">
+            <Undo2 /> {{ $t('approvals.reopen') }}
+          </Button>
         </li>
       </ul>
     </section>

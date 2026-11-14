@@ -17,7 +17,7 @@ import type { AuthUser } from '../../plugins/auth.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
 import { ensureOrgWorkspace } from '../orgs/service.ts'
-import { isApproved, lockPeriod } from './approvals.ts'
+import { isApproved, setPeriodLocked } from './approvals.ts'
 import { checkOrgWrite, visibleToCaller } from './orgrules.ts'
 import { type Change, type Json, merge, type Outcome, type RowState } from '../../sync/merge.ts'
 
@@ -223,8 +223,8 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
           if (outcome.status === 'applied') {
             await saveRow(tx, workspaceId, change.table, change.rowId, state, current !== null)
             // Approving a timesheet locks its period's entries.
-            if (change.table === 'timesheet_submission' && isApproved(state) && !isApproved(current)) {
-              await lockPeriod(tx, workspaceId, state, change.hlc)
+            if (change.table === 'timesheet_submission' && isApproved(state) !== isApproved(current)) {
+              await setPeriodLocked(tx, workspaceId, state, change.hlc, isApproved(state))
             }
           }
           results.push(outcome)

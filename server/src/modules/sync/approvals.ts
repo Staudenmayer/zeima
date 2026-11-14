@@ -40,8 +40,8 @@ const value = (state: RowState, field: string) => state.fields[field]?.v
 /** Whether this state of a submission is an approved one. */
 export const isApproved = (state: RowState | null) => state?.fields.status?.v === 'approved'
 
-/** Locks the person's time entries that start in the approved period; returns how many. */
-export async function lockPeriod(tx: Db, workspaceId: string, submission: RowState, hlc: string): Promise<number> {
+/** Locks (or, reopening a period, unlocks) the person's time entries that start in the period; returns how many. */
+export async function setPeriodLocked(tx: Db, workspaceId: string, submission: RowState, hlc: string, locked: boolean): Promise<number> {
   const user = value(submission, 'userId')
   const start = value(submission, 'periodStart')
   const end = value(submission, 'periodEnd')
@@ -55,12 +55,12 @@ export async function lockPeriod(tx: Db, workspaceId: string, submission: RowSta
   } catch {
     return 0 // an unknown zone locks nothing
   }
-  // Wins over any earlier write of the flag; a later unlock by a manager wins again.
+  // Wins over any earlier write of the flag; a later change by a manager wins again.
   const stamp = `${String(Date.now()).padStart(15, '0')}-000000-server`
   const lockHlc = stamp > hlc ? stamp : hlc
   const result = await tx.execute(sql`
     UPDATE sync_row
-       SET fields = jsonb_set(fields, '{locked}', jsonb_build_object('v', true, 'h', ${lockHlc}::text), true),
+       SET fields = jsonb_set(fields, '{locked}', jsonb_build_object('v', ${locked}::boolean, 'h', ${lockHlc}::text), true),
            seq = nextval('sync_seq')
      WHERE workspace_id = ${workspaceId}
        AND table_name = 'time_entry'
@@ -68,6 +68,6 @@ export async function lockPeriod(tx: Db, workspaceId: string, submission: RowSta
        AND fields -> 'userId' ->> 'v' = ${user}
        AND (fields -> 'startAt' ->> 'v')::bigint >= ${from}
        AND (fields -> 'startAt' ->> 'v')::bigint < ${to}
-       AND coalesce(fields -> 'locked' ->> 'v', 'false') <> 'true'`)
+       AND coalesce(fields -> 'locked' ->> 'v', 'false') <> ${String(locked)}`)
   return (result as unknown as { count?: number }).count ?? 0
 }

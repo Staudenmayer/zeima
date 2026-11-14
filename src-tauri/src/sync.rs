@@ -271,6 +271,10 @@ async fn pull_all(
             let mine: Vec<RemoteRow> = others.iter().filter(|r| r.workspace_id == *id).cloned().collect();
             if !mine.is_empty() {
                 applied += scope.sync_apply(&mine).await.map_err(|e| e.to_string())?.applied;
+                // Not for the first load of a new device: that is history, not news.
+                if cursor > 0 {
+                    crate::approvals::show(app, &crate::approvals::notices(&mine, &scope.ctx().user_id));
+                }
             }
         }
         core.set_sync_cursor(page.cursor)

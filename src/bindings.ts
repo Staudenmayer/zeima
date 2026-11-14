@@ -194,6 +194,7 @@ export const commands = {
 	submissionsList: () => typedError<TimesheetSubmission[], CmdError>(__TAURI_INVOKE("submissions_list")),
 	submissionSubmit: (from: string, to: string, note: string) => typedError<TimesheetSubmission, CmdError>(__TAURI_INVOKE("submission_submit", { from, to, note })),
 	submissionDecide: (id: string, approve: boolean, note: string) => typedError<TimesheetSubmission, CmdError>(__TAURI_INVOKE("submission_decide", { id, approve, note })),
+	submissionReopen: (id: string, note: string) => typedError<TimesheetSubmission, CmdError>(__TAURI_INVOKE("submission_reopen", { id, note })),
 	submissionWithdraw: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("submission_withdraw", { id })),
 	workspaceList: () => typedError<WorkspaceView[], CmdError>(__TAURI_INVOKE("workspace_list")),
 	workspaceSwitch: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("workspace_switch", { id })),

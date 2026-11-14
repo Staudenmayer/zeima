@@ -171,7 +171,7 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       expect(await decide(MANAGER, { status: 'approved', decidedBy: ANNA })).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
       expect(await decide(MANAGER, { status: 'approved', decidedBy: MANAGER, decidedAt: 5, decisionNote: 'ok' })).toEqual([{ status: 'applied' }])
       // Decided: closed for everyone.
-      expect(await decide(OWNER, { status: 'rejected', decidedBy: OWNER }, 140)).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await decide(OWNER, { status: 'approved', decidedBy: OWNER }, 140)).toEqual([{ status: 'rejected', reason: 'forbidden' }])
       expect(await decide(ANNA, { status: 'submitted' }, 150)).toEqual([{ status: 'rejected', reason: 'forbidden' }])
     })
 
@@ -186,6 +186,17 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       // Anna can no longer change a locked entry, a manager can.
       expect(await results(ANNA, [upsert('time_entry', E_IN, 200, { note: 'late' })])).toEqual([{ status: 'rejected', reason: 'locked' }])
       expect(await results(MANAGER, [upsert('time_entry', E_IN, 200, { note: 'fixed' })])).toEqual([{ status: 'applied' }])
+    })
+
+    it('can be reopened by an approver, which unlocks the period again', async () => {
+      // Anna may not reopen her own approved timesheet; the owner may.
+      expect(await results(ANNA, [upsert('timesheet_submission', SUB, 250, { status: 'rejected', decidedBy: ANNA })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await results(OWNER, [upsert('timesheet_submission', SUB, 260, { status: 'rejected', decidedBy: OWNER, decisionNote: 'reopened' })])).toEqual([{ status: 'applied' }])
+      const pulled = (await app.inject({ url: '/v1/sync/pull', headers: await headers(ANNA) })).json().rows as { rowId: string; fields: Record<string, { v: unknown }> }[]
+      expect(pulled.find((r) => r.rowId === E_IN)!.fields.locked?.v).toBe(false)
+      // Anna can hand it in again.
+      expect(await results(ANNA, [upsert('timesheet_submission', SUB, 270, { ...submission, status: 'submitted', decidedBy: null, decidedAt: null, decisionNote: '' })])).toEqual([{ status: 'applied' }])
+      expect(await results(MANAGER, [upsert('timesheet_submission', SUB, 280, { status: 'approved', decidedBy: MANAGER })])).toEqual([{ status: 'applied' }])
     })
 
     it('can be rejected, taken back while waiting and handed in again', async () => {

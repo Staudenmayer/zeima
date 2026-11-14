@@ -624,6 +624,8 @@ export default {
     approvedToast: 'Approved; the entries are locked',
     withdraw: 'Take back',
     again: 'Submit again',
+    reopen: 'Reopen',
+    reopenedToast: 'Reopened; the entries are unlocked',
     decided: 'Decided',
     someone: 'Someone',
     reason: 'Reason: {reason}',

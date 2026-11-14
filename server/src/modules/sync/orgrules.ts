@@ -101,8 +101,11 @@ async function checkSubmission(
     }
     return null
   }
-  // Someone else's: decide a waiting one, nothing more.
-  if (!current || change.op === 'delete' || status !== 'submitted') return forbidden
+  // Someone else's: decide a waiting one, or reopen an approved one (it goes back
+  // to the owner as rejected); nothing more.
+  if (!current || change.op === 'delete') return forbidden
+  const reopening = status === 'approved' && change.fields?.status === 'rejected'
+  if (status !== 'submitted' && !reopening) return forbidden
   const scope = scopeOf(actor, 'entry.approve')
   const covered = scope === 'org' || (scope === 'group' && (await sharesGroup(db, orgId, actor.user.orgs[orgId]?.groups ?? [], owner)))
   if (!covered) return forbidden
