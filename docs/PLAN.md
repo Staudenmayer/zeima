@@ -184,7 +184,7 @@ What 2.0 deliberately does not include, and why:
 - **Auto-pause per department** is a suggested idle time (the shortest wins when shorter than the person's own), not a forced setting.
 - **Windows and macOS** builds of all this are untested here (only Linux); signing, billing, social login and cloud hosting need the operator's accounts (see `docs/setup-server.md`).
 
-**Before tagging 2.0.0:** run `deploy/e2e/org-smoke.mjs` and `deploy/e2e/smoke.mjs` against the real stack; try two apps (Linux plus Windows or macOS) on one organization by hand: invite, switch workspace, track, submit and approve a timesheet, create a meeting; fix the updater key password secret; then `node scripts/version.mjs set 2.0.0` (already applied in the repository), commit and tag.
+**Before tagging 2.0.0:** run `deploy/e2e/org-smoke.mjs` and `deploy/e2e/smoke.mjs` against the real stack; try two apps (Linux plus Windows or macOS) on one organization by hand: invite, switch workspace, track, submit and approve a timesheet, create a meeting; fix the updater key password secret; then `node scripts/version.mjs set 2.0.0`, commit and tag (the repository is still at the old version).
 
 ---
 
