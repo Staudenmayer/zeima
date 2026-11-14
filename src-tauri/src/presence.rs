@@ -54,6 +54,9 @@ async fn check(app: &AppHandle, last: &mut HashMap<String, (Report, Instant)>) {
     // Only while signed in; the server forgets those who stop reporting.
     if !matches!(crate::account::current_token(app).await, Ok(Some(_))) {
         last.clear();
+        if let Some(activity) = app.try_state::<crate::activity::Activity>() {
+            activity.set_policy_idle_minutes(0);
+        }
         return;
     }
     let Ok(workspaces) = state.core.workspaces().await else {
@@ -63,6 +66,22 @@ async fn check(app: &AppHandle, last: &mut HashMap<String, (Report, Instant)>) {
         return;
     };
     let share = state.settings().share_project_presence;
+    // The organizations' auto-pause suggestion (the shortest of their policies).
+    let mut policy_idle = 0u32;
+    for w in workspaces.iter().filter(|w| w.kind == "org") {
+        if let Ok(p) = state.core.scoped(&w.id, &user).effective_policy().await {
+            if let Some(m) = p.auto_pause_idle_minutes.filter(|m| *m > 0) {
+                policy_idle = if policy_idle == 0 {
+                    m as u32
+                } else {
+                    policy_idle.min(m as u32)
+                };
+            }
+        }
+    }
+    if let Some(activity) = app.try_state::<crate::activity::Activity>() {
+        activity.set_policy_idle_minutes(policy_idle);
+    }
     let idle = app
         .try_state::<crate::activity::Activity>()
         .is_some_and(|a| a.is_idle());

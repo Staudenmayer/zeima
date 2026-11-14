@@ -142,7 +142,8 @@ pub async fn refresh(app: &AppHandle) {
 
 async fn load_view(app: &AppHandle) -> zeima_core::Result<View> {
     let state = app.state::<AppState>();
-    let core = &state.core;
+    let core_arc = crate::workspaces::running_core(&state).await;
+    let core = &core_arc;
     let lang = state.settings().language();
     let activities: HashMap<String, String> = core
         .list_activities(true)
@@ -363,7 +364,8 @@ fn on_menu_event(app: &AppHandle, event: MenuEvent) {
 
 async fn handle_async(app: &AppHandle, id: &str) -> zeima_core::Result<()> {
     let state = app.state::<AppState>();
-    let core = &state.core;
+    let core_arc = crate::workspaces::running_core(&state).await;
+    let core = &core_arc;
     match id {
         "toggle" => {
             windows::toggle_main(app).await;

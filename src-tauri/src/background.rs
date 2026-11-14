@@ -43,10 +43,17 @@ pub fn spawn(app: AppHandle) {
             if app.state::<addons::Addons>().tick(state.core.now_ms()).await {
                 timeline_changed(&app);
             }
-            if let Ok(TimerState::Running { .. }) = state.core.timer_state().await {
-                if let Err(err) = state.core.heartbeat().await {
-                    eprintln!("heartbeat failed: {err}");
+            // Every workspace with a running timer keeps its heartbeat (crash recovery).
+            let mut running = false;
+            for core in crate::workspaces::all_cores(&state).await {
+                if let Ok(TimerState::Running { .. }) = core.timer_state().await {
+                    running = true;
+                    if let Err(err) = core.heartbeat().await {
+                        eprintln!("heartbeat failed: {err}");
+                    }
                 }
+            }
+            if running {
                 tray::refresh(&app).await;
                 budget::check(&app).await;
             }

@@ -87,6 +87,33 @@ async fn all(state: &AppState) -> Vec<Arc<Core>> {
     cores
 }
 
+/// Where the running timer is: the active workspace if it runs there, else
+/// whichever workspace has one, else the active workspace. Tray, auto-pause
+/// and the daily limit follow this, so they work for organization timers too.
+pub async fn running_core(state: &AppState) -> Arc<Core> {
+    let active = state.data();
+    if !matches!(
+        active.timer_state().await,
+        Ok(zeima_core::model::TimerState::Idle) | Err(_)
+    ) {
+        return active;
+    }
+    for core in all(state).await {
+        if !matches!(
+            core.timer_state().await,
+            Ok(zeima_core::model::TimerState::Idle) | Err(_)
+        ) {
+            return core;
+        }
+    }
+    active
+}
+
+/// Every workspace the person can track time in (for work that looks at all of them).
+pub async fn all_cores(state: &AppState) -> Vec<Arc<Core>> {
+    all(state).await
+}
+
 /// Stops the timer of every workspace but the active one: one timer at a time.
 pub async fn stop_other_timers(state: &AppState) -> zeima_core::Result<bool> {
     let current = state.data().ctx().workspace_id.clone();

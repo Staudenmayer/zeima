@@ -34,12 +34,30 @@ pub struct Activity {
     /// The screen is locked or nobody has touched the machine for a few minutes
     /// (for presence: colleagues see "away").
     idle: std::sync::atomic::AtomicBool,
+    /// The shortest auto-pause idle time an organization's policy suggests (0: none).
+    policy_idle_minutes: std::sync::atomic::AtomicU32,
 }
 
 /// Idle time after which a person counts as away in the presence list.
 const AWAY_AFTER_MS: i64 = 5 * 60_000;
 
 impl Activity {
+    pub fn set_policy_idle_minutes(&self, minutes: u32) {
+        self.policy_idle_minutes
+            .store(minutes, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The idle time to use: the person's own, or an organization's if that is shorter.
+    fn idle_minutes(&self, own: u32) -> u32 {
+        match self
+            .policy_idle_minutes
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            0 => own,
+            policy => own.min(policy).max(1),
+        }
+    }
+
     pub fn is_idle(&self) -> bool {
         self.idle.load(std::sync::atomic::Ordering::Relaxed)
     }
@@ -62,7 +80,19 @@ fn auto_pause(app: &AppHandle) -> AutoPauseConfig {
 pub async fn on_startup(app: &AppHandle) {
     let state = app.state::<AppState>();
     let cfg = auto_pause(app);
-    match state.core.check_forgotten_timer(&cfg).await {
+    // A timer left running in any workspace.
+    let mut forgotten = None;
+    for core in crate::workspaces::all_cores(&state).await {
+        match core.check_forgotten_timer(&cfg).await {
+            Ok(Some(found)) => {
+                forgotten = Some(Ok(Some(found)));
+                break;
+            }
+            Ok(None) => {}
+            Err(err) => forgotten = Some(Err(err)),
+        }
+    }
+    match forgotten.unwrap_or(Ok(None)) {
         Ok(Some(_)) => {
             commands::changed(app, &[DataKind::Entry, DataKind::Away]).await;
             windows::show_prompt(app);
@@ -90,7 +120,7 @@ pub fn spawn(app: AppHandle) {
             loop {
                 std::thread::sleep(Duration::from_millis(POLL_MS as u64));
                 let cfg = auto_pause(&app);
-                detector.set_idle_minutes(cfg.idle_minutes);
+                detector.set_idle_minutes(app.state::<Activity>().idle_minutes(cfg.idle_minutes));
                 let snapshot = probe.snapshot();
                 let now = app.state::<AppState>().core.now_ms();
                 app.state::<Activity>().idle.store(
@@ -118,7 +148,8 @@ pub fn spawn(app: AppHandle) {
 
 async fn on_return(app: &AppHandle, period: AwayPeriod, cfg: &AutoPauseConfig) {
     let state = app.state::<AppState>();
-    match state.core.handle_away(period, cfg).await {
+    let core = crate::workspaces::running_core(&state).await;
+    match core.handle_away(period, cfg).await {
         Ok(Some(_)) => {
             commands::changed(app, &[DataKind::Entry, DataKind::Away]).await;
             windows::show_prompt(app);
@@ -136,7 +167,8 @@ async fn offer_morning(app: &AppHandle, cfg: &AutoPauseConfig) {
     }
     let state = app.state::<AppState>();
     let activity = app.state::<Activity>();
-    let core = &state.core;
+    let core_arc = crate::workspaces::running_core(&state).await;
+    let core = &core_arc;
     let (Ok(today), Ok(tz)) = (core.today(), core.tz()) else {
         return;
     };
@@ -178,7 +210,8 @@ async fn offer_morning(app: &AppHandle, cfg: &AutoPauseConfig) {
 async fn check_daily_limit(app: &AppHandle) {
     let state = app.state::<AppState>();
     let activity = app.state::<Activity>();
-    let core = &state.core;
+    let core_arc = crate::workspaces::running_core(&state).await;
+    let core = &core_arc;
     if !matches!(core.timer_state().await, Ok(TimerState::Running { .. })) {
         return;
     }
