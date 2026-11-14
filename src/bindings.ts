@@ -188,6 +188,15 @@ export const commands = {
 	 *  details become the error, with its `code`.
 	 */
 	orgRequest: (method: string, path: string, body: string | null) => typedError<string | null, CmdError>(__TAURI_INVOKE("org_request", { method, path, body })),
+	/**  Lets the person choose an export file and reads it. */
+	importPick: () => typedError<{
+	name: string,
+	text: string,
+} | null, CmdError>(__TAURI_INVOKE("import_pick")),
+	/**  What importing `text` would do. */
+	importPreview: (text: string, order: DateOrder) => typedError<ImportPreview, CmdError>(__TAURI_INVOKE("import_preview", { text, order })),
+	/**  Adds the entries of `text` (projects and tags as needed). */
+	importRun: (text: string, order: DateOrder) => typedError<ImportReport, CmdError>(__TAURI_INVOKE("import_run", { text, order })),
 	locationsList: (from: string, to: string) => typedError<WorkLocation[], CmdError>(__TAURI_INVOKE("locations_list", { from, to })),
 	locationSet: (date: string, kind: "office" | "home" | "travel" | "other" | null) => typedError<null, CmdError>(__TAURI_INVOKE("location_set", { date, kind })),
 	/**
@@ -659,6 +668,14 @@ export type DateFormat =
 /**  `2026-12-31` (ISO 8601) */
 "ymd";
 
+export type DateOrder = 
+/**  `2026-10-05` */
+"ymd" | 
+/**  `05.10.2026`, `05/10/2026` */
+"dmy" | 
+/**  `10/05/2026` */
+"mdy";
+
 export type DayPlan = {
 	targetMinutes: number,
 	/**  Core hours `HH:MM` (flextime). Informational for now. */
@@ -752,6 +769,28 @@ export type Hook = "entry.started" | "entry.stopped" | "entry.created" | "entry.
 "schedule.tick" | 
 /**  Items shown in the timesheet calendar, e.g. calendar events. */
 "timeline.events";
+
+export type ImportPreview = {
+	/**  Entries that would be added. */
+	newEntries: number,
+	/**  Entries already here. */
+	duplicates: number,
+	newProjects: string[],
+	newTags: string[],
+	/**  Rows of the file that cannot be read. */
+	skipped: SkippedRow[],
+	firstAt: number | null,
+	lastAt: number | null,
+};
+
+export type ImportReport = {
+	createdEntries: number,
+	duplicates: number,
+	createdProjects: number,
+	createdTags: number,
+	/**  Rows that were not imported, from the file or from the checks on entries. */
+	skipped: SkippedRow[],
+};
 
 /**  How a device that already has data joins an account that has data too. */
 export type JoinStrategy = 
@@ -852,6 +891,11 @@ export type Permission =
 "notify" | 
 /**  HTTP requests, only to `allowed_hosts`. */
 "network";
+
+export type PickedFile = {
+	name: string,
+	text: string,
+};
 
 export type PlanInfo = {
 	plan: string,
@@ -1078,6 +1122,12 @@ export type SettingType = "text" | "number" | "boolean" |
 "select" | 
 /**  Text shown masked in the form. */
 "password";
+
+export type SkippedRow = {
+	/**  Line in the file, counting the header as 1. */
+	line: number,
+	reason: string,
+};
 
 export type StartTimer = {
 	/**  Required. */

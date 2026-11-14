@@ -183,7 +183,7 @@ Order is by dependency:
 - Self-hosted polish: Helm chart, air-gapped install bundle, admin docs, upgrade guide, mountable extra country profiles
 - Addon registry with signing; org addon allowlist
 - Timeular BLE tracker addon; office Wi-Fi location addon
-- Data import (Toggl, Clockify, Timeular CSV)
+- Data import: **Toggl and Clockify ✅** (Settings → Data → Import: a detailed CSV export with the columns Project, Client, Description, Billable, Start date/time, End date/time, Tags, English or German headers; date order chosen by the person with a guess from the file; projects and tags matched by name and created; re-importing adds nothing; `zeima_core::import`). Timeular CSV still open (its export has a different layout)
 - Security review / penetration test; GDPR DPA, works-council documentation pack
 - Mobile companion (Tauri mobile) exploration
 

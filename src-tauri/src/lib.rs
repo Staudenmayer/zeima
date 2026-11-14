@@ -8,6 +8,7 @@ mod billing;
 mod budget;
 mod commands;
 mod commands_addons;
+mod commands_import;
 mod commands_report;
 mod commands_work;
 mod events;
@@ -146,6 +147,9 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             updates::update_install,
             license::plan_status,
             org::org_request,
+            commands_import::import_pick,
+            commands_import::import_preview,
+            commands_import::import_run,
             commands_work::locations_list,
             commands_work::location_set,
             commands_work::team_summary,

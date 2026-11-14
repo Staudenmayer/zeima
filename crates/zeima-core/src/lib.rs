@@ -13,6 +13,7 @@ pub mod events;
 pub mod export;
 pub mod hlc;
 pub mod ids;
+pub mod import;
 pub mod jurisdiction;
 pub mod locale;
 pub mod model;
@@ -42,7 +43,7 @@ pub use repo::{
 };
 pub use repo::{ApplyReport, FieldView, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
 #[cfg(feature = "db")]
-pub use repo::{LocationKind, WorkLocation};
+pub use repo::{ImportPreview, ImportReport, LocationKind, WorkLocation};
 pub use repo::{SubmissionStatus, TeamMember, TimesheetSubmission};
 
 #[cfg(feature = "db")]

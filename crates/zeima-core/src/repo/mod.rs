@@ -8,6 +8,7 @@ mod cost_centers;
 mod data;
 mod display;
 mod entries;
+mod import;
 mod locations;
 mod projects;
 mod submissions;
@@ -21,6 +22,7 @@ mod work;
 
 pub use addons::AddonRecord;
 pub use budget::BudgetStatus;
+pub use import::{ImportPreview, ImportReport};
 pub use locations::{LocationKind, WorkLocation};
 pub use submissions::{SubmissionStatus, TimesheetSubmission};
 pub use sync_apply::{ApplyReport, FieldView, RemoteRow, SyncConflict};
