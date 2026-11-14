@@ -1057,6 +1057,9 @@ mod tests {
             billable_default: false,
             status: zeima_core::model::ProjectStatus::Active,
             cost_center_id: None,
+            visibility: Default::default(),
+            manager_id: None,
+            member_ids: Vec::new(),
         })
         .await
         .unwrap()

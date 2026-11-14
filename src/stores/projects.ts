@@ -36,5 +36,8 @@ export function projectToInput(p: Project): ProjectInput {
     billableDefault: p.billableDefault,
     status: p.status,
     costCenterId: p.costCenterId,
+    visibility: p.visibility,
+    managerId: p.managerId,
+    memberIds: p.memberIds,
   }
 }

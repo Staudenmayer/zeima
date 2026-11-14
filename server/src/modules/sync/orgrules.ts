@@ -84,7 +84,14 @@ export async function checkOrgWrite(
   if (kind === 'never') return { status: 'rejected', reason: 'forbidden_table' }
   if (kind === 'shared') {
     const action = SHARED[change.table] ?? 'policy.write'
-    return can(actor, action, { orgId }) ? null : { status: 'rejected', reason: 'forbidden' }
+    if (can(actor, action, { orgId })) return null
+    // A project's manager runs it: visibility and members, not who the manager is.
+    if (change.table === 'project' && current && plain(current.fields.managerId) === actor.user.id) {
+      return change.fields && 'managerId' in change.fields && change.fields.managerId !== actor.user.id
+        ? { status: 'rejected', reason: 'forbidden_field' }
+        : null
+    }
+    return { status: 'rejected', reason: 'forbidden' }
   }
   // Own rows: the owner never changes after the row exists.
   const owner = ownerOf(current, change)
@@ -98,6 +105,14 @@ export async function checkOrgWrite(
   if (scope === 'org') return null
   if (scope === 'group' && (await sharesGroup(db, orgId, actor.user.orgs[orgId]?.groups ?? [], owner))) return null
   return { status: 'rejected', reason: 'forbidden' }
+}
+
+/** A members-only project is seen by those who manage all projects, its manager and its members. */
+function canSeeProject(user: Actor['user'], orgId: string, fields: Record<string, unknown>): boolean {
+  if (can({ user, orgId }, 'project.write', { orgId })) return true
+  if (plain(fields.managerId) === user.id) return true
+  const members = plain(fields.memberIds)
+  return Array.isArray(members) && members.includes(user.id)
 }
 
 /**
@@ -121,6 +136,7 @@ export async function visibleToCaller<T extends { workspaceId: string; table: st
     const kind = kindOf(row.table, row.fields)
     if (kind === 'never') continue
     if (kind === 'shared') {
+      if (row.table === 'project' && plain(row.fields.visibility) === 'members' && !canSeeProject(actor, orgId, row.fields)) continue
       out.push(row)
       continue
     }

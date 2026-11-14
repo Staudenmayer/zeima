@@ -78,6 +78,33 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     expect(await results(OWNER, [upsert('display_settings', id(13), 10, { theme: 'dark' })])).toEqual([{ status: 'rejected', reason: 'forbidden_table' }])
   })
 
+  it('hides members-only projects from people who are not on them', async () => {
+    const SECRET = id(30), OPEN = id(31)
+    // The admin creates one open project and one for Anna's team, managed by Anna.
+    expect(
+      await results(ADMIN, [
+        upsert('project', OPEN, 60, { name: 'Open', visibility: 'org' }),
+        upsert('project', SECRET, 60, { name: 'Secret', visibility: 'members', managerId: ANNA, memberIds: [ANNA, MANAGER] }),
+      ]),
+    ).toEqual([{ status: 'applied' }, { status: 'applied' }])
+    const projects = async (who: string) => (await pulledIds(who)).filter((r) => r === SECRET || r === OPEN)
+    expect(await projects(ANNA)).toEqual([SECRET, OPEN])
+    expect(await projects(MANAGER)).toEqual([SECRET, OPEN])
+    expect(await projects(ADMIN)).toEqual([SECRET, OPEN])
+    expect(await projects(OWNER)).toEqual([SECRET, OPEN])
+    expect(await projects(BEN)).toEqual([OPEN])
+  })
+
+  it('lets a project\'s manager run it, but not hand it over', async () => {
+    const SECRET = id(30)
+    expect(await results(ANNA, [upsert('project', SECRET, 70, { memberIds: [ANNA, MANAGER, BEN] })])).toEqual([{ status: 'applied' }])
+    expect(await results(ANNA, [upsert('project', SECRET, 71, { name: 'Renamed', visibility: 'org' })])).toEqual([{ status: 'applied' }])
+    expect(await results(ANNA, [upsert('project', SECRET, 72, { managerId: BEN })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+    // Members who do not manage it, and strangers to it, may not change it; managers can only change their own projects.
+    expect(await results(MANAGER, [upsert('project', SECRET, 73, { name: 'Mine now' })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+    expect(await results(ANNA, [upsert('project', id(32), 74, { name: 'New', managerId: ANNA })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+  })
+
   describe('personal rows in the shared workspace', () => {
     const E_ANNA = id(20), E_BEN = id(21)
 
@@ -102,7 +129,7 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     })
 
     it('are seen as far as the role reaches', async () => {
-      const shared = [id(10), id(11), id(12)]
+      const shared = [id(10), id(11), id(12), id(30), id(31)]
       const rows = async (who: string) => (await pulledIds(who)).filter((r) => !shared.includes(r))
       expect(await rows(ANNA)).toEqual([E_ANNA])
       expect(await rows(BEN)).toEqual([E_BEN])

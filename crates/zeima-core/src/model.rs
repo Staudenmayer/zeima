@@ -39,6 +39,11 @@ macro_rules! string_enum {
 }
 
 string_enum!(BudgetPeriod { Total => "total", Monthly => "monthly", Weekly => "weekly" });
+string_enum!(
+    /// Who sees a shared project: everyone in the organization, or only the
+    /// project's manager, its members and people who manage all projects.
+    ProjectVisibility { Org => "org", Members => "members" }
+);
 string_enum!(ProjectStatus { Active => "active", Paused => "paused", Archived => "archived" });
 string_enum!(EntrySource {
     Timer => "timer",
@@ -78,6 +83,12 @@ pub struct Project {
     pub status: ProjectStatus,
     /// Default cost center for entries on this project.
     pub cost_center_id: Option<String>,
+    /// Shared workspaces: who sees the project.
+    pub visibility: ProjectVisibility,
+    /// Account id of the person who runs the project (may edit it and its members).
+    pub manager_id: Option<String>,
+    /// Account ids of the people on a members-only project.
+    pub member_ids: Vec<String>,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub created_at: i64,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
@@ -102,6 +113,23 @@ pub struct ProjectInput {
     pub status: ProjectStatus,
     #[serde(default)]
     pub cost_center_id: Option<String>,
+    #[serde(default = "default_visibility")]
+    pub visibility: ProjectVisibility,
+    #[serde(default)]
+    pub manager_id: Option<String>,
+    #[serde(default)]
+    pub member_ids: Vec<String>,
+}
+
+#[allow(clippy::derivable_impls)] // the enum comes from `string_enum!`
+impl Default for ProjectVisibility {
+    fn default() -> Self {
+        Self::Org
+    }
+}
+
+fn default_visibility() -> ProjectVisibility {
+    ProjectVisibility::Org
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -589,6 +617,10 @@ impl ProjectInput {
         if !(1..=100).contains(&self.budget_warn_pct) {
             return Err(Error::validation("budgetWarnPct", "must be between 1 and 100"));
         }
+        self.manager_id = trimmed_opt(&self.manager_id);
+        self.member_ids.retain(|id| !id.trim().is_empty());
+        self.member_ids.sort();
+        self.member_ids.dedup();
         Ok(self)
     }
 }
@@ -686,6 +718,9 @@ mod tests {
             billable_default: true,
             status: ProjectStatus::Active,
             cost_center_id: None,
+            visibility: Default::default(),
+            manager_id: None,
+            member_ids: Vec::new(),
         }
     }
 

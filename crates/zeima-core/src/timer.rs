@@ -375,6 +375,9 @@ mod tests {
             billable_default: true,
             status: ProjectStatus::Active,
             cost_center_id: None,
+            visibility: Default::default(),
+            manager_id: None,
+            member_ids: Vec::new(),
         }
     }
 

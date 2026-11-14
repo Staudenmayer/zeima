@@ -45,6 +45,9 @@ async fn setup() -> (Core, Arc<ManualClock>, String) {
             billable_default: false,
             status: ProjectStatus::Active,
             cost_center_id: None,
+            visibility: Default::default(),
+            manager_id: None,
+            member_ids: Vec::new(),
         })
         .await
         .unwrap();
@@ -159,6 +162,9 @@ async fn away_time_can_be_assigned_to_another_project() {
             billable_default: false,
             status: ProjectStatus::Active,
             cost_center_id: None,
+            visibility: Default::default(),
+            manager_id: None,
+            member_ids: Vec::new(),
         })
         .await
         .unwrap();

@@ -4,6 +4,7 @@ import { toast } from 'vue-sonner'
 import { Pencil, Plus, Trash2 } from '@lucide/vue'
 import type { BudgetPeriod, Project, ProjectInput, ProjectStatus, Tag } from '@/bindings'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,7 +15,9 @@ import { nextColor } from '@/lib/colors'
 import { errorMessage } from '@/lib/ipc'
 import { useCostCentersStore } from '@/stores/costCenters'
 import { projectToInput, useProjectsStore } from '@/stores/projects'
+import { useOrgStore } from '@/stores/org'
 import { useTagsStore } from '@/stores/tags'
+import { useWorkspaceStore } from '@/stores/workspace'
 import ColorPicker from './ColorPicker.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import CostCenterSelect from './CostCenterSelect.vue'
@@ -28,6 +31,8 @@ const open = defineModel<boolean>('open', { required: true })
 const projects = useProjectsStore()
 const costCenters = useCostCentersStore()
 const tags = useTagsStore()
+const workspaces = useWorkspaceStore()
+const org = useOrgStore()
 
 const form = ref<ProjectInput>(empty())
 /** Budget is edited in hours, stored in minutes. */
@@ -50,6 +55,9 @@ function empty(): ProjectInput {
     billableDefault: false,
     status: 'active',
     costCenterId: null,
+    visibility: 'org',
+    managerId: null,
+    memberIds: [],
   }
 }
 
@@ -57,7 +65,19 @@ watch(open, (isOpen) => {
   if (!isOpen) return
   form.value = props.project ? projectToInput(props.project) : empty()
   budgetMinutes.value = form.value.budgetMinutes
+  // The people to pick from.
+  if (workspaces.inOrg && org.members.length === 0) void org.load().catch(() => {})
 })
+
+/** Account ids on a members-only project. */
+function toggleMember(id: string, on: boolean) {
+  const ids = new Set(form.value.memberIds)
+  if (on) ids.add(id)
+  else ids.delete(id)
+  form.value.memberIds = [...ids]
+}
+const personName = (m: { name: string | null; email: string | null; id: string }) => m.name || m.email || m.id
+const NO_MANAGER = '__none__'
 
 const textField = (key: 'alias' | 'client') =>
   computed({
@@ -138,6 +158,40 @@ async function deleteTag() {
           <div class="grid gap-2">
             <Label>{{ $t('projects.parent') }}</Label>
             <ProjectSelect v-model="form.parentId" :exclude="project ? [project.id] : []" />
+          </div>
+        </div>
+        <div v-if="workspaces.inOrg" class="grid gap-3 rounded-md border p-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="grid gap-2">
+              <Label>{{ $t('projects.visibility') }}</Label>
+              <Select v-model="form.visibility">
+                <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="org">{{ $t('projects.visibilityOrg') }}</SelectItem>
+                  <SelectItem value="members">{{ $t('projects.visibilityMembers') }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="grid gap-2">
+              <Label>{{ $t('projects.manager') }}</Label>
+              <Select :model-value="form.managerId ?? NO_MANAGER" @update:model-value="form.managerId = $event === NO_MANAGER ? null : String($event)">
+                <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem :value="NO_MANAGER">{{ $t('common.none') }}</SelectItem>
+                  <SelectItem v-for="m in org.members" :key="m.id" :value="m.id">{{ personName(m) }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div v-if="form.visibility === 'members'" class="grid gap-2">
+            <Label>{{ $t('projects.members') }}</Label>
+            <p class="text-xs text-muted-foreground">{{ $t('projects.membersHint') }}</p>
+            <div class="grid max-h-32 gap-1.5 overflow-y-auto">
+              <label v-for="m in org.members" :key="m.id" class="flex items-center gap-2 text-sm">
+                <Checkbox :model-value="(form.memberIds ?? []).includes(m.id)" @update:model-value="toggleMember(m.id, $event === true)" />
+                {{ personName(m) }}
+              </label>
+            </div>
           </div>
         </div>
         <div v-if="costCenters.all.length" class="grid gap-2">

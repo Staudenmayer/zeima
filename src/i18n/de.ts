@@ -108,6 +108,12 @@ const de: typeof en = {
     invalidTime: 'Bitte gültiges Datum und gültige Uhrzeiten eingeben.',
   },
   projects: {
+    visibility: 'Wer sieht es',
+    visibilityOrg: 'Alle in der Organisation',
+    visibilityMembers: 'Nur die Mitglieder',
+    manager: 'Projektleitung',
+    members: 'Mitglieder',
+    membersHint: 'Besitzer und Admins sehen immer alle Projekte, ebenso die Projektleitung.',
     new: 'Neues Projekt',
     edit: 'Projekt bearbeiten',
     empty: 'Noch keine Projekte. Lege eines an, um mit der Erfassung zu beginnen.',

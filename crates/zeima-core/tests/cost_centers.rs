@@ -55,6 +55,9 @@ fn project(cost_center_id: Option<&str>) -> ProjectInput {
         billable_default: false,
         status: ProjectStatus::Active,
         cost_center_id: cost_center_id.map(Into::into),
+        visibility: Default::default(),
+        manager_id: None,
+        member_ids: Vec::new(),
     }
 }
 

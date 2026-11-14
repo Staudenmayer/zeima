@@ -97,6 +97,9 @@ fn project(name: &str) -> ProjectInput {
         billable_default: false,
         status: ProjectStatus::Active,
         cost_center_id: None,
+        visibility: Default::default(),
+        manager_id: None,
+        member_ids: Vec::new(),
     }
 }
 
@@ -175,4 +178,51 @@ async fn shared_rows_carry_their_owner_and_arrive_on_the_other_device() {
     assert_eq!(in_workspace, WS);
     // Applying a pull does not queue anything to send back.
     assert_eq!(server.push(&ben).await, 0);
+}
+
+#[tokio::test]
+async fn project_access_travels_with_the_project() {
+    use zeima_core::model::ProjectVisibility;
+    let (_, ada) = device(ADA, "Ada").await;
+    let (ben_personal, ben) = device(BEN, "Ben").await;
+    let secret = ada
+        .create_project(ProjectInput {
+            visibility: ProjectVisibility::Members,
+            manager_id: Some(ADA.into()),
+            member_ids: vec![BEN.into(), ADA.into(), BEN.into()],
+            ..project("Secret")
+        })
+        .await
+        .unwrap();
+    // Normalized: sorted, no duplicates.
+    assert_eq!(secret.member_ids, vec![ADA.to_string(), BEN.to_string()]);
+
+    let mut server = Server::default();
+    server.push(&ada).await;
+    server.pull(&ben).await;
+    let theirs = ben.get_project(&secret.id).await.unwrap();
+    assert_eq!(theirs.visibility, ProjectVisibility::Members);
+    assert_eq!(theirs.manager_id.as_deref(), Some(ADA));
+    assert_eq!(theirs.member_ids, secret.member_ids);
+
+    // Ben (not the manager) removes himself from the member list: a change
+    // that goes back to Ada.
+    ben.update_project(
+        &secret.id,
+        ProjectInput {
+            visibility: theirs.visibility,
+            manager_id: theirs.manager_id.clone(),
+            member_ids: vec![ADA.into()],
+            ..project("Secret")
+        },
+    )
+    .await
+    .unwrap();
+    server.push(&ben).await;
+    server.pull(&ada).await;
+    assert_eq!(
+        ada.get_project(&secret.id).await.unwrap().member_ids,
+        vec![ADA.to_string()]
+    );
+    let _ = ben_personal;
 }

@@ -9,7 +9,8 @@ use crate::{Error, Result};
 macro_rules! columns {
     () => {
         "id, workspace_id, name, alias, color, parent_id, client, budget_minutes, \
-         budget_period, budget_warn_pct, billable_default, status, cost_center_id, created_at, updated_at"
+         budget_period, budget_warn_pct, billable_default, status, cost_center_id, visibility, manager_id, \
+         member_ids_json, created_at, updated_at"
     };
 }
 
@@ -28,6 +29,9 @@ fn from_row(r: &SqliteRow) -> Result<Project> {
         billable_default: r.try_get("billable_default")?,
         status: r.try_get::<String, _>("status")?.parse()?,
         cost_center_id: r.try_get("cost_center_id")?,
+        visibility: r.try_get::<String, _>("visibility")?.parse()?,
+        manager_id: r.try_get("manager_id")?,
+        member_ids: serde_json::from_str(&r.try_get::<String, _>("member_ids_json")?).unwrap_or_default(),
         created_at: r.try_get("created_at")?,
         updated_at: r.try_get("updated_at")?,
     })
@@ -207,6 +211,9 @@ fn from_input(input: ProjectInput) -> Project {
         billable_default: input.billable_default,
         status: input.status,
         cost_center_id: input.cost_center_id,
+        visibility: input.visibility,
+        manager_id: input.manager_id,
+        member_ids: input.member_ids,
         created_at: 0,
         updated_at: 0,
     }
@@ -234,13 +241,14 @@ async fn check_parent(tx: &mut WriteTx<'_>, id: &str, parent_id: Option<&str>) -
 async fn write(tx: &mut WriteTx<'_>, p: &Project, s: &Stamp, insert: bool) -> Result<()> {
     let sql = if insert {
         "INSERT INTO project (name, alias, color, parent_id, client, budget_minutes, budget_period,
-            budget_warn_pct, billable_default, status, cost_center_id, updated_at, hlc, origin_device,
-            id, workspace_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            budget_warn_pct, billable_default, status, cost_center_id, visibility, manager_id,
+            member_ids_json, updated_at, hlc, origin_device, id, workspace_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     } else {
         "UPDATE project SET name = ?, alias = ?, color = ?, parent_id = ?, client = ?,
             budget_minutes = ?, budget_period = ?, budget_warn_pct = ?, billable_default = ?,
-            status = ?, cost_center_id = ?, updated_at = ?, hlc = ?, origin_device = ?
+            status = ?, cost_center_id = ?, visibility = ?, manager_id = ?, member_ids_json = ?,
+            updated_at = ?, hlc = ?, origin_device = ?
          WHERE id = ? AND workspace_id = ? AND created_at = ?"
     };
     sqlx::query(sql)
@@ -255,6 +263,9 @@ async fn write(tx: &mut WriteTx<'_>, p: &Project, s: &Stamp, insert: bool) -> Re
         .bind(p.billable_default)
         .bind(p.status.as_str())
         .bind(&p.cost_center_id)
+        .bind(p.visibility.as_str())
+        .bind(&p.manager_id)
+        .bind(serde_json::to_string(&p.member_ids)?)
         .bind(p.updated_at)
         .bind(&s.hlc)
         .bind(&s.device)

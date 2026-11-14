@@ -45,6 +45,9 @@ async fn one_year_dashboard_is_fast() {
                 billable_default: i % 2 == 0,
                 status: ProjectStatus::Active,
                 cost_center_id: None,
+                visibility: Default::default(),
+                manager_id: None,
+                member_ids: Vec::new(),
             })
             .await
             .unwrap();

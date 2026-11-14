@@ -884,6 +884,12 @@ export type Project = {
 	status: ProjectStatus,
 	/**  Default cost center for entries on this project. */
 	costCenterId: string | null,
+	/**  Shared workspaces: who sees the project. */
+	visibility: ProjectVisibility,
+	/**  Account id of the person who runs the project (may edit it and its members). */
+	managerId: string | null,
+	/**  Account ids of the people on a members-only project. */
+	memberIds: string[],
 	createdAt: number,
 	updatedAt: number,
 };
@@ -900,6 +906,9 @@ export type ProjectInput = {
 	billableDefault: boolean,
 	status: ProjectStatus,
 	costCenterId?: string | null,
+	visibility?: ProjectVisibility,
+	managerId?: string | null,
+	memberIds?: string[],
 };
 
 export type ProjectStatus = "active" | "paused" | "archived";
@@ -908,6 +917,12 @@ export type ProjectTotal = {
 	projectId: string | null,
 	ms: number,
 };
+
+/**
+ *  Who sees a shared project: everyone in the organization, or only the
+ *  project's manager, its members and people who manage all projects.
+ */
+export type ProjectVisibility = "org" | "members";
 
 export type PromptState = {
 	away: AwayItem[],

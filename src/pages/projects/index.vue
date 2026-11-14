@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useAccountStore } from '@/stores/account'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
@@ -20,6 +21,7 @@ import { useTagsStore } from '@/stores/tags'
 definePage({ meta: { titleKey: 'nav.projects' } })
 
 const workspaces = useWorkspaceStore()
+const account = useAccountStore()
 
 const projects = useProjectsStore()
 const tags = useTagsStore()
@@ -98,7 +100,7 @@ const budgetLabel = (p: Project) => (p.budgetMinutes === null ? null : `${settin
           </td>
           <td class="px-2 py-1 text-right">
             <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-              <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(p)"><Pencil /></Button>
+              <Button v-if="workspaces.canEditShared || p.managerId === account.status.user?.id" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(p)"><Pencil /></Button>
               <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(p)"><Trash2 /></Button>
             </div>
           </td>

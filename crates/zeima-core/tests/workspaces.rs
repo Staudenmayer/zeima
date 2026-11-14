@@ -28,6 +28,9 @@ fn project(name: &str) -> ProjectInput {
         billable_default: false,
         status: ProjectStatus::Active,
         cost_center_id: None,
+        visibility: Default::default(),
+        manager_id: None,
+        member_ids: Vec::new(),
     }
 }
 

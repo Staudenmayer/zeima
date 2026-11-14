@@ -196,11 +196,13 @@ async fn local_row_fields(
         out.insert(camel(name), value);
     }
     // JSON columns hold several fields.
-    if let Some(Value::String(text)) = out.remove("daysJson") {
-        out.insert(
-            "days".to_string(),
-            serde_json::from_str(&text).unwrap_or(Value::String(text)),
-        );
+    for (column, field) in [("daysJson", "days"), ("memberIdsJson", "memberIds")] {
+        if let Some(Value::String(text)) = out.remove(column) {
+            out.insert(
+                field.to_string(),
+                serde_json::from_str(&text).unwrap_or(Value::String(text)),
+            );
+        }
     }
     if let Some(Value::String(text)) = out.remove("settingsJson") {
         if let Ok(Value::Object(map)) = serde_json::from_str(&text) {
@@ -667,6 +669,10 @@ impl Core {
                 }
                 if table == "work_schedule" && name == "days" {
                     values.push(("days_json".into(), Bind::Text(field.v.to_string())));
+                    continue;
+                }
+                if table == "project" && name == "memberIds" {
+                    values.push(("member_ids_json".into(), Bind::Text(field.v.to_string())));
                     continue;
                 }
                 let column = snake(name);

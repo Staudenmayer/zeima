@@ -106,6 +106,12 @@ export default {
     invalidTime: 'Please enter a valid date and times.',
   },
   projects: {
+    visibility: 'Who sees it',
+    visibilityOrg: 'Everyone in the organization',
+    visibilityMembers: 'Only its members',
+    manager: 'Project manager',
+    members: 'Members',
+    membersHint: 'Owners and admins always see every project, and so does its manager.',
     new: 'New project',
     edit: 'Edit project',
     empty: 'No projects yet. Create one to start tracking.',
