@@ -17,6 +17,20 @@ import { AppError, call, errorMessage } from '@/lib/ipc'
 
 definePage({ meta: { titleKey: 'nav.addons' } })
 
+
+/** Hosts the addon may reach because of an address in its settings. */
+function hostsFromSettings(addon: AddonInfo): string[] {
+  const hosts: string[] = []
+  for (const key of addon.manifest?.host_settings ?? []) {
+    const value = addon.record.settings?.[key]
+    if (!value) continue
+    const rest = value.trim().split('://').pop() ?? ''
+    const host = rest.split('@').pop()?.split(/[/?#:]/)[0]?.toLowerCase()
+    if (host && host.includes('.') && !hosts.includes(host)) hosts.push(host)
+  }
+  return hosts
+}
+
 const { t } = useI18n()
 const addons = ref<AddonInfo[]>([])
 
@@ -160,11 +174,11 @@ async function remove() {
         </div>
       </div>
 
-      <div v-if="addon.record.granted.length || (addon.manifest?.allowed_hosts ?? []).length" class="flex flex-wrap items-center gap-1.5">
+      <div v-if="addon.record.granted.length || (addon.manifest?.allowed_hosts ?? []).length || (addon.manifest?.host_settings ?? []).length" class="flex flex-wrap items-center gap-1.5">
         <Badge v-for="p in addon.record.granted" :key="p" variant="secondary">{{ $t(`addons.permissionShort.${PERMISSION_KEYS[p]}`) }}</Badge>
         <template v-if="addon.record.granted.includes('network')">
           <Globe class="ml-1 size-3.5 text-muted-foreground" />
-          <span class="font-mono text-xs text-muted-foreground">{{ (addon.manifest?.allowed_hosts ?? []).join(', ') }}</span>
+          <span class="font-mono text-xs text-muted-foreground">{{ [...(addon.manifest?.allowed_hosts ?? []), ...hostsFromSettings(addon)].join(', ') }}</span>
         </template>
       </div>
 

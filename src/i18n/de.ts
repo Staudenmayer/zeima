@@ -605,6 +605,7 @@ const de: typeof en = {
     replaces: 'ersetzt Version {version}',
     incompatible: 'Dieses Add-on braucht App-Version {version} oder neuer.',
     permissionsTitle: 'Es darf',
+    hostFromSettings: 'Nur der Server, dessen Adresse du in den Einstellungen einträgst',
     noPermissions: 'Nichts außer seinem eigenen Speicher und den Daten, die die App ihm übergibt.',
     hooksTitle: 'Es reagiert auf',
     sandboxHint: 'Add-ons laufen in einer Sandbox: Sie können nur nutzen, was hier steht, und das Netzwerk nur für die genannten Hosts.',

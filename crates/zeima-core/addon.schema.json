@@ -40,6 +40,14 @@
         "$ref": "#/$defs/Hook"
       }
     },
+    "host_settings": {
+      "description": "Keys of text settings that hold an address the addon may request\n(an ICS feed, a self-hosted server). The host of each value is added\nto the allowed hosts, so the user decides where the addon connects.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "string"
+      }
+    },
     "id": {
       "description": "Reverse-DNS id, e.g. `com.example.csv-export`.",
       "type": "string"

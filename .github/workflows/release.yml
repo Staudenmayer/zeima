@@ -143,10 +143,12 @@ jobs:
           workspaces: |
             addons/csv-export
             addons/recent-notes
+            addons/ics-calendar
       - name: Build example addons
         run: |
           bash addons/build.sh csv-export
           bash addons/build.sh recent-notes
+          bash addons/build.sh ics-calendar
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

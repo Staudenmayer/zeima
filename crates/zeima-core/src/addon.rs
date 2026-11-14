@@ -203,6 +203,11 @@ pub struct AddonManifest {
     /// or `*.example.com`.
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
+    /// Keys of text settings that hold an address the addon may request
+    /// (an ICS feed, a self-hosted server). The host of each value is added
+    /// to the allowed hosts, so the user decides where the addon connects.
+    #[serde(default)]
+    pub host_settings: Vec<String>,
     #[serde(default)]
     pub hooks: Vec<Hook>,
     /// Interval for `schedule.tick`, at least 1.
@@ -231,7 +236,38 @@ pub fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
+/// Host name of an address a user typed into a setting: `https://`,
+/// `http://` and `webcal://` are accepted, a port or path is ignored.
+/// `None` if there is no usable host.
+pub fn host_of_address(address: &str) -> Option<String> {
+    let rest = address.trim();
+    let rest = rest.split_once("://").map_or(rest, |(_, r)| r);
+    let rest = rest.rsplit_once('@').map_or(rest, |(_, r)| r);
+    let host = rest.split(['/', '?', '#', ':']).next()?.to_ascii_lowercase();
+    let ok = host.contains('.')
+        && !host.starts_with('.')
+        && !host.ends_with('.')
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.');
+    ok.then_some(host)
+}
+
 impl AddonManifest {
+    /// Allowed hosts: the manifest's list plus the hosts of the user's
+    /// `host_settings` values (`values` maps setting keys to their value).
+    pub fn effective_hosts(&self, values: &std::collections::BTreeMap<String, String>) -> Vec<String> {
+        let mut hosts = self.allowed_hosts.clone();
+        for key in &self.host_settings {
+            if let Some(host) = values.get(key).and_then(|v| host_of_address(v)) {
+                if !hosts.contains(&host) {
+                    hosts.push(host);
+                }
+            }
+        }
+        hosts
+    }
+
     pub fn parse(toml_src: &str) -> Result<Self> {
         let manifest: Self =
             toml::from_str(toml_src).map_err(|e| Error::validation("addon.toml", e.message().to_string()))?;
@@ -274,17 +310,29 @@ impl AddonManifest {
             return Err(Error::validation("wasm", "a .wasm file inside the addon folder"));
         }
         let network = self.permissions.contains(&Permission::Network);
-        if network && self.allowed_hosts.is_empty() {
+        if network && self.allowed_hosts.is_empty() && self.host_settings.is_empty() {
             return Err(Error::validation(
                 "allowed_hosts",
-                "the network permission needs at least one host",
+                "the network permission needs at least one host or host_settings",
             ));
         }
-        if !network && !self.allowed_hosts.is_empty() {
+        if !network && (!self.allowed_hosts.is_empty() || !self.host_settings.is_empty()) {
             return Err(Error::validation(
                 "allowed_hosts",
                 "only allowed with the network permission",
             ));
+        }
+        for key in &self.host_settings {
+            let is_text = self
+                .settings
+                .iter()
+                .any(|f| &f.key == key && matches!(f.kind, SettingType::Text | SettingType::Password));
+            if !is_text {
+                return Err(Error::validation(
+                    "host_settings",
+                    format!("'{key}' must be the key of a text setting"),
+                ));
+            }
         }
         for host in &self.allowed_hosts {
             let bare = host.strip_prefix("*.").unwrap_or(host);
@@ -460,6 +508,41 @@ auth_params = { access_type = "offline", prompt = "consent" }
         assert_eq!(m.oauth[0].auth_params["access_type"], "offline");
         assert!(m.supports_app("0.1.0"));
         assert!(!m.supports_app("0.0.9"));
+    }
+
+    #[test]
+    fn host_of_address_reads_the_host() {
+        assert_eq!(
+            host_of_address("https://Cal.Example.com/a/b.ics?x=1").as_deref(),
+            Some("cal.example.com")
+        );
+        assert_eq!(
+            host_of_address("webcal://example.org/x.ics").as_deref(),
+            Some("example.org")
+        );
+        assert_eq!(
+            host_of_address("http://user:pw@example.org:8080/x").as_deref(),
+            Some("example.org")
+        );
+        assert_eq!(host_of_address("localhost"), None);
+        assert_eq!(host_of_address(""), None);
+        assert_eq!(host_of_address("https://exa mple.com"), None);
+    }
+
+    #[test]
+    fn hosts_can_come_from_settings() {
+        let src = EXAMPLE.replace(
+            "allowed_hosts = [\"api.example.com\", \"*.example.org\"]\n",
+            "host_settings = [\"feed\"]\n",
+        ) + "\n[[settings]]\nkey = \"feed\"\nlabel = \"Feed\"\ntype = \"text\"\n";
+        let m = AddonManifest::parse(&src).unwrap();
+        let mut values = std::collections::BTreeMap::new();
+        assert!(m.effective_hosts(&values).is_empty());
+        values.insert("feed".into(), "webcal://cal.example.com/me.ics".into());
+        assert_eq!(m.effective_hosts(&values), vec!["cal.example.com".to_string()]);
+        // Must point at a text setting.
+        let bad = src.replace("host_settings = [\"feed\"]", "host_settings = [\"delimiter\"]");
+        assert!(AddonManifest::parse(&bad).is_err());
     }
 
     #[test]

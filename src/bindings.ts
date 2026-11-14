@@ -333,6 +333,12 @@ export type AddonManifest = {
 	 *  or `*.example.com`.
 	 */
 	allowed_hosts?: string[],
+	/**
+	 *  Keys of text settings that hold an address the addon may request
+	 *  (an ICS feed, a self-hosted server). The host of each value is added
+	 *  to the allowed hosts, so the user decides where the addon connects.
+	 */
+	host_settings?: string[],
 	hooks?: Hook[],
 	/**  Interval for `schedule.tick`, at least 1. */
 	schedule_minutes?: number | null,

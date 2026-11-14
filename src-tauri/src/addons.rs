@@ -416,7 +416,8 @@ fn build_plugin(
         .with_memory_max(MEMORY_PAGES)
         .with_config(config(manifest, &record.settings).into_iter());
     if record.granted.contains(&Permission::Network) {
-        wasm_manifest = wasm_manifest.with_allowed_hosts(manifest.allowed_hosts.clone().into_iter());
+        let hosts = manifest.effective_hosts(&config(manifest, &record.settings));
+        wasm_manifest = wasm_manifest.with_allowed_hosts(hosts.into_iter());
     }
     let data = UserData::new(HostCtx {
         services: services.clone(),
@@ -836,6 +837,11 @@ mod tests {
 
     /// Loads a built example addon with `granted`; `None` if not built.
     async fn load(package: &str, granted: &[Permission]) -> Option<Fixture> {
+        load_with(package, granted, &[]).await
+    }
+
+    /// Like [`load`], with the addon's settings filled in.
+    async fn load_with(package: &str, granted: &[Permission], settings: &[(&str, &str)]) -> Option<Fixture> {
         let zip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../addons/dist")
             .join(package);
@@ -857,6 +863,13 @@ mod tests {
         core.save_addon(&manifest.id, &manifest.version, granted)
             .await
             .unwrap();
+        if !settings.is_empty() {
+            let values = settings
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            core.set_addon_settings(&manifest.id, &values).await.unwrap();
+        }
         let record = core.set_addon_enabled(&manifest.id, true).await.unwrap();
         let notifications = Arc::new(Mutex::new(Vec::new()));
         let sink = notifications.clone();
@@ -969,6 +982,60 @@ mod tests {
         assert!(f.addons.timeline(&request).await.is_empty());
         let error = f.addons.error("dev.zeima.host-test").unwrap();
         assert!(error.contains("permission 'network'"), "{error}");
+    }
+
+    /// Serves `body` for every request on a free local port; returns the
+    /// address.
+    fn serve_once(body: &'static str) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let reply = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/calendar\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(reply.as_bytes());
+            }
+        });
+        format!("http://127.0.0.1:{port}/me.ics")
+    }
+
+    const ICS_FEED: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:r1\r\nSUMMARY:Design review\r\nLOCATION:Room 4\r\nDTSTART:20261005T090000Z\r\nDTEND:20261005T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+
+    #[tokio::test]
+    async fn ics_addon_fetches_the_address_from_its_settings_and_shows_events() {
+        let url = serve_once(ICS_FEED);
+        let Some(f) = load_with(
+            "dev.zeima.ics-calendar-1.0.0.zip",
+            &[Permission::Network],
+            &[("url", url.as_str())],
+        )
+        .await
+        else {
+            return;
+        };
+        let id = "dev.zeima.ics-calendar";
+        assert!(f.addons.tick(T0).await);
+        assert_eq!(f.addons.error(id), None);
+        let request = sdk::TimelineRequest {
+            range: sdk::Range {
+                from: T0,
+                to: T0 + 24 * HOUR,
+            },
+            timezone: "UTC".into(),
+        };
+        let items = f.addons.timeline(&request).await;
+        assert_eq!(f.addons.error(id), None);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].1.title, "Design review");
+        assert_eq!(items[0].1.detail.as_deref(), Some("Room 4"));
+        assert_eq!(items[0].1.start_at, T0 + HOUR);
+        assert_eq!(items[0].1.end_at, T0 + 2 * HOUR);
     }
 
     async fn project(core: &zeima_core::Core) -> String {

@@ -71,6 +71,10 @@ async function install() {
             <Globe class="size-3.5 text-muted-foreground" />
             <Badge v-for="h in (pkg.manifest.allowed_hosts ?? [])" :key="h" variant="secondary" class="font-mono">{{ h }}</Badge>
           </div>
+          <div v-if="(pkg.manifest.host_settings ?? []).length" class="flex items-center gap-1.5 pl-6 text-muted-foreground">
+            <Globe class="size-3.5" />
+            <span>{{ $t('addons.hostFromSettings') }}</span>
+          </div>
         </section>
 
         <section v-if="(pkg.manifest.oauth ?? []).length" class="grid gap-2">

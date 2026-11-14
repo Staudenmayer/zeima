@@ -1,0 +1,34 @@
+# Shows the events of an ICS feed (Outlook, Google, Nextcloud, Apple and most
+# other calendars can publish one) in the timesheet. Read-only; no account.
+id = "dev.zeima.ics-calendar"
+name = "ICS calendar"
+version = "1.0.0"
+author = "Zeima"
+description = "Shows the events of a calendar feed (an .ics link) in the timesheet. Click an event to track it."
+min_app_version = "1.0.0"
+wasm = "ics_calendar.wasm"
+permissions = ["network"]
+# The address you enter below; the addon can reach only that server.
+host_settings = ["url"]
+hooks = ["schedule.tick", "timeline.events"]
+schedule_minutes = 15
+
+[[settings]]
+key = "url"
+label = "Calendar address (ICS link)"
+type = "text"
+required = true
+description = "The \"subscribe\" or \"publish\" link of your calendar, ending in .ics. webcal:// links work too. Anyone with the link can read the calendar, so treat it like a password."
+
+[[settings]]
+key = "hide_cancelled"
+label = "Hide cancelled events"
+type = "boolean"
+default = "true"
+
+[[settings]]
+key = "hide_free"
+label = "Hide events marked as free"
+type = "boolean"
+default = "false"
+description = "Skips events that show you as available (transparent), such as reminders."

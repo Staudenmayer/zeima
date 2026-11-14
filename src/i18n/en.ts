@@ -603,6 +603,7 @@ export default {
     replaces: 'replaces version {version}',
     incompatible: 'This addon needs app version {version} or newer.',
     permissionsTitle: 'It will be allowed to',
+    hostFromSettings: 'Only the server whose address you enter in its settings',
     noPermissions: 'Nothing beyond its own storage and the data the app passes to it.',
     hooksTitle: 'It reacts to',
     sandboxHint: 'Addons run in a sandbox: they can only use what is listed here, and the network only for the listed hosts.',

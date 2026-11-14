@@ -1,0 +1,25 @@
+[package]
+name = "ics-calendar"
+description = "Zeima addon: shows the events of an ICS calendar feed in the timesheet"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+# Built on its own for wasm32-unknown-unknown (see ../build.sh).
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zeima-addon-sdk = { path = "../../crates/zeima-addon-sdk" }
+extism-pdk = "1.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+chrono-tz = "0.10"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

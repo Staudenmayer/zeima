@@ -7,7 +7,7 @@ This guide walks through a complete export-format addon, then documents everythi
 - [`csv-export`](../addons/csv-export): a report export format with settings.
 - [`recent-notes`](../addons/recent-notes): events, storage, quick-switch options and notifications.
 
-[`host-test`](../addons/host-test) is a test fixture for secrets, accounts and timeline items; it is short enough to read as an example too.
+[`ics-calendar`](../addons/ics-calendar) shows an ICS feed in the timesheet (network with a user-entered address, `schedule.tick`, `timeline.events`, storage). [`host-test`](../addons/host-test) is a test fixture for secrets, accounts and timeline items; it is short enough to read as an example too.
 
 ## Quick start: an export format
 
@@ -124,6 +124,7 @@ While developing, you can pick the `addon.toml` itself instead of a zip; Zeima t
 | `permissions` | | What the addon may do (see [Permissions](#permissions)). |
 | `allowed_hosts` | with `network` | Hosts for HTTP requests: `api.example.com` or `*.example.com`. No scheme, path or port. |
 | `hooks` | | What the addon reacts to (see [Hooks](#hooks)). |
+| `host_settings` | | Keys of text settings whose value is an address the addon may request (a calendar feed, a self-hosted server). The host of each value is allowed in addition to `allowed_hosts`, so the user decides where the addon connects; the install dialog says so. Counts as the `network` host requirement. |
 | `schedule_minutes` | with `schedule.tick` | Interval for `schedule.tick`, at least 1. |
 | `[[export_formats]]` | with `report.export` | `id`, `name` (menu label), `extension` (without dot). |
 | `[[settings]]` | | Fields of the addon's settings form (see [Settings](#settings)). |
@@ -193,7 +194,7 @@ The SDK's `host` module calls back into Zeima. Each call fails, and the hook wit
 
 **Secrets.** API keys and tokens belong in the OS keychain (macOS Keychain, Windows Credential Manager, Secret Service on Linux), not in key-value storage. `host::secret_set(key, value)` stores up to 8 KB under the addon's id; no other addon can read it. Uninstalling the addon deletes its secrets. Keychain access can be slow or show an unlock prompt the first time, so read secrets when you need them rather than on every call.
 
-**HTTP.** With the `network` permission, use `extism_pdk::http::request`. Requests only reach the manifest's `allowed_hosts`; everything else fails.
+**HTTP.** With the `network` permission, use `extism_pdk::http::request`. Requests only reach the manifest's `allowed_hosts` and the hosts of its `host_settings` values; everything else fails.
 
 ## Accounts (OAuth)
 
