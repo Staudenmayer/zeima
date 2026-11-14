@@ -153,6 +153,22 @@ async function createDept() {
     deptParent.value = 'none'
   })
 }
+const renamingDept = ref<Department | null>(null)
+const renameOpen = ref(false)
+const renameTo = ref('')
+function openDept(g: Department) {
+  renamingDept.value = g
+  renameTo.value = g.name
+  renameOpen.value = true
+}
+async function renameDept() {
+  const g = renamingDept.value
+  if (!g) return
+  await run(async () => {
+    await org.renameDepartment(g.id, renameTo.value.trim())
+    renameOpen.value = false
+  })
+}
 const deleting = ref<Department | null>(null)
 const deleteDeptOpen = ref(false)
 function askDeleteDept(g: Department) {
@@ -163,16 +179,19 @@ const memberName = (id: string) => org.nameOf(id) || id
 
 // ---------------------------------------------------------------- job descriptions
 const jobOpen = ref(false)
+const editingJob = ref<Job | null>(null)
 const jobName = ref('')
 const jobText = ref('')
-function openJob() {
-  jobName.value = ''
-  jobText.value = ''
+function openJob(j: Job | null = null) {
+  editingJob.value = j
+  jobName.value = j?.name ?? ''
+  jobText.value = j?.description ?? ''
   jobOpen.value = true
 }
 async function saveJob() {
   await run(async () => {
-    await org.createJob(jobName.value.trim(), jobText.value.trim())
+    if (editingJob.value) await org.updateJob(editingJob.value.id, jobName.value.trim(), jobText.value.trim())
+    else await org.createJob(jobName.value.trim(), jobText.value.trim())
     jobOpen.value = false
   })
 }
@@ -416,11 +435,12 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="g in sortedDepartments" :key="g.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+              <tr v-for="g in sortedDepartments" :key="g.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="canManage ? 'cursor-pointer' : ''" @click="canManage && openDept(g)">
                 <td class="px-3 py-1.5 font-medium" :style="{ paddingLeft: deptSort.key ? undefined : `calc(0.75rem + ${g.path.split('/').length - 1}rem)` }">{{ deptSort.key ? g.path : g.name }}</td>
                 <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ g.memberIds.length }}</td>
                 <td class="px-1 py-0.5" @click.stop>
                   <div v-if="canManage" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openDept(g)"><Pencil /></Button>
                     <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteDept(g)"><Trash2 /></Button>
                   </div>
                 </td>
@@ -447,12 +467,13 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="j in sortedJobs" :key="j.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+              <tr v-for="j in sortedJobs" :key="j.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="openJob(j)">
                 <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ j.name }}</td>
                 <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="j.description">{{ j.description || '–' }}</td>
                 <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ j.people }}</td>
                 <td class="px-1 py-0.5" @click.stop>
                   <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openJob(j)"><Pencil /></Button>
                     <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteJob(j)"><Trash2 /></Button>
                   </div>
                 </td>
@@ -562,7 +583,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
 
   <Dialog v-model:open="jobOpen">
     <DialogContent :aria-describedby="undefined" class="sm:max-w-md">
-      <DialogHeader><DialogTitle>{{ $t('org.jobs.new') }}</DialogTitle></DialogHeader>
+      <DialogHeader><DialogTitle>{{ editingJob ? $t('org.jobs.edit') : $t('org.jobs.new') }}</DialogTitle></DialogHeader>
       <form class="grid gap-4" @submit.prevent="saveJob">
         <div class="grid gap-2">
           <Label for="job-name">{{ $t('org.jobs.name') }}</Label>
@@ -614,6 +635,22 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" @click="personOpen = false">{{ $t('common.cancel') }}</Button>
+          <Button type="submit">{{ $t('common.save') }}</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog v-model:open="renameOpen">
+    <DialogContent :aria-describedby="undefined" class="sm:max-w-md">
+      <DialogHeader><DialogTitle>{{ $t('org.renameDepartment') }}</DialogTitle></DialogHeader>
+      <form class="grid gap-4" @submit.prevent="renameDept">
+        <div class="grid gap-2">
+          <Label for="dept-rename">{{ $t('org.departmentName') }}</Label>
+          <Input id="dept-rename" v-model="renameTo" required maxlength="60" autofocus />
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" @click="renameOpen = false">{{ $t('common.cancel') }}</Button>
           <Button type="submit">{{ $t('common.save') }}</Button>
         </DialogFooter>
       </form>

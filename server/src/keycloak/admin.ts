@@ -35,6 +35,8 @@ export interface KeycloakAdmin {
   /** The people in each role group of the organization. */
   listRoleMembers(orgId: string): Promise<Record<OrgRole, string[]>>
   deleteGroup(groupId: string): Promise<void>
+  /** Renames a department (its subgroups follow). */
+  renameGroup(groupId: string, name: string): Promise<void>
   addToGroup(userId: string, groupId: string): Promise<void>
   removeFromGroup(userId: string, groupId: string): Promise<void>
 }
@@ -254,6 +256,10 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
 
   async deleteGroup(groupId: string): Promise<void> {
     await this.call('DELETE', `/groups/${groupId}`)
+  }
+
+  async renameGroup(groupId: string, name: string): Promise<void> {
+    await this.call('PUT', `/groups/${groupId}`, { json: { name } })
   }
 
   async addToGroup(userId: string, groupId: string): Promise<void> {

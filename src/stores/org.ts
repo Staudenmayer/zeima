@@ -245,6 +245,11 @@ export const useOrgStore = defineStore('org', () => {
     await load()
   }
 
+  async function renameDepartment(id: string, name: string) {
+    await api('PATCH', `${base()}/groups/${id}`, { name })
+    await load()
+  }
+
   async function deleteDepartment(id: string) {
     await api('DELETE', `${base()}/groups/${id}`)
     await load()
@@ -265,6 +270,6 @@ export const useOrgStore = defineStore('org', () => {
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
     directory, loadDirectory, updateInvitation, jobs, loadJobs, createJob, updateJob, deleteJob, setJob, loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
-    createDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
+    createDepartment, renameDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

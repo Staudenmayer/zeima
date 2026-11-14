@@ -61,6 +61,9 @@ export class FakeKeycloak implements KeycloakAdmin {
   async deleteGroup(groupId: string) {
     this.record('deleteGroup', groupId)
   }
+  async renameGroup(groupId: string, name: string) {
+    this.record('renameGroup', groupId, name)
+  }
   async addToGroup(userId: string, groupId: string) {
     this.record('addToGroup', userId, groupId)
   }

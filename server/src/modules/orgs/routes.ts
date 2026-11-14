@@ -514,6 +514,57 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
   )
 
+  app.patch(
+    '/orgs/:orgId/groups/:groupId',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Renames a department (the ones below it follow)',
+        description: 'Refused while rules are set for the department or one below it: they name it by its path. Remove them first.',
+        security: SECURITY,
+        params: GroupParams,
+        body: Type.Object({ name: Type.String({ minLength: 1, maxLength: 60, pattern: '^[^/\\s][^/]*$', description: 'No slash; not starting with a space' }) }),
+        response: { 200: Group, ...problems(400, 401, 403, 404, 409, 502, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId, groupId } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      authorize(actor, 'group.manage', { orgId })
+      const db = database()
+      const [group] = await db.select().from(schema.kcGroup).where(and(eq(schema.kcGroup.id, groupId), eq(schema.kcGroup.orgId, orgId)))
+      if (!group) throw new HttpProblem(404, 'not_found', 'department not found')
+      const oldPath = group.path.slice(prefix(orgId).length)
+      const name = request.body.name.trim()
+      const newPath = `${oldPath.includes('/') ? `${oldPath.slice(0, oldPath.lastIndexOf('/'))}/` : ''}${name}`
+      if (newPath === oldPath) return (await loadGroups(orgId)).find((g) => g.id === groupId)!
+      const [clash] = await db.select().from(schema.kcGroup).where(eq(schema.kcGroup.path, `${prefix(orgId)}${newPath}`))
+      if (clash) throw new HttpProblem(409, 'already_exists', 'a department with this name already exists here')
+      // Rules name their department by path: they would point nowhere.
+      const workspace = await orgWorkspaceId(db, orgId)
+      if (workspace) {
+        const rules = await db
+          .select({ fields: schema.syncRow.fields, deleted: schema.syncRow.deleted })
+          .from(schema.syncRow)
+          .where(and(eq(schema.syncRow.workspaceId, workspace), eq(schema.syncRow.tableName, 'org_policy')))
+        const named = rules.some((r) => {
+          const path = (r.fields as Record<string, { v: unknown }>).groupPath?.v
+          return r.deleted === null && typeof path === 'string' && (path === oldPath || path.startsWith(`${oldPath}/`))
+        })
+        if (named) throw new HttpProblem(409, 'department_has_rules', 'rules are set for this department; remove them before renaming it')
+      }
+      await keycloak().renameGroup(groupId, name)
+      // The ones below follow in Keycloak; the mirror's paths follow too.
+      const like = `${group.path.replace(/[\\%_]/g, '\\$&')}/%`
+      await db
+        .update(schema.kcGroup)
+        .set({ path: sql`${`${prefix(orgId)}${newPath}`} || substr(${schema.kcGroup.path}, ${group.path.length + 1})` })
+        .where(and(eq(schema.kcGroup.orgId, orgId), sql`(${schema.kcGroup.path} = ${group.path} or ${schema.kcGroup.path} like ${like})`))
+      await audit(db, { orgId, actorId: actor.user.id, action: 'group.rename', target: newPath, detail: { from: oldPath } })
+      return (await loadGroups(orgId)).find((g) => g.id === groupId)!
+    },
+  )
+
   app.delete(
     '/orgs/:orgId/groups/:groupId',
     {

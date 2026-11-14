@@ -439,6 +439,35 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect(log.map((l) => l.target)).toEqual(['dev', 'dev/backend'])
     })
 
+    it('renames a department with the ones below it, unless rules name it', async () => {
+      await reset()
+      const post = (body: object) => call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', body)
+      const dev = (await post({ name: 'dev' })).json()
+      const backend = (await post({ name: 'backend', parentId: dev.id })).json()
+      await post({ name: 'ops' })
+      const rename = (uid: string, role: string, gid: string, name: string) => call('PATCH', `/v1/orgs/${ORG}/groups/${gid}`, uid, role, { name })
+      expect((await rename(MANAGER, 'manager', dev.id, 'engineering')).statusCode).toBe(403)
+      expect((await rename(ADMIN, 'admin', dev.id, 'a/b')).statusCode).toBe(400)
+      expect((await rename(ADMIN, 'admin', dev.id, 'ops')).statusCode).toBe(409)
+      expect((await rename(ADMIN, 'admin', id(995), 'x')).statusCode).toBe(404)
+      kc.calls = []
+      const done = await rename(ADMIN, 'admin', dev.id, 'engineering')
+      expect(done.statusCode).toBe(200)
+      expect(done.json()).toMatchObject({ name: 'engineering', path: 'engineering' })
+      expect(kc.calls).toEqual([`renameGroup ${dev.id} engineering`])
+      expect((await call('GET', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin')).json().map((g: { path: string }) => g.path)).toEqual(['engineering', 'engineering/backend', 'ops'])
+      expect((await rename(ADMIN, 'admin', backend.id, 'api')).json()).toMatchObject({ path: 'engineering/api', parentId: dev.id })
+      expect((await rename(ADMIN, 'admin', dev.id, 'engineering')).statusCode).toBe(200)
+
+      // Rules name a department by its path, so it cannot be renamed while some exist.
+      const workspace = ((await call('GET', `/v1/workspaces`, ADMIN, 'admin')).json() as { id: string; kind: string }[]).find((w) => w.kind === 'org')!
+      await db.db.insert(schema.syncRow).values({ workspaceId: workspace.id, tableName: 'org_policy', rowId: id(996), fields: { groupPath: { v: 'engineering/api', h: '1' } } })
+      const blocked = await rename(ADMIN, 'admin', dev.id, 'tech')
+      expect(blocked.statusCode).toBe(409)
+      expect(blocked.json().code).toBe('department_has_rules')
+      await db.db.delete(schema.syncRow).where(eq(schema.syncRow.rowId, id(996)))
+    })
+
     it('forgets department memberships when a member is removed', async () => {
       await reset()
       const g = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'ops' })).json()
