@@ -154,6 +154,7 @@ const { sort, sorted: sortedDepartments } = useSort(departmentTotals, {
   </PageHeader>
 
   <EmptyState v-if="!workspaces.inOrg" :icon="Users" :text="$t('team.personal')" />
+  <EmptyState v-else-if="!['group', 'org'].includes(workspaces.scopeOf('entry.read') ?? '')" :icon="Users" :text="$t('noAccess.team')" />
 
   <div v-else class="grid gap-4">
     <div class="flex flex-wrap gap-6 text-sm">

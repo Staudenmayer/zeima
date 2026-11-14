@@ -130,7 +130,9 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
     <Button v-if="workspaces.can('cost_center.write')" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
   </PageHeader>
 
-  <EmptyState v-if="costCenters.all.length === 0" :icon="Landmark" :text="$t('costCenters.empty')">
+  <EmptyState v-if="!workspaces.can('cost_center.read')" :icon="Landmark" :text="$t('noAccess.costCenters')" />
+
+  <EmptyState v-else-if="costCenters.all.length === 0" :icon="Landmark" :text="$t('costCenters.empty')">
     <Button v-if="workspaces.can('cost_center.write')" variant="outline" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
   </EmptyState>
 

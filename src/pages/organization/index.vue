@@ -376,7 +376,8 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
       </TabsList>
 
       <TabsContent value="members">
-        <div class="overflow-x-auto rounded-lg border">
+        <p v-if="!org.can('member.read')" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('noAccess.members') }}</p>
+        <div v-else class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">

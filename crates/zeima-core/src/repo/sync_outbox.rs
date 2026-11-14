@@ -232,7 +232,18 @@ impl Core {
         }
         let mut tx = self.pool().begin().await?;
         for (change, outcome) in outbox.changes.iter().zip(results) {
-            if matches!(outcome, Outcome::Rejected { .. }) {
+            if let Outcome::Rejected { reason } = outcome {
+                // The person should hear that the server did not take it.
+                sqlx::query(
+                    "INSERT INTO sync_conflict (table_name, row_id, message, at) VALUES (?, ?, ?, ?) \
+                     ON CONFLICT (table_name, row_id) DO UPDATE SET message = excluded.message, at = excluded.at",
+                )
+                .bind(&change.table)
+                .bind(&change.row_id)
+                .bind(reason.advice())
+                .bind(self.now_ms())
+                .execute(&mut *tx)
+                .await?;
                 continue;
             }
             let known = load_state(&mut tx, &change.table, &change.row_id).await?;

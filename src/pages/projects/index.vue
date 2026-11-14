@@ -75,7 +75,9 @@ const { sort, sorted: sortedList } = useSort(list, {
     <Button v-if="workspaces.can('project.write')" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
   </PageHeader>
 
-  <EmptyState v-if="list.length === 0" :icon="FolderKanban" :text="$t('projects.empty')">
+  <EmptyState v-if="!workspaces.can('project.read')" :icon="FolderKanban" :text="$t('noAccess.projects')" />
+
+  <EmptyState v-else-if="list.length === 0" :icon="FolderKanban" :text="$t('projects.empty')">
     <Button v-if="workspaces.can('project.write')" variant="outline" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
   </EmptyState>
 

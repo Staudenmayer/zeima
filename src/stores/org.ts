@@ -164,7 +164,7 @@ export const useOrgStore = defineStore('org', () => {
       await loadRoles().catch(() => {})
       people.value = await api<{ id: string; name: string | null }[]>('GET', `${base()}/people`).catch(() => [])
       const [m, g, i] = await Promise.all([
-        api<Member[]>('GET', `${base()}/members`),
+        can('member.read') ? api<Member[]>('GET', `${base()}/members`) : Promise.resolve([] as Member[]),
         api<Department[]>('GET', `${base()}/groups`),
         can('member.invite') ? api<Invitation[]>('GET', `${base()}/invitations`) : Promise.resolve([]),
       ])

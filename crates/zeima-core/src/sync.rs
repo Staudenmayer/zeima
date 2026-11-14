@@ -88,6 +88,22 @@ pub enum Reason {
     RoomTaken,
 }
 
+impl Reason {
+    /// What the person is told when the server refuses their change.
+    pub fn advice(self) -> &'static str {
+        match self {
+            Reason::Locked => "The entry is locked; only a manager can change it.",
+            Reason::ForbiddenField => "Only managers change this part of an entry.",
+            Reason::Forbidden | Reason::ForbiddenTable => {
+                "Your role in the organization does not allow this change."
+            }
+            Reason::PolicyProject => "The organization's rules ask for a project on every entry.",
+            Reason::PolicyTags => "The organization's rules ask for tags on every entry.",
+            Reason::RoomTaken => "The room is booked at that time. Pick another room or time.",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum Outcome {

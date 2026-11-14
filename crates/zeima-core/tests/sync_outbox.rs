@@ -132,6 +132,11 @@ async fn a_rejected_change_is_not_retried_and_not_remembered() {
     .await
     .unwrap();
     assert!(core.sync_outbox(SYNC_BATCH).await.unwrap().is_empty());
+    // ...but the person is told, in the list of changes that could not be applied.
+    let told = core.sync_conflicts().await.unwrap();
+    assert_eq!(told.len(), 1);
+    assert_eq!(told[0].row_id, project.id);
+    assert!(told[0].message.contains("locked"));
 
     // The server never took it, so the next edit still sends every field it
     // differs on, not just the new one.
