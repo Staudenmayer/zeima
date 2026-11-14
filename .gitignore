@@ -33,3 +33,6 @@ addons/*/target/
 # Server environment
 .env
 packages/core-wasm/pkg
+
+# Developer-local copies of the blueprints
+deploy/dev.env
