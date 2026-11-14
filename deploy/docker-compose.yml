@@ -85,6 +85,8 @@ services:
       KEYCLOAK_URL: ${ID_URL}
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080
       DOCS_ENABLED: ${DOCS_ENABLED:-false}
+      # Lets the API manage users and organizations in Keycloak.
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${API_ADMIN_SECRET}
       # Vendor keys whose license tokens are accepted (see server/README.md).
       ENTITLEMENT_PUBLIC_KEYS: ${ENTITLEMENT_PUBLIC_KEYS:-}
     depends_on:

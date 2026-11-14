@@ -37,6 +37,11 @@ export const EnvSchema = Type.Object({
   /** Public client of the Swagger UI "Authorize" button. */
   DOCS_CLIENT_ID: Type.String({ default: 'zeima-swagger' }),
 
+  /** Service-account client the API uses to manage users, groups and organizations in Keycloak. */
+  KEYCLOAK_ADMIN_CLIENT_ID: Type.String({ minLength: 1, default: 'zeima-api-admin' }),
+  /** Its secret. Without it, organization management is switched off. */
+  KEYCLOAK_ADMIN_CLIENT_SECRET: Type.Optional(Type.String({ minLength: 1 })),
+
   DOCS_ENABLED: Type.Boolean({ default: true }),
   METRICS_ENABLED: Type.Boolean({ default: true }),
   /** Browser origins allowed by CORS, comma-separated (the desktop app needs none). */
@@ -78,6 +83,8 @@ export interface Config {
     jwksUrl: string
     authorizationUrl: string
     tokenUrl: string
+    /** Admin REST API access; `null` when no client secret is set. */
+    admin: { clientId: string; clientSecret: string; tokenUrl: string; apiUrl: string } | null
   }
   audience: string
   allowedClients: string[]
@@ -178,6 +185,14 @@ export function loadConfig(source: Record<string, string | undefined> = process.
       jwksUrl: `${internal}/protocol/openid-connect/certs`,
       authorizationUrl: `${issuer}/protocol/openid-connect/auth`,
       tokenUrl: `${issuer}/protocol/openid-connect/token`,
+      admin: env.KEYCLOAK_ADMIN_CLIENT_SECRET
+        ? {
+            clientId: env.KEYCLOAK_ADMIN_CLIENT_ID,
+            clientSecret: env.KEYCLOAK_ADMIN_CLIENT_SECRET,
+            tokenUrl: `${internal}/protocol/openid-connect/token`,
+            apiUrl: `${(env.KEYCLOAK_INTERNAL_URL ?? keycloakUrl).replace(/\/+$/, '')}/admin/realms/${encodeURIComponent(env.KEYCLOAK_REALM)}`,
+          }
+        : null,
     },
     audience: env.API_AUDIENCE,
     allowedClients: list(env.ALLOWED_CLIENTS),

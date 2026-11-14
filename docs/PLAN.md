@@ -165,7 +165,7 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 
 Order is by dependency:
 
-1. **User management**: org creation (Keycloak Organization + role groups), invitations, role assignment, hierarchical department groups. All of it goes through API admin endpoints that call the Keycloak Admin API, then the mirror tables. Admin pages (`admin/users`, `admin/groups`, `admin/policies`), seat counting against the entitlement, audit log.
+1. **User management** *(started: API ✅ — org creation, members, invitations with roles and seats, role changes, deactivate/remove, audit log (`server/src/modules/orgs`), checked against Keycloak 26.8; groups/departments API, admin pages in the app and the Keycloak event webhook are still open)*: org creation (Keycloak Organization + role groups), invitations, role assignment, hierarchical department groups. All of it goes through API admin endpoints that call the Keycloak Admin API, then the mirror tables. Admin pages (`admin/users`, `admin/groups`, `admin/policies`), seat counting against the entitlement, audit log.
 2. **Shared data**: org projects (visibility, members, project manager role), org cost centers/tags, org work schedules and auto-pause policies per group
 3. **Approvals**: timesheet submission/approval → `locked` entries; absence requests/approval
 4. **Online users**: server WebSocket presence hub, client presence reporter (based on timer state and the idle/lock watchers), privacy opt-in for project sharing, `team/online` panel + dashboard widget

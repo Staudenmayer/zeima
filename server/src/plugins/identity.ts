@@ -6,6 +6,7 @@
 import type { FastifyInstance } from 'fastify'
 import fp from 'fastify-plugin'
 import { schema } from '../db/index.ts'
+import { acceptInvitations } from '../modules/orgs/service.ts'
 
 const REFRESH_MS = 5 * 60_000
 
@@ -25,5 +26,9 @@ export const identityPlugin = fp(async (app: FastifyInstance) => {
         set: { email: user.email, displayName: user.name, locale: user.locale, lastSeenAt: now },
       })
     seen.set(user.id, now)
+    // Invitations the person has accepted give them their role.
+    if (app.keycloakAdmin) {
+      await acceptInvitations(app.db, app.keycloakAdmin, user).catch((err: unknown) => app.log.warn({ err }, 'could not apply an invitation'))
+    }
   })
 })

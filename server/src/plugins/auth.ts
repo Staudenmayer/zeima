@@ -30,6 +30,8 @@ export interface AuthUser {
   /** Keycloak user id (`sub`). */
   id: string
   email: string | null
+  /** Keycloak has checked that the user owns the address. */
+  emailVerified: boolean
   name: string | null
   locale: string | null
   /** Realm roles, e.g. `user`, `platform-admin`. */
@@ -86,6 +88,7 @@ function userFromClaims(claims: JWTPayload): AuthUser {
   return {
     id: claims.sub!,
     email: str(claims.email),
+    emailVerified: claims.email_verified === true,
     name: str(claims.name),
     locale: str(claims.locale),
     roles,

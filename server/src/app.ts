@@ -12,6 +12,8 @@ import { discoveryRoutes } from './modules/discovery/routes.ts'
 import { healthRoutes, keycloakCheck, type ReadinessCheck } from './modules/health/routes.ts'
 import { billingRoutes } from './modules/billing/routes.ts'
 import { licenseRoutes, licensingRoutes } from './modules/licensing/routes.ts'
+import { orgRoutes } from './modules/orgs/routes.ts'
+import { HttpKeycloakAdmin, type KeycloakAdmin } from './keycloak/admin.ts'
 import { syncRoutes } from './modules/sync/routes.ts'
 import { meRoutes } from './modules/me/routes.ts'
 import { authPlugin } from './plugins/auth.ts'
@@ -28,6 +30,8 @@ export interface AppOptions {
   keys?: JWTVerifyGetKey
   /** Database for the routes; adds a readiness check. Omit for no database. */
   db?: Db
+  /** Keycloak admin client (tests pass a fake); default: HTTP when the config has admin credentials. */
+  keycloakAdmin?: KeycloakAdmin | null
   /** Register the modules of both deployment modes. For the API document only. */
   documentAll?: boolean
   /** Readiness checks; default: Keycloak. */
@@ -57,6 +61,7 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
 
   const { db } = options
   app.decorate('licensing', new Licensing(config))
+  app.decorate('keycloakAdmin', options.keycloakAdmin !== undefined ? options.keycloakAdmin : config.keycloak.admin ? new HttpKeycloakAdmin(config.keycloak.admin) : null)
   if (db) app.decorate('db', db)
   await app.register(healthRoutes, {
     checks: {
@@ -68,6 +73,7 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
   await app.register(
     async (v1) => {
       await v1.register(meRoutes)
+      await v1.register(orgRoutes)
       await v1.register(syncRoutes)
       await v1.register(licensingRoutes)
       // Offline licenses are for self-hosted installs; the cloud has billing.
@@ -87,5 +93,7 @@ declare module 'fastify' {
     /** Present when the app was built with a database. */
     db: Db
     licensing: Licensing
+    /** Null when no admin credentials are configured: organization management is off. */
+    keycloakAdmin: KeycloakAdmin | null
   }
 }

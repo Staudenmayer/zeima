@@ -10,6 +10,7 @@ function actor(role: OrgRole | null, groups: string[] = [], orgId: string | null
   const user: AuthUser = {
     id: 'me',
     email: null,
+    emailVerified: false,
     name: null,
     locale: null,
     roles: ['user'],

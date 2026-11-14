@@ -104,6 +104,27 @@ export const kcOrgMember = pgTable(
   ],
 )
 
+/** An invitation that has been sent and not yet accepted; the role is given when the invitee signs in. */
+export const orgInvitation = pgTable(
+  'org_invitation',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    /** Lower case. */
+    email: text('email').notNull(),
+    role: text('role').notNull(),
+    invitedBy: uuid('invited_by'),
+    createdAt: ms('created_at').notNull(),
+    acceptedAt: ms('accepted_at'),
+  },
+  (t) => [
+    uniqueIndex('org_invitation_pending').on(t.orgId, t.email).where(sql`${t.acceptedAt} IS NULL`),
+    check('org_invitation_role', sql`${t.role} IN ('admin', 'manager', 'member')`),
+  ],
+)
+
 export const device = pgTable(
   'device',
   {

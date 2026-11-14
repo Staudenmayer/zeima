@@ -43,6 +43,13 @@
       "when": 1794582621023,
       "tag": "0005_entitlement_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794642687448,
+      "tag": "0006_org_invitation",
+      "breakpoints": true
     }
   ]
 }
