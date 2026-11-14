@@ -43,7 +43,7 @@ It runs fully offline for one person. A paid tier adds sync and organization fea
 | Online users (presence) | — | — | ✅ |
 | Work-location view (office / home office) | — | — | ✅ |
 | Meetings: schedule & sync with attendees | — | — | ✅ |
-| Approvals (timesheets, absences) | — | — | ✅ |
+| Approvals (absences) | — | — | ✅ |
 | SSO (Entra ID / Google Workspace / SAML / LDAP via Keycloak) | — | — | ✅ (Enterprise add-on) |
 | Hosting | local only | cloud | **cloud (default)** or **self-hosted** (offline license file) |
 
@@ -213,7 +213,7 @@ A **workspace** is the ownership boundary. Free users have one local personal wo
 | `billable` | |
 | `source` | `timer` \| `manual` \| `calendar` \| `meeting` \| `addon:<id>` \| `import` |
 | `source_ref` | e.g. calendar event id |
-| `locked` | true after timesheet approval or period close |
+| `locked` | true after period close (set by a manager) |
 | **TimeEntryTag** | `entry_id, tag_id` |
 
 Invariant: at most **one running entry per user**. Overlapping entries are allowed but flagged in the UI and in reports.
@@ -300,7 +300,7 @@ Platform notes: idle time via the `user-idle` crate (X11/Wayland support varies;
 - Vacation entitlement defaults, week start, overtime thresholds: from the country profile.
 - Absences: request (org) or record (personal); half days; remaining vacation days.
 - **Balance**: running flexitime balance, weekly and monthly overtime, manual adjustments with audit trail.
-- **Period close / timesheet approval** (org): the user submits a month, a manager approves, and the entries become `locked`.
+- **Period close** (org): a manager locks a period; its entries become `locked`. Time entries are not handed in for approval, only absences are.
 
 ### 5.5 Dashboard
 Widgets (rearrangeable, persisted per user):

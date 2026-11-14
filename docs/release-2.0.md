@@ -20,9 +20,9 @@ organization:
 - **Rules**: organizations (and departments) can require a project or tag on
   every finished entry, limit what managers see of entries, hide who is online,
   set a weekly target and suggest an auto-pause time.
-- **Approvals**: submit a timesheet for a period; a manager or admin approves
-  or rejects it, which locks the entries. Absences in an organization are
-  requests that someone approves. Desktop notifications tell you what waits.
+- **Approvals**: absences in an organization are requests that a manager or
+  admin approves or rejects. Time entries are not handed in for approval.
+  Desktop notifications tell you what waits.
 - **Team**: tracked and billable time per person, project, tag and cost
   center, per department, with people far from the weekly target flagged.
 - **Online**: see who is online, tracking, in a meeting or away (you choose
@@ -67,8 +67,8 @@ organization:
    green (CI does this).
 2. Against a real stack: `deploy/e2e/smoke.mjs` and `deploy/e2e/org-smoke.mjs`.
 3. By hand with two apps (ideally Windows or macOS too) on one organization:
-   invite and join, switch workspace, track time in both, submit and approve a
-   timesheet (entries lock), request and approve an absence, create a meeting
+   invite and join, switch workspace, track time in both, request and approve an
+   absence, create a meeting
    and answer it from the other app, look at Online, Locations and Team.
 4. Release pipeline: the updater key password secret matches the key
    (`node scripts/verify-updater-key.mjs`), then tag `v2.0.0-rc.1` first.

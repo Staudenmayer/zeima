@@ -3209,12 +3209,6 @@
                             {
                               "type": "string",
                               "enum": [
-                                "timesheet_submission"
-                              ]
-                            },
-                            {
-                              "type": "string",
-                              "enum": [
                                 "work_location"
                               ]
                             },

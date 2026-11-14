@@ -4,8 +4,8 @@
 
 import { eq } from 'drizzle-orm'
 import { type Db, schema } from '../db/index.ts'
-import { startOfDay } from '../modules/sync/approvals.ts'
 import { occurrences } from './occurrences.ts'
+import { startOfDay } from './zones.ts'
 
 export interface Busy {
   from: number

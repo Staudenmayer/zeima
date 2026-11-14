@@ -28,7 +28,6 @@ const MATRIX: Record<string, [owner: Scope | null, admin: Scope | null, manager:
   'entry.read': [O, o, g, o],
   'entry.write': [o, o, o, o],
   'entry.write_locked': [O, O, g, n],
-  'entry.approve': [O, O, g, n],
   'absence.read': [O, O, g, o],
   'absence.write': [o, o, o, o],
   'absence.approve': [O, O, g, n],

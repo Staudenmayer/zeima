@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use zeima_core::clock::ManualClock;
 use zeima_core::model::BalanceAdjustmentInput;
-use zeima_core::{Core, Error, SubmissionStatus, SYNC_BATCH};
+use zeima_core::{Core, Error, SYNC_BATCH};
 
 const T0: i64 = 1_791_187_200_000;
 const WS: &str = "0192f000-0000-7000-8000-00000000a001";
@@ -36,99 +36,6 @@ async fn setup() -> (Core, Core, Core) {
         .unwrap();
     let (ada, ben) = (personal.scoped(WS, ADA), personal.scoped(WS, BEN));
     (personal, ada, ben)
-}
-
-#[tokio::test]
-async fn a_timesheet_is_submitted_then_decided_by_someone_else() {
-    let (_, ada, ben) = setup().await;
-    let sub = ada
-        .submit_timesheet(date("2026-10-05"), date("2026-10-11"), " week 41 ")
-        .await
-        .unwrap();
-    assert_eq!(
-        (sub.status, sub.note.as_str(), sub.user_id.as_str()),
-        (SubmissionStatus::Submitted, "week 41", ADA)
-    );
-
-    // Not twice, not overlapping.
-    assert!(matches!(
-        ada.submit_timesheet(date("2026-10-05"), date("2026-10-11"), "")
-            .await,
-        Err(Error::Conflict(_))
-    ));
-    assert!(matches!(
-        ada.submit_timesheet(date("2026-10-10"), date("2026-10-18"), "")
-            .await,
-        Err(Error::Conflict(_))
-    ));
-    // Not before it starts.
-    assert!(ada
-        .submit_timesheet(date("2026-10-12"), date("2026-10-11"), "")
-        .await
-        .is_err());
-
-    // Not by oneself.
-    assert!(matches!(
-        ada.decide_submission(&sub.id, true, "").await,
-        Err(Error::Validation { .. })
-    ));
-    let approved = ben.decide_submission(&sub.id, true, "ok").await.unwrap();
-    assert_eq!(
-        (
-            approved.status,
-            approved.decided_by.as_deref(),
-            approved.decision_note.as_str()
-        ),
-        (SubmissionStatus::Approved, Some(BEN), "ok")
-    );
-    assert!(approved.decided_at.is_some());
-    // Decided once; no taking back an approved one.
-    assert!(matches!(
-        ben.decide_submission(&sub.id, false, "").await,
-        Err(Error::Conflict(_))
-    ));
-    assert!(matches!(
-        ada.withdraw_submission(&sub.id).await,
-        Err(Error::Conflict(_))
-    ));
-    assert_eq!(
-        ada.list_submissions().await.unwrap()[0].status,
-        SubmissionStatus::Approved
-    );
-}
-
-#[tokio::test]
-async fn a_rejected_timesheet_is_submitted_again_and_a_waiting_one_taken_back() {
-    let (_, ada, ben) = setup().await;
-    let first = ada
-        .submit_timesheet(date("2026-10-12"), date("2026-10-18"), "")
-        .await
-        .unwrap();
-    ben.decide_submission(&first.id, false, "hours missing")
-        .await
-        .unwrap();
-    let again = ada
-        .submit_timesheet(date("2026-10-12"), date("2026-10-18"), "fixed")
-        .await
-        .unwrap();
-    assert_eq!(again.id, first.id, "the same record is submitted again");
-    assert_eq!(
-        (again.status, again.decided_by, again.decision_note.as_str()),
-        (SubmissionStatus::Submitted, None, "")
-    );
-    ada.withdraw_submission(&again.id).await.unwrap();
-    assert!(ada.list_submissions().await.unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn only_shared_workspaces_have_timesheets() {
-    let (personal, ..) = setup().await;
-    assert!(matches!(
-        personal
-            .submit_timesheet(date("2026-10-05"), date("2026-10-11"), "")
-            .await,
-        Err(Error::Validation { .. })
-    ));
 }
 
 #[tokio::test]
@@ -266,40 +173,6 @@ async fn absences_in_a_shared_workspace_are_requests_someone_else_decides() {
         .await
         .unwrap();
     assert_eq!(a.status, AbsenceStatus::Approved);
-}
-
-#[tokio::test]
-async fn an_approved_timesheet_can_be_reopened_by_someone_else() {
-    let (_, ada, ben) = setup().await;
-    let sub = ada
-        .submit_timesheet(date("2026-10-05"), date("2026-10-11"), "")
-        .await
-        .unwrap();
-    assert!(
-        matches!(ben.reopen_submission(&sub.id, "").await, Err(Error::Conflict(_))),
-        "only approved ones"
-    );
-    ben.decide_submission(&sub.id, true, "").await.unwrap();
-    assert!(
-        matches!(
-            ada.reopen_submission(&sub.id, "").await,
-            Err(Error::Validation { .. })
-        ),
-        "not one's own"
-    );
-    let reopened = ben.reopen_submission(&sub.id, "a day is missing").await.unwrap();
-    assert_eq!(
-        (reopened.status, reopened.decision_note.as_str()),
-        (SubmissionStatus::Rejected, "a day is missing")
-    );
-    // The person can submit it again.
-    assert_eq!(
-        ada.submit_timesheet(date("2026-10-05"), date("2026-10-11"), "")
-            .await
-            .unwrap()
-            .status,
-        SubmissionStatus::Submitted
-    );
 }
 
 #[tokio::test]

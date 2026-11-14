@@ -470,13 +470,7 @@ impl WriteTx<'_> {
     /// In a shared workspace the server decides who may change a row by its
     /// `userId`, so rows of one person's own data carry it.
     fn with_owner(&self, table: &str, payload: Option<String>) -> Option<String> {
-        const PERSONAL: [&str; 5] = [
-            "absence",
-            "balance_adjustment",
-            "work_settings",
-            "work_schedule",
-            "timesheet_submission",
-        ];
+        const PERSONAL: [&str; 4] = ["absence", "balance_adjustment", "work_settings", "work_schedule"];
         let ctx = &self.core.ctx;
         if !ctx.shared || !PERSONAL.contains(&table) {
             return payload;

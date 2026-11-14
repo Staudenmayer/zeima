@@ -1960,7 +1960,7 @@ export interface paths {
                         /** Format: uuid */
                         deviceId: string;
                         changes: {
-                            table: "project" | "tag" | "time_entry" | "pause" | "activity" | "cost_center" | "cost_center_assignment" | "jurisdiction_selection" | "work_settings" | "work_schedule" | "absence_type" | "absence" | "custom_holiday" | "balance_adjustment" | "display_settings" | "timesheet_submission" | "work_location" | "org_policy" | "office" | "meeting" | "meeting_response";
+                            table: "project" | "tag" | "time_entry" | "pause" | "activity" | "cost_center" | "cost_center_assignment" | "jurisdiction_selection" | "work_settings" | "work_schedule" | "absence_type" | "absence" | "custom_holiday" | "balance_adjustment" | "display_settings" | "work_location" | "org_policy" | "office" | "meeting" | "meeting_response";
                             /** Format: uuid */
                             rowId: string;
                             op: "upsert" | "delete";

@@ -13,7 +13,6 @@ import { useOrgStore } from '@/stores/org'
 import { useTagsStore } from '@/stores/tags'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
-import { useSubmissionsStore } from '@/stores/submissions'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 definePage({ meta: { titleKey: 'nav.team' } })
@@ -23,7 +22,6 @@ const tags = useTagsStore()
 const costCenters = useCostCentersStore()
 const projects = useProjectsStore()
 const settings = useSettingsStore()
-const submissions = useSubmissionsStore()
 const workspaces = useWorkspaceStore()
 
 type Preset = 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth'
@@ -57,7 +55,6 @@ const total = computed(() => team.value.reduce((n, m) => n + m.totalMs, 0))
 const billable = computed(() => team.value.reduce((n, m) => n + m.billableMs, 0))
 const nameOf = (id: string) => org.nameOf(id)
 const projectName = (id: string | null) => (id ? (projects.byId.get(id)?.name ?? '') : '')
-const waiting = computed(() => submissions.all.filter((s) => s.status === 'submitted').length)
 
 const DAY = 86_400_000
 const currentRange = computed(() => range(preset.value))
@@ -126,7 +123,6 @@ async function load() {
   try {
     if (org.members.length === 0) await org.load().catch(() => {})
     await Promise.all([org.loadPolicies().catch(() => {}), tags.load().catch(() => {}), costCenters.load().catch(() => {})])
-    await submissions.load().catch(() => {})
     team.value = await call(commands.teamSummary(range(preset.value)))
   } catch (err) {
     toast.error(errorMessage(err))
@@ -154,9 +150,6 @@ watch([preset, () => workspaces.active?.id], () => {
     <div class="flex flex-wrap gap-6 text-sm">
       <div><p class="text-xs text-muted-foreground">{{ $t('team.total') }}</p><p class="text-2xl font-semibold tabular-nums">{{ hours(total) }}</p></div>
       <div><p class="text-xs text-muted-foreground">{{ $t('team.billable') }}</p><p class="text-2xl font-semibold tabular-nums">{{ hours(billable) }}</p></div>
-      <div v-if="waiting"><p class="text-xs text-muted-foreground">{{ $t('team.waiting') }}</p>
-        <RouterLink to="/approvals" class="text-2xl font-semibold tabular-nums hover:underline">{{ waiting }}</RouterLink>
-      </div>
     </div>
 
     <section v-if="departmentTotals.length" class="grid gap-1">

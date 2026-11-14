@@ -228,11 +228,6 @@ export const commands = {
 	/**  Absence requests of other people waiting for a decision. */
 	absenceRequests: () => typedError<Absence[], CmdError>(__TAURI_INVOKE("absence_requests")),
 	absenceDecide: (id: string, approve: boolean, note: string) => typedError<Absence, CmdError>(__TAURI_INVOKE("absence_decide", { id, approve, note })),
-	submissionsList: () => typedError<TimesheetSubmission[], CmdError>(__TAURI_INVOKE("submissions_list")),
-	submissionSubmit: (from: string, to: string, note: string) => typedError<TimesheetSubmission, CmdError>(__TAURI_INVOKE("submission_submit", { from, to, note })),
-	submissionDecide: (id: string, approve: boolean, note: string) => typedError<TimesheetSubmission, CmdError>(__TAURI_INVOKE("submission_decide", { id, approve, note })),
-	submissionReopen: (id: string, note: string) => typedError<TimesheetSubmission, CmdError>(__TAURI_INVOKE("submission_reopen", { id, note })),
-	submissionWithdraw: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("submission_withdraw", { id })),
 	workspaceList: () => typedError<WorkspaceView[], CmdError>(__TAURI_INVOKE("workspace_list")),
 	workspaceSwitch: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("workspace_switch", { id })),
 	/**  What can be bought here. Empty on servers without billing and when signed out. */
@@ -1260,8 +1255,6 @@ export type StartTimer = {
 	billable: boolean | null,
 };
 
-export type SubmissionStatus = "submitted" | "approved" | "rejected";
-
 export type Subscription = {
 	plan: string,
 	status: string,
@@ -1385,23 +1378,6 @@ export type TimeFormat =
 export type TimerChanged = TimerState;
 
 export type TimerState = { status: "idle" } | { status: "running"; entry: TimeEntry } | { status: "paused"; pause: Pause; resumeEntry: TimeEntry | null };
-
-export type TimesheetSubmission = {
-	id: string,
-	/**  The person the timesheet belongs to (their account id). */
-	userId: string,
-	periodStart: string,
-	/**  Inclusive. */
-	periodEnd: string,
-	/**  Zone the period's days are in. */
-	tz: string,
-	status: SubmissionStatus,
-	note: string,
-	submittedAt: number,
-	decidedBy: string | null,
-	decidedAt: number | null,
-	decisionNote: string,
-};
 
 export type UpdateInfo = {
 	version: string,

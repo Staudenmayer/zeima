@@ -72,7 +72,7 @@ account in both and use Sync now. Things to know:
 Automated checks of the same flows, without the app:
 `deploy/e2e/smoke.mjs` (sign-in and sync) and `deploy/e2e/org-smoke.mjs`
 (organizations: create, invite, roles, departments, the shared workspace and its
-rules, a timesheet that gets approved and locks the entries; needs the API to
+rules, an absence request that gets approved; needs the API to
 have `KEYCLOAK_ADMIN_CLIENT_SECRET` and Keycloak to have working SMTP, as in the
 dev stack). Run it with the API on port 3000:
 

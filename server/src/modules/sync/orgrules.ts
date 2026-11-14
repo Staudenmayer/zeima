@@ -38,7 +38,6 @@ const READ: Record<string, string> = {
   balance_adjustment: 'member.read',
   work_schedule: 'member.read',
   work_settings: 'member.read',
-  timesheet_submission: 'entry.approve',
   work_location: 'member.read',
   meeting: 'member.read',
   meeting_response: 'member.read',
@@ -111,49 +110,6 @@ async function checkMeetingResponse(db: Db, orgId: string, me: string, merged: R
 const DECISION_FIELDS = ['decidedBy', 'decidedAt', 'decisionNote']
 
 /**
- * A timesheet submission: its owner hands it in (and takes it back while it
- * waits, or hands in a rejected one again); someone with `entry.approve` over
- * the owner decides a waiting one, and may touch nothing else.
- */
-async function checkSubmission(
-  db: Db,
-  actor: Actor,
-  orgId: string,
-  change: Change,
-  current: RowState | null,
-  owner: string,
-): Promise<Outcome | null> {
-  const forbidden: Outcome = { status: 'rejected', reason: 'forbidden' }
-  const status = plain(current?.fields.status)
-  if (owner === actor.user.id) {
-    if (current && status !== 'submitted' && status !== 'rejected') return forbidden // decided: closed
-    if (change.op === 'delete') return status === 'submitted' ? null : forbidden
-    if (change.fields?.status !== undefined && change.fields.status !== 'submitted') return { status: 'rejected', reason: 'forbidden_field' }
-    if (!current && change.fields?.status !== 'submitted') return forbidden
-    // Handing in again clears the decision; anything else about it is not theirs to write.
-    for (const f of DECISION_FIELDS) {
-      const v = change.fields?.[f]
-      if (v !== undefined && v !== null && v !== '') return { status: 'rejected', reason: 'forbidden_field' }
-    }
-    return null
-  }
-  // Someone else's: decide a waiting one, or reopen an approved one (it goes back
-  // to the owner as rejected); nothing more.
-  if (!current || change.op === 'delete') return forbidden
-  const reopening = status === 'approved' && change.fields?.status === 'rejected'
-  if (status !== 'submitted' && !reopening) return forbidden
-  const scope = scopeOf(actor, 'entry.approve')
-  const covered = scope === 'org' || (scope === 'group' && (await sharesGroup(db, orgId, actor.user.orgs[orgId]?.groups ?? [], owner)))
-  if (!covered) return forbidden
-  const fields = change.fields ?? {}
-  const decision = fields.status
-  if (decision !== 'approved' && decision !== 'rejected') return { status: 'rejected', reason: 'forbidden_field' }
-  if (Object.keys(fields).some((f) => f !== 'status' && !DECISION_FIELDS.includes(f))) return { status: 'rejected', reason: 'forbidden_field' }
-  if (fields.decidedBy !== undefined && fields.decidedBy !== actor.user.id) return { status: 'rejected', reason: 'forbidden_field' }
-  return null
-}
-
-/**
  * An absence in an organization is a request. Its owner writes it (always as
  * `requested`, so changing a decided one asks again); someone with
  * `absence.approve` over the owner decides a waiting one and changes nothing else.
@@ -217,7 +173,6 @@ export async function checkOrgWrite(
   // Own rows: the owner never changes after the row exists.
   const owner = ownerOf(current, change)
   if (!owner) return { status: 'rejected', reason: 'forbidden' }
-  if (change.table === 'timesheet_submission') return checkSubmission(db, actor, orgId, change, current, owner)
   if (change.table === 'absence') return checkAbsence(db, actor, orgId, change, current, owner)
   if (change.table === 'meeting_response' && owner === actor.user.id) return checkMeetingResponse(db, orgId, actor.user.id, merged)
   const moved = change.fields?.userId

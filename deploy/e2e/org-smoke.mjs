@@ -86,17 +86,6 @@ const pulled = async (who) => (await json(await call(who, 'GET', '/v1/sync/pull?
 must((await pulled(member)).some((r) => r.rowId === entry), 'the member reads their entry')
 must((await pulled(owner)).some((r) => r.rowId === entry), 'the owner reads it too')
 
-// ---- a timesheet, approved by the owner, locks the entry
-const day = new Date(start).toISOString().slice(0, 10)
-const sub = randomUUID()
-const submission = { userId: member.sub, periodStart: day, periodEnd: day, tz: 'UTC', status: 'submitted', note: '', submittedAt: Date.now(), decidedBy: null, decidedAt: null, decisionNote: '' }
-must((await push(member, [upsert('timesheet_submission', sub, 4, submission)]))[0].status === 'applied', 'the member submitted a timesheet')
-must((await push(member, [upsert('timesheet_submission', sub, 5, { status: 'approved', decidedBy: member.sub })]))[0].status === 'rejected', 'they cannot approve their own')
-must((await push(owner, [upsert('timesheet_submission', sub, 6, { status: 'approved', decidedBy: owner.sub })]))[0].status === 'applied', 'the owner approved it')
-const locked = (await pulled(member)).find((r) => r.rowId === entry)?.fields.locked?.v
-must(locked === true, 'the approved period locked the entry', locked)
-must((await push(member, [upsert('time_entry', entry, 7, { note: 'late edit' })]))[0].reason === 'locked', 'the member can no longer edit it')
-
 // ---- leaving
 await expect(await call(owner, 'DELETE', `/v1/orgs/${org.id}/members/${member.sub}`), 204, 'the owner removed the member')
 const audit = await json(await call(owner, 'GET', `/v1/orgs/${org.id}/audit`))

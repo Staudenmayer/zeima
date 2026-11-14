@@ -1,5 +1,5 @@
-//! Tells the person when something waits for their decision or was decided
-//! (SPEC §5.9): derived from the rows a sync brings in, so every change is
+//! Tells the person when an absence request waits for their decision or was
+//! decided (SPEC §5.9): derived from the rows a sync brings in, so every change is
 //! reported once, on the device that receives it.
 
 use tauri::AppHandle;
@@ -11,8 +11,7 @@ use crate::state::AppState;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Notices {
-    /// Timesheets of other people waiting for the person.
-    pub timesheets_waiting: usize,
+    /// Absence requests of other people waiting for the person.
     pub absences_waiting: usize,
     /// The person's own, newly approved or rejected by someone else.
     pub approved: usize,
@@ -33,7 +32,7 @@ fn text<'a>(row: &'a RemoteRow, field: &str) -> Option<&'a str> {
 pub fn notices(rows: &[RemoteRow], me: &str) -> Notices {
     let mut n = Notices::default();
     for row in rows {
-        if row.deleted.is_some() || !matches!(row.table.as_str(), "timesheet_submission" | "absence") {
+        if row.deleted.is_some() || row.table != "absence" {
             continue;
         }
         let (Some(owner), Some(status)) = (text(row, "userId"), text(row, "status")) else {
@@ -41,8 +40,7 @@ pub fn notices(rows: &[RemoteRow], me: &str) -> Notices {
         };
         let decided_by = text(row, "decidedBy");
         match (owner == me, status) {
-            (false, "submitted") if row.table == "timesheet_submission" => n.timesheets_waiting += 1,
-            (false, "requested") if row.table == "absence" => n.absences_waiting += 1,
+            (false, "requested") => n.absences_waiting += 1,
             (true, "approved") if decided_by.is_some_and(|d| d != me) => n.approved += 1,
             (true, "rejected") if decided_by.is_some_and(|d| d != me) => n.rejected += 1,
             _ => {}
@@ -58,16 +56,6 @@ pub fn show(app: &AppHandle, n: &Notices) {
     }
     let de = app.state::<AppState>().settings().language() == "de";
     let mut lines: Vec<String> = Vec::new();
-    if n.timesheets_waiting > 0 {
-        lines.push(if de {
-            format!(
-                "{} Zeitnachweis(e) warten auf deine Freigabe",
-                n.timesheets_waiting
-            )
-        } else {
-            format!("{} timesheet(s) waiting for your approval", n.timesheets_waiting)
-        });
-    }
     if n.absences_waiting > 0 {
         lines.push(if de {
             format!(
@@ -80,16 +68,16 @@ pub fn show(app: &AppHandle, n: &Notices) {
     }
     if n.approved > 0 {
         lines.push(if de {
-            format!("{} Eintrag/Einträge freigegeben", n.approved)
+            format!("{} Abwesenheit(en) freigegeben", n.approved)
         } else {
-            format!("{} of yours approved", n.approved)
+            format!("{} absence(s) of yours approved", n.approved)
         });
     }
     if n.rejected > 0 {
         lines.push(if de {
-            format!("{} Eintrag/Einträge abgelehnt", n.rejected)
+            format!("{} Abwesenheit(en) abgelehnt", n.rejected)
         } else {
-            format!("{} of yours rejected", n.rejected)
+            format!("{} absence(s) of yours rejected", n.rejected)
         });
     }
     let title = if de { "Freigaben" } else { "Approvals" };
@@ -130,20 +118,17 @@ mod tests {
     #[test]
     fn reports_what_waits_and_what_was_decided_by_others() {
         let rows = vec![
-            row("timesheet_submission", "ann", "submitted", None),
-            row("timesheet_submission", "me", "submitted", None),
             row("absence", "ann", "requested", None),
             row("absence", "me", "approved", Some("boss")),
-            row("timesheet_submission", "me", "rejected", Some("boss")),
+            row("absence", "me", "rejected", Some("boss")),
             // My own decision on somebody else's, an absence of mine nobody decided, other tables.
             row("absence", "ann", "approved", Some("me")),
             row("absence", "me", "approved", None),
-            row("time_entry", "ann", "submitted", None),
+            row("time_entry", "ann", "requested", None),
         ];
         assert_eq!(
             notices(&rows, "me"),
             Notices {
-                timesheets_waiting: 1,
                 absences_waiting: 1,
                 approved: 1,
                 rejected: 1

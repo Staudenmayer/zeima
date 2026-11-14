@@ -16,7 +16,6 @@ actions:
   entry.read:        { owner: org, admin: own, manager: group, member: own }
   entry.write:       { owner: own, admin: own, manager: own, member: own }
   entry.write_locked: { owner: org, admin: org, manager: group }
-  entry.approve:     { owner: org, admin: org, manager: group }
 
   # Absences
   absence.read:      { owner: org, admin: org, manager: group, member: own }
