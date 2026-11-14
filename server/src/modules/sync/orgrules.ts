@@ -26,6 +26,7 @@ const SHARED: Record<string, string> = {
   activity: 'policy.write',
   absence_type: 'policy.write',
   org_policy: 'policy.write',
+  office: 'policy.write',
   custom_holiday: 'policy.write',
 }
 

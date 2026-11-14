@@ -382,13 +382,13 @@ async fn the_team_summary_adds_up_each_persons_projects() {
 async fn work_locations_are_one_row_per_person_and_day() {
     use zeima_core::LocationKind;
     let (personal, ada, ben) = setup().await;
-    ada.set_location(date("2026-10-05"), Some(LocationKind::Office))
+    ada.set_location(date("2026-10-05"), Some(LocationKind::Office), None)
         .await
         .unwrap();
-    ada.set_location(date("2026-10-05"), Some(LocationKind::Home))
+    ada.set_location(date("2026-10-05"), Some(LocationKind::Home), None)
         .await
         .unwrap();
-    ben.set_location(date("2026-10-05"), Some(LocationKind::Travel))
+    ben.set_location(date("2026-10-05"), Some(LocationKind::Travel), None)
         .await
         .unwrap();
     let day = ada
@@ -403,7 +403,7 @@ async fn work_locations_are_one_row_per_person_and_day() {
     );
     // Clearing and setting again reuses the row (the same id on every device).
     let id = day[0].id.clone();
-    ada.set_location(date("2026-10-05"), None).await.unwrap();
+    ada.set_location(date("2026-10-05"), None, None).await.unwrap();
     assert_eq!(
         ada.list_locations(date("2026-10-05"), date("2026-10-05"))
             .await
@@ -411,7 +411,7 @@ async fn work_locations_are_one_row_per_person_and_day() {
             .len(),
         1
     );
-    ada.set_location(date("2026-10-05"), Some(LocationKind::Office))
+    ada.set_location(date("2026-10-05"), Some(LocationKind::Office), None)
         .await
         .unwrap();
     let again = ada
@@ -420,7 +420,7 @@ async fn work_locations_are_one_row_per_person_and_day() {
         .unwrap();
     assert_eq!(again[0].id, id);
     assert!(personal
-        .set_location(date("2026-10-05"), Some(LocationKind::Home))
+        .set_location(date("2026-10-05"), Some(LocationKind::Home), None)
         .await
         .is_err());
 }
@@ -596,4 +596,117 @@ async fn the_team_summary_also_sums_tags_and_cost_centers_and_lists_a_persons_en
         2
     );
     assert!(ben.team_entries(BEN, range).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_day_in_the_office_can_name_the_office() {
+    use zeima_core::LocationKind;
+    let (_, ada, _) = setup().await;
+    let vienna = ada.save_office(None, " Vienna ", Some(20)).await.unwrap();
+    assert_eq!((vienna.name.as_str(), vienna.capacity), ("Vienna", Some(20)));
+    assert!(ada.save_office(None, "", None).await.is_err());
+    assert!(ada.save_office(None, "Tiny", Some(0)).await.is_err());
+    let renamed = ada
+        .save_office(Some(&vienna.id), "Vienna HQ", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        (renamed.id.as_str(), renamed.capacity),
+        (vienna.id.as_str(), None)
+    );
+
+    ada.set_location(
+        date("2026-10-05"),
+        Some(LocationKind::Office),
+        Some(vienna.id.clone()),
+    )
+    .await
+    .unwrap();
+    let day = ada
+        .list_locations(date("2026-10-05"), date("2026-10-05"))
+        .await
+        .unwrap();
+    assert_eq!(day[0].office_id.as_deref(), Some(vienna.id.as_str()));
+    // Only office days have an office, and it must exist.
+    ada.set_location(
+        date("2026-10-06"),
+        Some(LocationKind::Home),
+        Some(vienna.id.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        ada.list_locations(date("2026-10-06"), date("2026-10-06"))
+            .await
+            .unwrap()[0]
+            .office_id,
+        None
+    );
+    assert!(ada
+        .set_location(
+            date("2026-10-07"),
+            Some(LocationKind::Office),
+            Some("nope".into())
+        )
+        .await
+        .is_err());
+    ada.delete_office(&vienna.id).await.unwrap();
+    assert!(ada.list_offices().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_usual_week_fills_the_empty_days() {
+    use zeima_core::{LocationKind, LocationPattern, PatternDay};
+    let (_, ada, _) = setup().await;
+    let day = |weekday, kind| PatternDay {
+        weekday,
+        kind,
+        office_id: None,
+    };
+    assert!(ada
+        .set_location_pattern(LocationPattern {
+            days: vec![day(8, LocationKind::Home)]
+        })
+        .await
+        .is_err());
+    ada.set_location_pattern(LocationPattern {
+        days: vec![
+            day(1, LocationKind::Office),
+            day(3, LocationKind::Office),
+            day(5, LocationKind::Home),
+        ],
+    })
+    .await
+    .unwrap();
+    // 5 to 11 October 2026 is a week from Monday; Wednesday is already set.
+    ada.set_location(date("2026-10-07"), Some(LocationKind::Travel), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        ada.apply_location_pattern(date("2026-10-05"), date("2026-10-11"))
+            .await
+            .unwrap(),
+        2
+    );
+    let week = ada
+        .list_locations(date("2026-10-05"), date("2026-10-11"))
+        .await
+        .unwrap();
+    assert_eq!(
+        week.iter()
+            .map(|l| (l.date.to_string(), l.kind))
+            .collect::<Vec<_>>(),
+        vec![
+            ("2026-10-05".to_string(), LocationKind::Office),
+            ("2026-10-07".to_string(), LocationKind::Travel),
+            ("2026-10-09".to_string(), LocationKind::Home),
+        ]
+    );
+    // Applying again changes nothing.
+    assert_eq!(
+        ada.apply_location_pattern(date("2026-10-05"), date("2026-10-11"))
+            .await
+            .unwrap(),
+        0
+    );
 }

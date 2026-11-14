@@ -24,7 +24,7 @@ mod work;
 pub use addons::AddonRecord;
 pub use budget::BudgetStatus;
 pub use import::{ImportPreview, ImportReport};
-pub use locations::{LocationKind, WorkLocation};
+pub use locations::{LocationKind, LocationPattern, Office, PatternDay, WorkLocation};
 pub use policies::ACCOUNT_GROUPS_KEY;
 pub use submissions::{SubmissionStatus, TimesheetSubmission};
 pub use sync_apply::{ApplyReport, FieldView, RemoteRow, SyncConflict};

@@ -260,6 +260,11 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     // Benn and the admin, who see none of Anna's entries, see where she works.
     for (const who of [BEN, ADMIN, MANAGER]) expect(await pulledIds(who)).toContain(L)
     expect(await results(ANNA, [upsert('work_location', L, 520, { kind: 'home' })])).toEqual([{ status: 'applied' }])
+    // Offices are shared data like projects: set up by those who manage policies.
+    const OFFICE = id(62)
+    expect(await results(ANNA, [upsert('office', OFFICE, 530, { name: 'Vienna', capacity: 20 })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+    expect(await results(ADMIN, [upsert('office', OFFICE, 530, { name: 'Vienna', capacity: 20 })])).toEqual([{ status: 'applied' }])
+    expect(await pulledIds(BEN)).toContain(OFFICE)
   })
 
   describe('policies', () => {

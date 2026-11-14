@@ -437,8 +437,9 @@ pub async fn location_set(
     state: State<'_, AppState>,
     date: NaiveDate,
     kind: Option<zeima_core::LocationKind>,
+    office_id: Option<String>,
 ) -> CmdResult<()> {
-    state.data().set_location(date, kind).await?;
+    state.data().set_location(date, kind, office_id).await?;
     work_changed(&app).await;
     Ok(())
 }
@@ -490,4 +491,64 @@ pub async fn team_entries(
     range: zeima_core::summary::Range,
 ) -> CmdResult<Vec<zeima_core::model::TimeEntry>> {
     Ok(state.data().team_entries(&user_id, range).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn offices_list(state: State<'_, AppState>) -> CmdResult<Vec<zeima_core::Office>> {
+    Ok(state.data().list_offices().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn office_save(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: Option<String>,
+    name: String,
+    capacity: Option<u32>,
+) -> CmdResult<zeima_core::Office> {
+    let office = state
+        .data()
+        .save_office(id.as_deref(), &name, capacity.map(i64::from))
+        .await?;
+    work_changed(&app).await;
+    Ok(office)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn office_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state.data().delete_office(&id).await?;
+    work_changed(&app).await;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn location_pattern_get(state: State<'_, AppState>) -> CmdResult<zeima_core::LocationPattern> {
+    Ok(state.data().location_pattern().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn location_pattern_set(
+    state: State<'_, AppState>,
+    pattern: zeima_core::LocationPattern,
+) -> CmdResult<()> {
+    Ok(state.data().set_location_pattern(pattern).await?)
+}
+
+/// Sets the days without a location from the usual week; returns how many.
+#[tauri::command]
+#[specta::specta]
+pub async fn location_pattern_apply(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> CmdResult<u32> {
+    let n = state.data().apply_location_pattern(from, to).await?;
+    work_changed(&app).await;
+    Ok(n)
 }

@@ -450,6 +450,14 @@ async fn sync_once(app: &AppHandle) -> Result<Option<usize>, String> {
 
     // Organizations' shared workspaces: one handle on each, acting as the account.
     let shared = adopt_shared_workspaces(app, &api, &token).await?;
+    // The usual week sets the coming days that have no location yet.
+    for (_, scope) in &shared {
+        if let Ok(today) = scope.today() {
+            let _ = scope
+                .apply_location_pattern(today, today + chrono::Duration::days(7))
+                .await;
+        }
+    }
     let mut sent = push_all(core, &api, &token, &workspace_id).await?;
     for (id, scope) in &shared {
         sent += push_all(scope, &api, &token, id).await?;

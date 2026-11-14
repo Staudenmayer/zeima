@@ -46,7 +46,9 @@ pub use repo::{
 };
 pub use repo::{ApplyReport, FieldView, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
 pub use repo::{IdTotal, SubmissionStatus, TeamMember, TimesheetSubmission};
-pub use repo::{ImportPreview, ImportReport, LocationKind, WorkLocation};
+pub use repo::{
+    ImportPreview, ImportReport, LocationKind, LocationPattern, Office, PatternDay, WorkLocation,
+};
 
 #[cfg(feature = "db")]
 pub use db::{Core, WorkspaceInfo};

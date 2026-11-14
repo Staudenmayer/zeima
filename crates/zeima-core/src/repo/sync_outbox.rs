@@ -17,7 +17,7 @@ use crate::{Core, Result};
 
 /// Tables the server accepts (`server/src/modules/sync/routes.ts`). Changes
 /// to other tables stay in the log until the server learns them.
-pub const SYNCED_TABLES: [&str; 18] = [
+pub const SYNCED_TABLES: [&str; 19] = [
     "project",
     "tag",
     "time_entry",
@@ -36,6 +36,7 @@ pub const SYNCED_TABLES: [&str; 18] = [
     "timesheet_submission",
     "work_location",
     "org_policy",
+    "office",
 ];
 
 /// The synced tables as an SQL list. sqlx wants literal SQL, so the list is a
@@ -44,7 +45,7 @@ macro_rules! synced_tables_sql {
     () => {
         "'project', 'tag', 'time_entry', 'pause', 'activity', 'cost_center', 'cost_center_assignment', \
          'jurisdiction_selection', 'work_settings', 'work_schedule', 'absence_type', 'absence', \
-         'custom_holiday', 'balance_adjustment', 'display_settings', 'timesheet_submission', 'work_location', 'org_policy'"
+         'custom_holiday', 'balance_adjustment', 'display_settings', 'timesheet_submission', 'work_location', 'org_policy', 'office'"
     };
 }
 

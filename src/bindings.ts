@@ -203,7 +203,14 @@ export const commands = {
 	/**  Adds the entries of `text` (projects and tags as needed). */
 	importRun: (text: string, order: DateOrder) => typedError<ImportReport, CmdError>(__TAURI_INVOKE("import_run", { text, order })),
 	locationsList: (from: string, to: string) => typedError<WorkLocation[], CmdError>(__TAURI_INVOKE("locations_list", { from, to })),
-	locationSet: (date: string, kind: "office" | "home" | "travel" | "other" | null) => typedError<null, CmdError>(__TAURI_INVOKE("location_set", { date, kind })),
+	locationSet: (date: string, kind: "office" | "home" | "travel" | "other" | null, officeId: string | null) => typedError<null, CmdError>(__TAURI_INVOKE("location_set", { date, kind, officeId })),
+	officesList: () => typedError<Office[], CmdError>(__TAURI_INVOKE("offices_list")),
+	officeSave: (id: string | null, name: string, capacity: number | null) => typedError<Office, CmdError>(__TAURI_INVOKE("office_save", { id, name, capacity })),
+	officeDelete: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("office_delete", { id })),
+	locationPatternGet: () => typedError<LocationPattern, CmdError>(__TAURI_INVOKE("location_pattern_get")),
+	locationPatternSet: (pattern: LocationPattern) => typedError<null, CmdError>(__TAURI_INVOKE("location_pattern_set", { pattern })),
+	/**  Sets the days without a location from the usual week; returns how many. */
+	locationPatternApply: (from: string, to: string) => typedError<number, CmdError>(__TAURI_INVOKE("location_pattern_apply", { from, to })),
 	/**
 	 *  Time tracked by everyone this device has entries of in the workspace
 	 *  (what the person's role lets the server send).
@@ -821,6 +828,11 @@ export type JurisdictionSelection = {
 
 export type LocationKind = "office" | "home" | "travel" | "other";
 
+/**  A usual week: for each weekday (Monday = 1 … Sunday = 7) where the person works. */
+export type LocationPattern = {
+	days: PatternDay[],
+};
+
 /**  What managers see of the entries of the people they manage. */
 export type ManagerVisibility = "full" | "hide_notes" | "totals_only";
 
@@ -872,11 +884,25 @@ export type OAuthProvider = {
 	redirect_host?: string | null,
 };
 
+/**  A place people work from, with room for `capacity` people a day. */
+export type Office = {
+	id: string,
+	name: string,
+	capacity: number | null,
+};
+
 export type OrgPolicy = {
 	id: string,
 	/**  `None`: the whole organization; otherwise a department like `dev/backend`. */
 	groupPath: string | null,
 } & PolicySettings;
+
+export type PatternDay = {
+	/**  1 = Monday … 7 = Sunday. */
+	weekday: number,
+	kind: LocationKind,
+	officeId?: string | null,
+};
 
 export type Pause = {
 	id: string,
@@ -1370,6 +1396,8 @@ export type WorkLocation = {
 	userId: string,
 	date: string,
 	kind: LocationKind,
+	/**  Which office, for a day in the office. */
+	officeId?: string | null,
 };
 
 export type WorkSchedule = {
