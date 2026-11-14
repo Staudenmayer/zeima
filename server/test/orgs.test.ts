@@ -227,10 +227,10 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     const res = await call('GET', `/v1/orgs/${ORG}/people`, MEMBER, 'member')
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual([
-      { id: ADMIN, name: 'Adam' },
-      { id: MEMBER, name: 'Max' },
-      { id: MANAGER, name: 'Mia' },
-      { id: OWNER, name: 'Olga' },
+      { id: ADMIN, name: 'Adam', avatar: null },
+      { id: MEMBER, name: 'Max', avatar: null },
+      { id: MANAGER, name: 'Mia', avatar: null },
+      { id: OWNER, name: 'Olga', avatar: null },
     ])
     expect((await call('GET', `/v1/orgs/${ORG}/people`, OTHER, null)).statusCode).toBe(403)
   })
@@ -621,6 +621,25 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     })
   })
 
+  describe('profile pictures', () => {
+    const PIC = 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+
+    it('are set by the person, seen by everyone in the organization, and can be removed', async () => {
+      await reset()
+      expect((await call('PUT', '/v1/me/avatar', MEMBER, 'member', { image: 'https://example.com/a.png' })).statusCode).toBe(400)
+      expect((await call('PUT', '/v1/me/avatar', MEMBER, 'member', { image: 'data:text/html;base64,PHNjcmlwdD4=' })).statusCode).toBe(400)
+      expect((await call('PUT', '/v1/me/avatar', MEMBER, 'member', { image: PIC })).statusCode).toBe(204)
+      expect((await call('GET', '/v1/me', MEMBER, 'member')).json().avatar).toBe(PIC)
+      const people = (await call('GET', `/v1/orgs/${ORG}/people`, OTHER, 'member')).json() as { id: string; avatar: string | null }[]
+      expect(people.find((p) => p.id === MEMBER)!.avatar).toBe(PIC)
+      expect(people.find((p) => p.id === OWNER)!.avatar).toBeNull()
+      const directory = (await call('GET', `/v1/orgs/${ORG}/directory`, OTHER, 'member')).json() as { id: string; avatar: string | null }[]
+      expect(directory.find((p) => p.id === MEMBER)!.avatar).toBe(PIC)
+      expect((await call('DELETE', '/v1/me/avatar', MEMBER, 'member')).statusCode).toBe(204)
+      expect((await call('GET', '/v1/me', MEMBER, 'member')).json().avatar).toBeNull()
+    })
+  })
+
   describe('presence', () => {
     /** A connected device that records what the server sends it. */
     const connect = (userId: string) => {
@@ -637,7 +656,7 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       const ada = connect(ADMIN)
       const max = connect(MEMBER)
       expect((await put(ADMIN, 'admin', { state: 'tracking', projectId: id(77) })).statusCode).toBe(204)
-      expect(await present(MEMBER, 'member')).toMatchObject([{ userId: ADMIN, state: 'tracking', projectId: id(77) }])
+      expect(await present(MEMBER, 'member')).toMatchObject([{ userId: ADMIN, state: 'online', projectId: id(77) }])  // an older app's "tracking" counts as online
       // Everyone in the organization hears about it, with the organization named.
       expect(max.sent).toContain(JSON.stringify({ type: 'presence', orgId: ORG }))
       // The same report again changes nothing, so nobody is bothered.
@@ -647,6 +666,8 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       await put(ADMIN, 'admin', { state: 'away' })
       expect((await present(OWNER, 'owner'))[0]).toMatchObject({ state: 'away', projectId: null })
       expect(max.sent.length).toBe(heard + 1)
+      await put(ADMIN, 'admin', { state: 'traveling' })
+      expect((await present(OWNER, 'owner'))[0]).toMatchObject({ state: 'traveling' })
       ada.remove()
       max.remove()
     })

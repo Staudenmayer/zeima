@@ -46,6 +46,8 @@ import type { Anchor } from '@/lib/anchor'
 import type { Busy, PersonDay } from '@/lib/busy'
 import { call, errorMessage } from '@/lib/ipc'
 import { HOUR, addDays, dayRange, daysBetween, fromInputs, getTimeZone, startOfDay, toDateInput, toTimeInput, weekDays } from '@/lib/time'
+import UserAvatar from '@/components/time/UserAvatar.vue'
+import TableToolbar from '@/components/time/TableToolbar.vue'
 import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -144,11 +146,14 @@ const filter = ref({
   tagIds: [] as (string | null)[],
   billable: 'all' as 'all' | 'yes' | 'no',
 })
+const search = ref('')
+const words = computed(() => search.value.trim().toLowerCase().split(/\s+/).filter(Boolean))
 const hasFilter = computed(() => {
   const f = filter.value
-  return f.kinds.length + f.activityIds.length + f.projectIds.length + f.tagIds.length > 0 || f.billable !== 'all'
+  return words.value.length > 0 || f.kinds.length + f.activityIds.length + f.projectIds.length + f.tagIds.length > 0 || f.billable !== 'all'
 })
 function clearFilter() {
+  search.value = ''
   filter.value = { kinds: [], activityIds: [], projectIds: [], tagIds: [], billable: 'all' }
 }
 const kindOptions = computed<FilterOption[]>(() => KINDS.map((k) => ({ value: k, label: t(`timesheet.kinds.${k}`) })))
@@ -164,8 +169,22 @@ const tagOptions = computed<FilterOption[]>(() => [
   ...tags.all.map((tag) => ({ value: tag.id, label: tag.name, color: tag.color })),
   { value: null, label: t('reports.noTag') },
 ])
-type Filterable = { activityId: string | null; projectId: string | null; tagIds: string[]; billable: boolean }
+type Filterable = { activityId: string | null; projectId: string | null; tagIds: string[]; billable: boolean; note?: string | null; title?: string | null; detail?: string | null }
+/** The words typed in the search all appear in the note, title, project, activity or tags. */
+function matchesSearch(x: Filterable): boolean {
+  if (words.value.length === 0) return true
+  const hay = [
+    x.note,
+    x.title,
+    x.detail,
+    x.projectId ? projects.byId.get(x.projectId)?.name : '',
+    x.activityId ? activities.all.find((a) => a.id === x.activityId)?.name : '',
+    ...x.tagIds.map((id) => tags.all.find((tg) => tg.id === id)?.name),
+  ].filter(Boolean).join(' ').toLowerCase()
+  return words.value.every((w) => hay.includes(w))
+}
 function matches(x: Filterable): boolean {
+  if (!matchesSearch(x)) return false
   const f = filter.value
   if (f.activityIds.length && !f.activityIds.includes(x.activityId)) return false
   if (f.projectIds.length && !f.projectIds.includes(x.projectId)) return false
@@ -178,7 +197,7 @@ const filterEntries = (list: TimeEntry[]) => (showsKind('entries') ? list.filter
 const shownEntries = computed(() => filterEntries(entries.value))
 const shownTimeline = computed(() => [
   ...(showsKind('events') ? timeline.value.filter(matches) : []),
-  ...(showsKind('absences') ? absenceItems.value : []),
+  ...(showsKind('absences') ? absenceItems.value.filter(matchesSearch) : []),
 ])
 
 // In an organization everyone can lay other people's days next to their own:
@@ -496,7 +515,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
   </PageHeader>
 
   <!-- Filters: what the calendar, the table and the totals show. -->
-  <div class="mb-3 flex flex-wrap items-center gap-2">
+  <TableToolbar v-model="search" :active="hasFilter" @clear="clearFilter">
     <DropdownMenu v-if="canPickPeople">
       <DropdownMenuTrigger as-child>
         <Button variant="outline" size="sm" :title="$t('timesheet.peopleHint')">
@@ -509,7 +528,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
           :key="c.id"
           :model-value="shownIds.includes(c.id)"
           @select.prevent="peopleIds = shownIds.includes(c.id) ? shownIds.filter((x) => x !== c.id) : [...shownIds, c.id]"
-        >{{ c.name }}</DropdownMenuCheckboxItem>
+        ><UserAvatar :user-id="c.id" :name="c.name" size="xs" />{{ c.name }}</DropdownMenuCheckboxItem>
         <DropdownMenuItem v-if="candidates.length === 0" disabled>{{ $t('timesheet.noPeople') }}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -525,8 +544,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
         <SelectItem value="no">{{ $t('reports.notBillable') }}</SelectItem>
       </SelectContent>
     </Select>
-    <Button v-if="hasFilter" size="sm" variant="ghost" @click="clearFilter"><X /> {{ $t('reports.clearFilter') }}</Button>
-  </div>
+  </TableToolbar>
 
   <DayTimeline
     v-if="view === 'calendar' && mode === 'day'"

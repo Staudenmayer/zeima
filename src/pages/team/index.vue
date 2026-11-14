@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { Users } from '@lucide/vue'
@@ -16,6 +17,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceStore } from '@/stores/workspace'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import { useTableSearch } from '@/composables/useTableSearch'
 
 definePage({ meta: { titleKey: 'nav.team' } })
 
@@ -138,7 +141,14 @@ watch([preset, () => workspaces.active?.id], () => {
   void load()
 })
 
-const { sort, sorted: sortedDepartments } = useSort(departmentTotals, {
+// One search for both lists: the departments' and the people's.
+const { search, searching, matches: matchesDepartment } = useTableSearch<{ path: string }>([], (g) => [g.path])
+const shownDepartments = computed(() => departmentTotals.value.filter(matchesDepartment))
+const shownTeam = computed(() => {
+  const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  return team.value.filter((m) => words.every((w) => (nameOf(m.userId) || '').toLowerCase().includes(w)))
+})
+const { sort, sorted: sortedDepartments } = useSort(shownDepartments, {
   department: (g) => g.path,
   people: (g) => g.count,
   total: (g) => g.total,
@@ -162,7 +172,8 @@ const { sort, sorted: sortedDepartments } = useSort(departmentTotals, {
       <div><p class="text-xs text-muted-foreground">{{ $t('team.billable') }}</p><p class="text-2xl font-semibold tabular-nums">{{ hours(billable) }}</p></div>
     </div>
 
-    <section v-if="departmentTotals.length" class="grid gap-1">
+    <TableToolbar v-if="team.length" v-model="search" class="!mb-0" :active="searching" :placeholder="$t('team.search')" @clear="search = ''" />
+    <section v-if="shownDepartments.length" class="grid gap-1">
       <h2 class="text-sm font-medium">{{ $t('team.departments') }}</h2>
       <div class="overflow-x-auto rounded-lg border">
         <table class="w-full text-sm">
@@ -194,10 +205,11 @@ const { sort, sorted: sortedDepartments } = useSort(departmentTotals, {
     </section>
 
     <p v-if="!loading && team.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('team.empty') }}</p>
+    <p v-else-if="shownTeam.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
     <ul v-else class="grid gap-3">
-      <li v-for="m in team" :key="m.userId" class="rounded-lg border p-3">
+      <li v-for="m in shownTeam" :key="m.userId" class="rounded-lg border p-3">
         <div class="flex items-baseline gap-3">
-          <span class="flex-1 font-medium">{{ nameOf(m.userId) || $t('team.someone') }}</span>
+          <span class="flex flex-1 items-center gap-2 self-center font-medium"><UserAvatar :user-id="m.userId" size="sm" />{{ nameOf(m.userId) || $t('team.someone') }}</span>
           <span class="text-sm tabular-nums">{{ hours(m.totalMs) }}</span>
           <span v-if="overtime(m) !== null" class="text-xs tabular-nums" :class="outlier(m) ? 'font-medium text-amber-600' : 'text-muted-foreground'">{{ signed(overtime(m)!) }}</span>
           <span class="w-24 text-right text-xs tabular-nums text-muted-foreground">{{ $t('team.billableShort', { h: hours(m.billableMs) }) }}</span>

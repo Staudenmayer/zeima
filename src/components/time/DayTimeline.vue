@@ -8,6 +8,8 @@ import type { PersonDay } from '@/lib/busy'
 import { textOn } from '@/lib/colors'
 import { layoutLanes } from '@/lib/lanes'
 import { HOUR, fromInputs, toDateInput, type DayRange } from '@/lib/time'
+import UserAvatar from '@/components/time/UserAvatar.vue'
+import { useOrgStore } from '@/stores/org'
 import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -136,6 +138,7 @@ function blocksOf(segs: ReturnType<typeof segmentsOf>) {
 
 /** The person's own row first, then the others'. */
 const LANE_HEIGHT = 56
+const org = useOrgStore()
 const rows = computed(() => {
   const own = { id: 'me', name: t('timesheet.me'), mine: true, total: props.total, blocks: blocksOf(segments.value) }
   const others = otherSegments.value.map((o) => ({
@@ -211,11 +214,11 @@ function onTrackDblClick(event: MouseEvent) {
         <span class="font-medium">{{ format.day(day.from) }}</span>
         <span class="tabular-nums text-muted-foreground">{{ settings.formatDuration(total) }}</span>
       </div>
-      <ul v-if="allDay.length" class="flex flex-wrap gap-1 border-b px-3 py-1.5">
+      <ul v-if="allDay.length" class="grid gap-1 border-b px-3 py-1.5">
         <li
           v-for="item in allDay"
           :key="`${item.addonId}/${item.id}`"
-          class="truncate rounded-sm px-1 text-[10px] leading-4"
+          class="truncate rounded-sm px-2 py-0.5 text-xs leading-4"
           :class="item.addonId === 'zeima.absences' ? 'absent-hatch' : 'border border-dashed'"
           :style="item.addonId === 'zeima.absences' ? undefined : { borderColor: item.color ?? 'var(--border)' }"
           :title="eventTooltip(item)"
@@ -237,7 +240,10 @@ function onTrackDblClick(event: MouseEvent) {
       <div class="mx-3 mb-3 flex min-h-40 flex-1 flex-col gap-2">
         <div v-for="row in rows" :key="row.id" class="flex min-h-0 flex-1 gap-2" :style="{ minHeight: row.minHeight }">
           <div v-if="withOthers" class="w-30 shrink-0 pt-1.5 text-sm leading-4">
-            <p class="truncate font-medium">{{ row.name }}</p>
+            <p class="flex items-center gap-1.5 truncate font-medium">
+              <UserAvatar :user-id="row.mine ? org.myId : row.id" :name="row.name" size="xs" />
+              <span class="truncate">{{ row.name }}</span>
+            </p>
             <p class="text-xs tabular-nums text-muted-foreground">{{ settings.formatDuration(row.total) }}</p>
           </div>
           <div class="relative min-w-0 flex-1" @dblclick="row.mine && onTrackDblClick($event)">

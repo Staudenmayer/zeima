@@ -3,7 +3,7 @@
 // reporting, so it is worth nothing after a restart. Devices report on every
 // change and about once a minute; a report older than `TTL_MS` no longer counts.
 
-export const PRESENCE_STATES = ['online', 'tracking', 'in_meeting', 'away'] as const
+export const PRESENCE_STATES = ['online', 'in_meeting', 'traveling', 'away'] as const
 export type PresenceState = (typeof PRESENCE_STATES)[number]
 
 /** A device reports at least every minute. */

@@ -239,12 +239,7 @@ async function setProject(p: Project | null) {
 }
 
 async function addTag(tag: Tag) {
-  // One tag per group.
-  const others = chipTagIds.value.filter((id) => {
-    const other = tags.byId.get(id)
-    return !(tag.groupName && other?.groupName === tag.groupName)
-  })
-  const ids = [...new Set([...others, tag.id])]
+  const ids = [...new Set([...chipTagIds.value, tag.id])]
   if (editing.value) return updateRunning({ tagIds: ids })
   tagIds.value = ids
 }
@@ -553,7 +548,6 @@ const hint = computed(() => {
           </template>
           <template v-else-if="option.kind === 'tag'">
             <TagList :ids="[option.tag.id]" />
-            <span v-if="option.tag.groupName" class="text-xs text-muted-foreground">{{ option.tag.groupName }}</span>
           </template>
           <template v-else-if="option.kind === 'create'">
             <Plus class="size-3.5 shrink-0 text-muted-foreground" />

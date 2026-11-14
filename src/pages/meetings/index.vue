@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
+import { passes, useTableSearch } from '@/composables/useTableSearch'
+import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -46,10 +50,26 @@ async function load() {
 onMounted(load)
 watch(() => workspaces.active?.id, load)
 
+const organizers = ref<(string | null)[]>([])
+const projectIds = ref<(string | null)[]>([])
+const organizerOptions = computed<FilterOption[]>(() => [...new Set(items.value.map((o) => o.meeting.userId))].map((id) => ({ value: id, label: org.nameOf(id) || '–', person: true })))
+const projectOptions = computed<FilterOption[]>(() => [...new Set(items.value.flatMap((o) => (o.meeting.projectId ? [o.meeting.projectId] : [])))].map((id) => ({ value: id, label: projects.byId.get(id)?.name ?? id })))
+const { search, filtered, searching } = useTableSearch(
+  items,
+  (o) => [o.meeting.title, o.meeting.location, o.meeting.onlineUrl, o.meeting.projectId ? projects.byId.get(o.meeting.projectId)?.name : '', org.nameOf(o.meeting.userId), ...o.meeting.attendeeIds.map((id) => org.nameOf(id))],
+  (o) => passes(organizers.value, o.meeting.userId) && passes(projectIds.value, o.meeting.projectId),
+)
+const narrowed = computed(() => searching.value || organizers.value.length > 0 || projectIds.value.length > 0)
+const clearFilters = () => {
+  search.value = ''
+  organizers.value = []
+  projectIds.value = []
+}
+
 /** Upcoming first; meetings that ended earlier today stay until tomorrow. */
 const days = computed(() => {
   const groups = new Map<string, MeetingOccurrence[]>()
-  for (const o of items.value) {
+  for (const o of filtered.value) {
     const key = toDateInput(o.startAt)
     groups.set(key, [...(groups.get(key) ?? []), o])
   }
@@ -108,7 +128,12 @@ const { sort, apply: sortOccurrences } = useSort<MeetingOccurrence>(null, {
   </EmptyState>
 
   <div v-else class="grid gap-3">
-    <div class="overflow-x-auto rounded-lg border">
+    <TableToolbar v-model="search" class="!mb-0" :active="narrowed" @clear="clearFilters">
+      <MultiFilter v-model="organizers" :label="$t('meetings.organizer')" :options="organizerOptions" />
+      <MultiFilter v-if="projectOptions.length" v-model="projectIds" :label="$t('meetings.projectColumn')" :options="projectOptions" />
+    </TableToolbar>
+    <p v-if="filtered.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+    <div v-else class="overflow-x-auto rounded-lg border">
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
@@ -139,7 +164,7 @@ const { sort, apply: sortOccurrences } = useSort<MeetingOccurrence>(null, {
                 <Badge v-if="o.meeting.cancelled" variant="destructive">{{ $t('meetings.cancelled') }}</Badge>
                 <Badge v-else-if="o.meeting.rrule" variant="outline">{{ $t('meetings.repeating') }}</Badge>
               </div>
-              <p v-if="organizer(o.meeting)" class="truncate text-xs text-muted-foreground">{{ $t('meetings.by', { name: organizer(o.meeting) }) }}</p>
+              <p v-if="organizer(o.meeting)" class="flex items-center gap-1 truncate text-xs text-muted-foreground"><UserAvatar :user-id="o.meeting.userId" size="xs" />{{ $t('meetings.by', { name: organizer(o.meeting) }) }}</p>
               <p v-if="o.meeting.note" class="truncate text-xs text-muted-foreground" :title="o.meeting.note">{{ o.meeting.note }}</p>
             </td>
             <td class="px-3 py-1.5 text-muted-foreground" @click.stop>

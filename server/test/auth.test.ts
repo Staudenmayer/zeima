@@ -52,6 +52,7 @@ describe('bearer authentication', () => {
       email: 'ada@example.com',
       name: 'Ada Lovelace',
       locale: 'de',
+      avatar: null,
       roles: ['user', 'offline_access'],
       orgs: [{ id: 'o1', role: 'admin', permissions: defaultPermissions('admin'), groups: ['/orgs/o1/groups/dev'] }],
       activeOrgId: null,

@@ -1,14 +1,14 @@
 <script setup lang="ts">
+import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
-import { Contact, Search, X } from '@lucide/vue'
+import { Contact, X } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import EmptyState from '@/components/time/EmptyState.vue'
 import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
+import TableToolbar from '@/components/time/TableToolbar.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import PresenceDot from '@/components/time/PresenceDot.vue'
 import SortHead from '@/components/time/SortHead.vue'
@@ -113,23 +113,23 @@ async function mail(address: string) {
 
   <EmptyState v-if="!workspaces.inOrg" :icon="Contact" :text="$t('directory.personal')" />
   <template v-else>
-    <div class="mb-3 flex flex-wrap items-center gap-2">
-      <div class="relative">
-        <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input v-model="search" class="h-8 w-64 pl-8" :placeholder="$t('directory.search')" />
-      </div>
+    <TableToolbar v-model="search" :active="hasFilter" :placeholder="$t('directory.search')" @clear="clearFilters">
       <MultiFilter v-model="departments" :label="$t('team.department')" :options="departmentOptions" />
       <Badge v-if="person" variant="secondary" class="gap-1 py-1">
+        <UserAvatar :user-id="person" size="xs" />
         {{ nameOf(org.directory.find((e) => e.id === person) ?? { id: person, name: null, email: null, departments: [], jobId: null, jobTitle: null, jobDescription: null }) }}
         <button type="button" class="rounded-sm hover:bg-background/60" :title="$t('reports.clearFilter')" @click="clearPerson"><X class="size-3" /></button>
       </Badge>
-      <Button v-if="hasFilter" size="sm" variant="ghost" @click="clearFilters"><X /> {{ $t('reports.clearFilter') }}</Button>
-    </div>
+    </TableToolbar>
 
     <EmptyState v-if="org.directory.length === 0" :icon="Contact" :text="$t('directory.empty')" />
-    <p v-else-if="sorted.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('timesheet.noMatch') }}</p>
+    <p v-else-if="sorted.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
     <div v-else class="overflow-x-auto rounded-lg border">
-      <table class="w-full text-sm">
+      <!-- Fixed column widths: searching or filtering must not make the columns jump or the cells wrap. -->
+      <table class="w-full min-w-[56rem] table-fixed text-sm">
+        <colgroup>
+          <col class="w-[24%]" /><col class="w-[26%]" /><col class="w-[22%]" /><col class="w-[28%]" />
+        </colgroup>
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
             <SortHead :sort="sort" column="name" class="px-3 py-2 font-medium">{{ $t('org.col.member') }}</SortHead>
@@ -140,16 +140,16 @@ async function mail(address: string) {
         </thead>
         <tbody>
           <tr v-for="e in sorted" :key="e.id" class="border-b last:border-b-0 hover:bg-muted/30">
-            <td class="whitespace-nowrap px-3 py-1.5 font-medium"><span class="flex items-center gap-2"><PresenceDot :user-id="e.id" />{{ nameOf(e) }}</span></td>
-            <td class="px-3 py-1.5">
-              <a v-if="e.email" :href="`mailto:${e.email}`" class="text-muted-foreground hover:text-foreground hover:underline" @click.prevent="mail(e.email)">{{ e.email }}</a>
+            <td class="px-3 py-1.5 font-medium"><span class="flex min-w-0 items-center gap-2.5"><span class="relative inline-flex shrink-0"><UserAvatar :user-id="e.id" :name="nameOf(e)" size="md" /><PresenceDot :user-id="e.id" class="absolute -right-0.5 -bottom-0.5 ring-2 ring-background" /></span><span class="truncate">{{ nameOf(e) }}</span></span></td>
+            <td class="truncate px-3 py-1.5">
+              <a v-if="e.email" :href="`mailto:${e.email}`" :title="e.email" class="text-muted-foreground hover:text-foreground hover:underline" @click.prevent="mail(e.email)">{{ e.email }}</a>
               <span v-else class="text-muted-foreground">–</span>
             </td>
             <td class="px-3 py-1.5">
-              <span v-if="e.departments.length" class="flex flex-wrap gap-1"><Badge v-for="d in e.departments" :key="d" variant="secondary">{{ d }}</Badge></span>
+              <span v-if="e.departments.length" class="flex gap-1 overflow-hidden" :title="e.departments.join(', ')"><Badge v-for="d in e.departments" :key="d" variant="secondary" class="shrink-0">{{ d }}</Badge></span>
               <span v-else class="text-muted-foreground">–</span>
             </td>
-            <td class="max-w-0 w-full truncate px-3 py-1.5" :title="e.jobDescription ?? undefined">{{ e.jobTitle || '–' }}</td>
+            <td class="truncate px-3 py-1.5" :title="e.jobDescription ?? undefined">{{ e.jobTitle || '–' }}</td>
           </tr>
         </tbody>
       </table>

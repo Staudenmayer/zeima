@@ -112,6 +112,13 @@ export async function listMembers(db: Db, orgId: string, only?: { userIds: reado
   return rows as MemberRow[]
 }
 
+/** The profile pictures (data URLs) of these users; those without one are missing from the map. */
+export async function avatarsOf(db: Db, userIds: readonly string[]): Promise<Map<string, string>> {
+  if (userIds.length === 0) return new Map()
+  const rows = await db.select({ id: schema.kcUser.id, avatar: schema.kcUser.avatar }).from(schema.kcUser).where(inArray(schema.kcUser.id, [...userIds]))
+  return new Map(rows.flatMap((r) => (r.avatar ? [[r.id, r.avatar] as const] : [])))
+}
+
 export async function memberOf(db: Db, orgId: string, userId: string): Promise<MemberRow | null> {
   return (await listMembers(db, orgId, { userIds: [userId] }))[0] ?? null
 }

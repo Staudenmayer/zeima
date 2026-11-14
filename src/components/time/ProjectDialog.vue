@@ -250,7 +250,6 @@ async function deleteTag() {
             <li v-for="tag in projectTags" :key="tag.id" class="flex items-center gap-2 px-3 py-1.5 text-sm">
               <span class="size-2.5 rounded-full" :style="{ backgroundColor: tag.color }" />
               <span class="flex-1">{{ tag.name }}</span>
-              <span v-if="tag.groupName" class="text-xs text-muted-foreground">{{ tag.groupName }}</span>
               <Button type="button" size="icon" variant="ghost" class="size-7" @click="openTag(tag)"><Pencil /></Button>
               <Button type="button" size="icon" variant="ghost" class="size-7" @click="askDeleteTag(tag)"><Trash2 /></Button>
             </li>

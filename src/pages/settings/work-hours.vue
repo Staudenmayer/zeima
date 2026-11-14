@@ -23,6 +23,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { useWorkStore } from '@/stores/work'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import { useTableSearch } from '@/composables/useTableSearch'
 
 definePage({ meta: { titleKey: 'nav.settings' } })
 
@@ -172,7 +174,8 @@ async function addAdjustment() {
   }
 }
 
-const { sort, sorted: sortedAdjustments } = useSort(adjustments, { date: (a) => a.date, minutes: (a) => a.minutes, reason: (a) => a.reason })
+const { search: adjSearch, filtered: shownAdjustments, searching: adjSearching } = useTableSearch(adjustments, (a) => [a.date, a.reason, a.minutes])
+const { sort, sorted: sortedAdjustments } = useSort(shownAdjustments, { date: (a) => a.date, minutes: (a) => a.minutes, reason: (a) => a.reason })
 </script>
 
 <template>
@@ -316,6 +319,9 @@ const { sort, sorted: sortedAdjustments } = useSort(adjustments, { date: (a) => 
           <Button type="submit" variant="outline"><Plus /> {{ $t('work.addAdjustment') }}</Button>
         </form>
         <p v-if="adjustments.length === 0" class="text-sm text-muted-foreground">{{ $t('work.noAdjustments') }}</p>
+        <template v-else>
+        <TableToolbar v-model="adjSearch" class="!mb-0" :active="adjSearching" @clear="adjSearch = ''" />
+        <p v-if="sortedAdjustments.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
@@ -340,6 +346,7 @@ const { sort, sorted: sortedAdjustments } = useSort(adjustments, { date: (a) => 
             </tbody>
           </table>
         </div>
+        </template>
       </CardContent>
     </Card>
   </div>

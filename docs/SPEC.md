@@ -195,7 +195,7 @@ A **workspace** is the ownership boundary. Free users have one local personal wo
 
 **Tag** — `name, color, project_id NULL, group_name NULL`
 - `project_id = NULL` → global tag. A non-null `project_id` makes it a **project-scoped tag** (the project's "own tag system", e.g. *Design / Backend / QA* only within project X).
-- `group_name` allows mutually exclusive tag groups (e.g. activity type: *Development* vs *Meeting*).
+- `group_name` is stored but not used for now: tag groups (mutually exclusive tags) are switched off in the app and not enforced.
 
 **CostCenter** (Kostenstelle) — `code, name, parent_id, active, valid_from, valid_to`
 **CostCenterAssignment** — default cost center per `user` or `group` with a validity range. An entry gets its cost center from: explicit value → project → user/group default.

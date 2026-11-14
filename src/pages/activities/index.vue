@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import { useTableSearch } from '@/composables/useTableSearch'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -72,6 +74,9 @@ async function confirmDelete() {
   }
 }
 
+const { search, matches, searching } = useTableSearch<Activity>([], (a) => [a.name])
+const shown = computed(() => activities.active.filter(matches))
+const shownArchived = computed(() => archived.value.filter(matches))
 const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a.name })
 </script>
 
@@ -85,7 +90,9 @@ const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a
   </EmptyState>
 
   <div class="grid gap-6">
-    <div v-if="activities.active.length" class="overflow-x-auto rounded-lg border">
+    <TableToolbar v-if="activities.active.length || archived.length" v-model="search" class="-mb-3" :active="searching" @clear="search = ''" />
+    <p v-if="searching && shown.length === 0 && shownArchived.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+    <div v-if="shown.length" class="overflow-x-auto rounded-lg border">
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
@@ -95,7 +102,7 @@ const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a
         </thead>
         <tbody>
           <tr
-            v-for="activity in sortActivities(activities.active)"
+            v-for="activity in sortActivities(shown)"
             :key="activity.id"
             class="group border-b last:border-b-0 hover:bg-muted/30"
             :class="workspaces.can('policy.write') ? 'cursor-pointer' : ''"
@@ -123,7 +130,7 @@ const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a
       </div>
     </section>
 
-    <section v-if="archived.length">
+    <section v-if="shownArchived.length">
       <h2 class="mb-2 text-sm font-medium text-muted-foreground">{{ $t('activities.archivedSection') }}</h2>
       <div class="overflow-x-auto rounded-lg border">
         <table class="w-full text-sm">
@@ -134,7 +141,7 @@ const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a
             </tr>
           </thead>
           <tbody>
-            <tr v-for="activity in sortActivities(archived)" :key="activity.id" class="group border-b text-muted-foreground last:border-b-0 hover:bg-muted/30">
+            <tr v-for="activity in sortActivities(shownArchived)" :key="activity.id" class="group border-b text-muted-foreground last:border-b-0 hover:bg-muted/30">
               <td class="px-3 py-1.5"><span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm opacity-60" :style="{ backgroundColor: activity.color }" />{{ activity.name }}</span></td>
               <td class="px-1 py-0.5" @click.stop>
                 <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { Check, ClipboardCheck, X } from '@lucide/vue'
@@ -17,6 +18,9 @@ import { useWorkStore } from '@/stores/work'
 import { useWorkspaceStore } from '@/stores/workspace'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
+import { passes, useTableSearch } from '@/composables/useTableSearch'
 
 definePage({ meta: { titleKey: 'nav.approvals' } })
 
@@ -71,7 +75,22 @@ async function reject() {
   rejecting.value = null
 }
 
-const { sort, sorted: sortedRequests } = useSort(requests, {
+const people = ref<(string | null)[]>([])
+const types = ref<(string | null)[]>([])
+const personOptions = computed<FilterOption[]>(() => [...new Set(requests.value.map((a) => a.userId))].map((id) => ({ value: id, label: nameOf(id) || '–', person: true })))
+const typeOptions = computed<FilterOption[]>(() => [...new Set(requests.value.map((a) => a.typeId))].map((id) => ({ value: id, label: typeName({ typeId: id } as Absence) })))
+const { search, filtered, searching } = useTableSearch(
+  requests,
+  (a) => [nameOf(a.userId), typeName(a), a.note, range(a)],
+  (a) => passes(people.value, a.userId) && passes(types.value, a.typeId),
+)
+const narrowed = computed(() => searching.value || people.value.length > 0 || types.value.length > 0)
+const clearFilters = () => {
+  search.value = ''
+  people.value = []
+  types.value = []
+}
+const { sort, sorted: sortedRequests } = useSort(filtered, {
   person: (a) => nameOf(a.userId),
   period: (a) => a.startDate,
   type: (a) => typeName(a),
@@ -87,7 +106,12 @@ const { sort, sorted: sortedRequests } = useSort(requests, {
 
   <section v-else class="grid gap-2">
     <h2 class="text-sm font-medium">{{ $t('approvals.absenceRequests') }}</h2>
-    <div class="overflow-x-auto rounded-lg border">
+    <TableToolbar v-model="search" class="!mb-1" :active="narrowed" @clear="clearFilters">
+      <MultiFilter v-model="people" :label="$t('approvals.person')" :options="personOptions" />
+      <MultiFilter v-model="types" :label="$t('absences.type')" :options="typeOptions" />
+    </TableToolbar>
+    <p v-if="filtered.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+    <div v-else class="overflow-x-auto rounded-lg border">
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
@@ -100,7 +124,7 @@ const { sort, sorted: sortedRequests } = useSort(requests, {
         </thead>
         <tbody>
           <tr v-for="a in sortedRequests" :key="a.id" class="border-b last:border-b-0 hover:bg-muted/30">
-            <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ nameOf(a.userId) || $t('approvals.someone') }}</td>
+            <td class="whitespace-nowrap px-3 py-1.5 font-medium"><span class="flex items-center gap-2"><UserAvatar :user-id="a.userId" size="sm" />{{ nameOf(a.userId) || $t('approvals.someone') }}</span></td>
             <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ range(a) }}</td>
             <td class="whitespace-nowrap px-3 py-1.5">{{ typeName(a) }}</td>
             <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="a.note">{{ a.note }}</td>

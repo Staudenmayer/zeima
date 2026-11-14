@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { useWorkspaceStore } from '@/stores/workspace'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
+import { passes, useTableSearch } from '@/composables/useTableSearch'
+import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Landmark, Pencil, Plus, Trash2 } from '@lucide/vue'
 import { commands, type CostCenter } from '@/bindings'
@@ -107,7 +111,24 @@ async function setDefault(id: string | null) {
 }
 
 // Sorted by a column, the tree is a flat list; otherwise children sit under their parent.
-const { sort, sorted: ordered } = useSort(tree, {
+const { t: tr } = useI18n()
+const states = ref<(string | null)[]>([])
+const stateOptions = computed<FilterOption[]>(() => [
+  { value: 'active', label: tr('costCenters.active') },
+  { value: 'inactive', label: tr('costCenters.inactive') },
+])
+const { search, filtered, searching } = useTableSearch(
+  tree,
+  (r) => [r.cc.code, r.cc.name],
+  (r) => passes(states.value, r.cc.active ? 'active' : 'inactive'),
+)
+const narrowed = computed(() => searching.value || states.value.length > 0)
+const clearFilters = () => {
+  search.value = ''
+  states.value = []
+}
+watch([search, states], () => (page.value = 0))
+const { sort, sorted: ordered } = useSort(filtered, {
   code: (r) => r.cc.code,
   name: (r) => r.cc.name,
   validity: (r) => r.cc.validFrom ?? r.cc.validTo ?? '',
@@ -154,7 +175,11 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
       </div>
     </section>
 
-    <div class="overflow-x-auto rounded-lg border">
+    <TableToolbar v-model="search" class="-mb-3" :active="narrowed" @clear="clearFilters">
+      <MultiFilter v-model="states" :label="$t('costCenters.status')" :options="stateOptions" />
+    </TableToolbar>
+    <p v-if="ordered.length === 0" class="-mt-3 py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+    <div v-else class="overflow-x-auto rounded-lg border">
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
@@ -173,7 +198,7 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
             :class="cc.active ? '' : 'text-muted-foreground'"
             @click="workspaces.can('cost_center.write') && open(cc)"
           >
-            <td class="whitespace-nowrap px-3 py-1.5 font-mono text-xs" :style="{ paddingLeft: `calc(0.75rem + ${sort.key ? 0 : depth}rem)` }">{{ cc.code }}</td>
+            <td class="whitespace-nowrap px-3 py-1.5 font-mono text-xs" :style="{ paddingLeft: `calc(0.75rem + ${sort.key || searching ? 0 : depth}rem)` }">{{ cc.code }}</td>
             <td class="max-w-0 w-full truncate px-3 py-1.5">{{ cc.name }}</td>
             <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">{{ validity(cc) || '–' }}</td>
             <td class="whitespace-nowrap px-3 py-1.5">

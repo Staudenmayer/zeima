@@ -92,6 +92,13 @@
       "when": 1794671270725,
       "tag": "0012_org_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794675047106,
+      "tag": "0013_avatar",
+      "breakpoints": true
     }
   ]
 }

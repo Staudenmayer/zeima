@@ -17,14 +17,13 @@ watch(usable, (list) => {
   }
 })
 
-/** Selecting a tag deselects others of the same group. */
+/** Selects or deselects a tag. */
 function toggle(tag: Tag) {
   if (selected.value.includes(tag.id)) {
     selected.value = selected.value.filter((id) => id !== tag.id)
     return
   }
-  const sameGroup = (id: string) => tag.groupName !== null && tags.byId.get(id)?.groupName === tag.groupName
-  selected.value = [...selected.value.filter((id) => !sameGroup(id)), tag.id]
+  selected.value = [...selected.value, tag.id]
 }
 </script>
 
@@ -41,7 +40,6 @@ function toggle(tag: Tag) {
     >
       <span v-if="!selected.includes(tag.id)" class="size-2 rounded-full" :style="{ backgroundColor: tag.color }" />
       {{ tag.name }}
-      <span v-if="tag.groupName" class="opacity-70">· {{ tag.groupName }}</span>
     </button>
     <span v-if="usable.length === 0" class="text-sm text-muted-foreground">{{ $t('common.none') }}</span>
   </div>

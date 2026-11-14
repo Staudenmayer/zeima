@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import UserAvatar from '@/components/time/UserAvatar.vue'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 // A form field that picks several of a list: a button that opens the list
@@ -14,6 +15,8 @@ export interface MultiOption {
   label: string
   /** Nesting depth, to indent a tree (departments). */
   depth?: number
+  /** The value is a person's id: their profile picture is shown. */
+  person?: boolean
 }
 
 const props = defineProps<{ options: MultiOption[]; placeholder: string; empty?: string; searchPlaceholder?: string }>()
@@ -48,6 +51,7 @@ const toggle = (value: string, on: boolean) => (model.value = on ? [...new Set([
             :style="{ paddingLeft: `${0.5 + (o.depth ?? 0)}rem` }"
           >
             <Checkbox :model-value="model.includes(o.value)" @update:model-value="toggle(o.value, $event === true)" />
+            <UserAvatar v-if="o.person" :user-id="o.value" :name="o.label" size="xs" />
             <span class="truncate">{{ o.label }}</span>
           </label>
           <p v-if="shown.length === 0" class="px-2 py-1.5 text-sm text-muted-foreground">{{ empty ?? '' }}</p>
@@ -56,6 +60,7 @@ const toggle = (value: string, on: boolean) => (model.value = on ? [...new Set([
     </Popover>
     <div v-if="picked.length" class="flex flex-wrap gap-1">
       <Badge v-for="o in picked" :key="o.value" variant="secondary" class="gap-1">
+        <UserAvatar v-if="o.person" :user-id="o.value" :name="o.label" size="xs" />
         {{ o.label }}
         <button type="button" class="opacity-60 hover:opacity-100" :aria-label="$t('common.delete')" @click="toggle(o.value, false)"><X class="size-3" /></button>
       </Badge>

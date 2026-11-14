@@ -206,7 +206,6 @@ impl Core {
             } else {
                 e.project_id.clone()
             };
-            let group = |id: &String| tags.get(id).and_then(|t| t.group_name.clone());
             let mut tag_ids: Vec<String> = e
                 .tag_ids
                 .iter()
@@ -214,10 +213,9 @@ impl Core {
                 .cloned()
                 .collect();
             for added in &patch.add_tag_ids {
-                if let Some(g) = group(added) {
-                    tag_ids.retain(|id| id == added || group(id).as_deref() != Some(g.as_str()));
+                if !tag_ids.contains(added) {
+                    tag_ids.push(added.clone());
                 }
-                tag_ids.push(added.clone());
             }
             // Tags scoped to another project do not apply (also added ones).
             tag_ids.retain(|id| {

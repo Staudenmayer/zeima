@@ -29,11 +29,18 @@ pub fn allowed(method: &str, path: &str) -> bool {
             .chars()
             .any(|c| c.is_whitespace() || c.is_control() || c == '#');
     let target = path == "/v1/me"
+        || path == "/v1/me/avatar"
         || path == "/v1/orgs"
         || path
             .strip_prefix("/v1/orgs/")
             .is_some_and(|rest| !rest.is_empty());
-    METHODS.contains(&method) && plain && target && (path != "/v1/me" || method == "GET")
+    // `/v1/me` is read-only; the profile picture can be set (PUT) and removed (DELETE).
+    let method_ok = match path {
+        "/v1/me" => method == "GET",
+        "/v1/me/avatar" => method == "PUT" || method == "DELETE",
+        _ => true,
+    };
+    METHODS.contains(&method) && plain && target && method_ok
 }
 
 /// The answer: status and body text.
@@ -136,6 +143,11 @@ mod tests {
         assert!(allowed("DELETE", "/v1/orgs/0b2f/audit?before=5&limit=10"));
         assert!(!allowed("POST", "/v1/me"));
         assert!(!allowed("GET", "/v1/entitlement"));
+        assert!(allowed("PUT", "/v1/me/avatar"));
+        assert!(allowed("DELETE", "/v1/me/avatar"));
+        assert!(!allowed("GET", "/v1/me/avatar"));
+        assert!(!allowed("PUT", "/v1/me"));
+        assert!(!allowed("PUT", "/v1/me/other"));
         assert!(!allowed("GET", "/v1/orgs/"));
         assert!(!allowed("GET", "/v1/orgs/../license"));
         assert!(!allowed("GET", "/v1/orgs//x"));

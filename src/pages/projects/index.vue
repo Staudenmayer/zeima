@@ -3,6 +3,7 @@ import { useAccountStore } from '@/stores/account'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
+import { useI18n } from 'vue-i18n'
 import { FolderKanban, Pencil, Plus, Trash2 } from '@lucide/vue'
 import type { Project } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
@@ -19,9 +20,13 @@ import { useSettingsStore } from '@/stores/settings'
 import { useTagsStore } from '@/stores/tags'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
+import { passes, useTableSearch } from '@/composables/useTableSearch'
 
 definePage({ meta: { titleKey: 'nav.projects' } })
 
+const { t } = useI18n()
 const workspaces = useWorkspaceStore()
 const account = useAccountStore()
 
@@ -57,7 +62,22 @@ async function confirmDelete() {
 const tagCount = (id: string) => tags.all.filter((t) => t.projectId === id).length
 const budgetLabel = (p: Project) => (p.budgetMinutes === null ? null : `${settings.formatNumber(p.budgetMinutes / 60)} h`)
 
-const { sort, sorted: sortedList } = useSort(list, {
+const clients = ref<(string | null)[]>([])
+const statuses = ref<(string | null)[]>([])
+const clientOptions = computed<FilterOption[]>(() => [...new Set(list.value.map((p) => p.client).filter((c): c is string => !!c))].sort().map((c) => ({ value: c, label: c })))
+const statusOptions = computed<FilterOption[]>(() => [...new Set(list.value.map((p) => p.status))].sort().map((s) => ({ value: s, label: t(`projects.statuses.${s}`) })))
+const { search, filtered, searching } = useTableSearch(
+  list,
+  (p) => [p.name, p.alias, p.client, p.status],
+  (p) => passes(clients.value, p.client) && passes(statuses.value, p.status),
+)
+const narrowed = computed(() => searching.value || clients.value.length > 0 || statuses.value.length > 0)
+const clearFilters = () => {
+  search.value = ''
+  clients.value = []
+  statuses.value = []
+}
+const { sort, sorted: sortedList } = useSort(filtered, {
   name: (p) => p.name,
   client: (p) => p.client,
   budget: (p) => p.budgetMinutes,
@@ -81,6 +101,12 @@ const { sort, sorted: sortedList } = useSort(list, {
     <Button v-if="workspaces.can('project.write')" variant="outline" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
   </EmptyState>
 
+  <template v-else>
+  <TableToolbar v-model="search" :active="narrowed" @clear="clearFilters">
+    <MultiFilter v-if="clientOptions.length" v-model="clients" :label="$t('projects.client')" :options="clientOptions" />
+    <MultiFilter v-model="statuses" :label="$t('projects.status')" :options="statusOptions" />
+  </TableToolbar>
+  <p v-if="filtered.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
   <div v-else class="overflow-x-auto rounded-lg border">
     <table class="w-full text-sm">
       <thead class="text-left text-xs text-muted-foreground">
@@ -120,6 +146,7 @@ const { sort, sorted: sortedList } = useSort(list, {
       </tbody>
     </table>
   </div>
+  </template>
 
   <ProjectDialog v-model:open="dialogOpen" :project="editing" />
   <ConfirmDialog

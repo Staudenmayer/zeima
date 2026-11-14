@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { ChevronDown } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import UserAvatar from '@/components/time/UserAvatar.vue'
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -16,6 +17,8 @@ export interface FilterOption {
   value: string | null
   label: string
   color?: string
+  /** The value is a person's id: their profile picture is shown. */
+  person?: boolean
 }
 
 const props = defineProps<{ label: string; options: FilterOption[] }>()
@@ -51,6 +54,7 @@ function toggle(value: string | null, on: boolean) {
         @update:model-value="toggle(o.value, $event)"
         @select.prevent
       >
+        <UserAvatar v-if="o.person && o.value" :user-id="o.value" :name="o.label" size="xs" />
         <span v-if="o.color" class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: o.color }" />
         <span class="truncate" :class="o.value === null ? 'text-muted-foreground' : ''">{{ o.label }}</span>
       </DropdownMenuCheckboxItem>

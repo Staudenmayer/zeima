@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -27,6 +28,9 @@ import { useAccountStore } from '@/stores/account'
 import { covers, type Department, type Invitation, type Job, type Member, type OrgRole, type Role, useOrgStore } from '@/stores/org'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
+import { passes, useTableSearch } from '@/composables/useTableSearch'
 
 definePage({ meta: { titleKey: 'nav.organization' } })
 
@@ -215,7 +219,8 @@ function askDeleteJob(j: Job) {
   deletingJob.value = j
   deleteJobOpen.value = true
 }
-const { sort: jobSort, sorted: sortedJobs } = useSort(() => org.jobs, { name: (j) => j.name, description: (j) => j.description, people: (j) => j.people })
+const { search: jobSearch, filtered: shownJobs, searching: jobSearching } = useTableSearch(() => org.jobs, (j) => [j.name, j.description])
+const { sort: jobSort, sorted: sortedJobs } = useSort(shownJobs, { name: (j) => j.name, description: (j) => j.description, people: (j) => j.people })
 
 // ------------------------------------------------------------------- roles
 const roleOpen = ref(false)
@@ -232,7 +237,8 @@ function askDeleteRole(r: Role) {
 }
 const canEditRoles = computed(() => org.can('role.edit'))
 const canDeleteRoles = computed(() => org.can('role.delete'))
-const { sort: roleSort, sorted: sortedRoles } = useSort(() => org.roles, {
+const { search: roleSearch, filtered: shownRoles, searching: roleSearching } = useTableSearch(() => org.roles, (r) => [org.roleName(r.key), r.description])
+const { sort: roleSort, sorted: sortedRoles } = useSort(shownRoles, {
   name: (r) => org.roleName(r.key),
   people: (r) => r.people,
   permissions: (r) => Object.keys(r.permissions ?? {}).length,
@@ -286,7 +292,32 @@ const people = computed<PersonRow[]>(() => [
   })),
 ])
 const STATUS_ORDER = { active: 0, deactivated: 1, pending: 2 }
-const { sort: memberSort, sorted: sortedPeople } = useSort(people, {
+const memberRoles = ref<(string | null)[]>([])
+const memberDepartments = ref<(string | null)[]>([])
+const memberJobs = ref<(string | null)[]>([])
+const memberStatuses = ref<(string | null)[]>([])
+const roleOptions = computed<FilterOption[]>(() => [...new Set(people.value.map((r) => r.role))].map((k) => ({ value: k, label: org.roleName(k) })))
+const memberDepartmentOptions = computed<FilterOption[]>(() => [...new Set(people.value.flatMap((r) => r.departments))].sort().map((d) => ({ value: d, label: d })))
+const memberJobOptions = computed<FilterOption[]>(() => [...new Set(people.value.flatMap((r) => (r.job ? [r.job] : [])))].sort().map((j) => ({ value: j, label: j })))
+const memberStatusOptions = computed<FilterOption[]>(() => [
+  { value: 'active', label: t('org.active') },
+  { value: 'deactivated', label: t('org.deactivated') },
+  { value: 'pending', label: t('org.invitePending') },
+])
+const { search: memberSearch, filtered: shownPeople, searching: memberSearching } = useTableSearch(
+  people,
+  (r) => [r.name, r.email, org.roleName(r.role), ...r.departments, r.job],
+  (r) => passes(memberRoles.value, r.role) && passes(memberDepartments.value, r.departments) && passes(memberJobs.value, r.job) && passes(memberStatuses.value, r.status),
+)
+const memberNarrowed = computed(() => memberSearching.value || memberRoles.value.length + memberDepartments.value.length + memberJobs.value.length + memberStatuses.value.length > 0)
+const clearMembers = () => {
+  memberSearch.value = ''
+  memberRoles.value = []
+  memberDepartments.value = []
+  memberJobs.value = []
+  memberStatuses.value = []
+}
+const { sort: memberSort, sorted: sortedPeople } = useSort(shownPeople, {
   member: (r) => r.name,
   role: (r) => r.role,
   department: (r) => r.departments.join(', '),
@@ -326,12 +357,29 @@ async function savePerson() {
   })
 }
 
-const { sort: deptSort, sorted: sortedDepartments } = useSort(() => org.departments, { name: (g) => g.path, people: (g) => g.memberIds.length })
-const { sort: policySort, sorted: sortedScopes } = useSort(policyScopes, {
+const { search: deptSearch, filtered: shownDepartments, searching: deptSearching } = useTableSearch(() => org.departments, (g) => [g.path])
+const { sort: deptSort, sorted: sortedDepartments } = useSort(shownDepartments, { name: (g) => g.path, people: (g) => g.memberIds.length })
+const { search: policySearch, filtered: shownScopes, searching: policySearching } = useTableSearch(policyScopes, (s) => [s.label])
+const { sort: policySort, sorted: sortedScopes } = useSort(shownScopes, {
   scope: (s) => s.label,
   rules: (s) => policySummary(policyOf(s.path)),
 })
-const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
+const auditWho = ref<(string | null)[]>([])
+const auditWhat = ref<(string | null)[]>([])
+const auditWhoOptions = computed<FilterOption[]>(() => [...new Set(org.audit.flatMap((a) => (a.actorId ? [a.actorId] : [])))].map((id) => ({ value: id, label: actor(id), person: true })))
+const auditWhatOptions = computed<FilterOption[]>(() => [...new Set(org.audit.map((a) => a.action))].map((a) => ({ value: a, label: actionLabel(a) })))
+const { search: auditSearch, filtered: shownAudit, searching: auditSearching } = useTableSearch(
+  () => org.audit,
+  (a) => [actionLabel(a.action), actor(a.actorId), a.target],
+  (a) => passes(auditWho.value, a.actorId) && passes(auditWhat.value, a.action),
+)
+const auditNarrowed = computed(() => auditSearching.value || auditWho.value.length > 0 || auditWhat.value.length > 0)
+const clearAudit = () => {
+  auditSearch.value = ''
+  auditWho.value = []
+  auditWhat.value = []
+}
+const { sort: auditSort, sorted: sortedAudit } = useSort(shownAudit, {
   when: (a) => a.at,
   what: (a) => actionLabel(a.action),
   who: (a) => actor(a.actorId),
@@ -381,6 +429,14 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
 
       <TabsContent value="members">
         <p v-if="!org.can('member.read')" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('noAccess.members') }}</p>
+        <template v-else>
+        <TableToolbar v-model="memberSearch" :active="memberNarrowed" @clear="clearMembers">
+          <MultiFilter v-model="memberRoles" :label="$t('org.col.role')" :options="roleOptions" />
+          <MultiFilter v-if="memberDepartmentOptions.length" v-model="memberDepartments" :label="$t('team.department')" :options="memberDepartmentOptions" />
+          <MultiFilter v-if="memberJobOptions.length" v-model="memberJobs" :label="$t('directory.jobTitle')" :options="memberJobOptions" />
+          <MultiFilter v-model="memberStatuses" :label="$t('org.col.status')" :options="memberStatusOptions" />
+        </TableToolbar>
+        <p v-if="sortedPeople.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
@@ -403,8 +459,8 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
               >
                 <td class="px-3 py-1.5">
                   <div class="flex items-center gap-2">
-                    <PresenceDot v-if="r.member" :user-id="r.member.id" />
-                    <span v-else class="size-2.5 shrink-0" />
+                    <span v-if="r.member" class="relative inline-flex shrink-0"><UserAvatar :user-id="r.member.id" :name="r.name" size="md" /><PresenceDot :user-id="r.member.id" class="absolute -right-0.5 -bottom-0.5 ring-2 ring-background" /></span>
+                    <UserAvatar v-else :name="r.name" size="md" class="opacity-50" />
                     <div class="min-w-0">
                       <p class="truncate font-medium">{{ r.name }}</p>
                       <p v-if="r.name !== r.email && r.email" class="truncate text-xs text-muted-foreground">{{ r.email }}</p>
@@ -449,6 +505,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
             </tbody>
           </table>
         </div>
+        </template>
         <p v-if="org.invitations.length" class="mt-3 text-xs text-muted-foreground">{{ $t('org.invitationHint') }}</p>
         <div v-if="isOwner" class="mt-6">
           <Button variant="outline" class="text-destructive" @click="deleteOrgOpen = true"><Trash2 /> {{ $t('org.deleteOrg') }}</Button>
@@ -461,6 +518,9 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
           <Button v-if="canEditDepartments" size="sm" @click="deptOpen = true"><Plus /> {{ $t('org.newDepartment') }}</Button>
         </div>
         <p v-if="org.departments.length === 0" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.noDepartments') }}</p>
+        <template v-else>
+        <TableToolbar v-model="deptSearch" :active="deptSearching" @clear="deptSearch = ''" />
+        <p v-if="sortedDepartments.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
@@ -484,6 +544,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
             </tbody>
           </table>
         </div>
+        </template>
       </TabsContent>
 
       <TabsContent v-if="canEditJobs || canDeleteJobs" value="jobs">
@@ -492,6 +553,9 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
           <Button v-if="canEditJobs" size="sm" @click="openJob()"><Plus /> {{ $t('org.jobs.new') }}</Button>
         </div>
         <p v-if="org.jobs.length === 0" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.jobs.none') }}</p>
+        <template v-else>
+        <TableToolbar v-model="jobSearch" :active="jobSearching" @clear="jobSearch = ''" />
+        <p v-if="sortedJobs.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
@@ -517,6 +581,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
             </tbody>
           </table>
         </div>
+        </template>
       </TabsContent>
 
       <TabsContent v-if="canSeeRoles" value="roles">
@@ -524,7 +589,9 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
           <p class="text-sm text-muted-foreground">{{ $t('org.rolesHint') }}</p>
           <Button v-if="canEditRoles" size="sm" @click="openRole(null)"><Plus /> {{ $t('org.roleNew') }}</Button>
         </div>
-        <div class="overflow-x-auto rounded-lg border">
+        <TableToolbar v-model="roleSearch" :active="roleSearching" @clear="roleSearch = ''" />
+        <p v-if="sortedRoles.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+        <div v-else class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">
@@ -556,6 +623,9 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
 
       <TabsContent v-if="org.can('policy.write')" value="policies">
         <p v-if="!workspaces.inOrg" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.policy.switch') }}</p>
+        <template v-else>
+        <TableToolbar v-model="policySearch" :active="policySearching" @clear="policySearch = ''" />
+        <p v-if="sortedScopes.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
@@ -579,11 +649,17 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
             </tbody>
           </table>
         </div>
+        </template>
         <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.policy.hint') }}</p>
       </TabsContent>
 
       <TabsContent v-if="org.can('audit.read')" value="activity">
-        <div class="overflow-x-auto rounded-lg border">
+        <TableToolbar v-model="auditSearch" :active="auditNarrowed" @clear="clearAudit">
+          <MultiFilter v-model="auditWhat" :label="$t('org.col.what')" :options="auditWhatOptions" />
+          <MultiFilter v-model="auditWho" :label="$t('org.col.who')" :options="auditWhoOptions" />
+        </TableToolbar>
+        <p v-if="sortedAudit.length === 0 && org.audit.length > 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+        <div v-else class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">

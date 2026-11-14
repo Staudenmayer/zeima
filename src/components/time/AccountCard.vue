@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Button } from '@/components/ui/button'
@@ -9,9 +9,36 @@ import AccountSignIn from '@/components/time/AccountSignIn.vue'
 import { commands, type ConflictField, type ConflictView } from '@/bindings'
 import { call, errorMessage } from '@/lib/ipc'
 import { useAccountStore } from '@/stores/account'
+import { useOrgStore } from '@/stores/org'
+import { shrinkPicture } from '@/lib/avatar'
+import UserAvatar from '@/components/time/UserAvatar.vue'
 
 const { t } = useI18n()
 const account = useAccountStore()
+const org = useOrgStore()
+const fileInput = ref<HTMLInputElement | null>(null)
+
+// The profile picture lives on the server and is shown to the organization's members.
+watch(() => account.status.signedIn, (on) => { if (on) void org.loadOrgs().catch(() => {}) }, { immediate: true })
+async function pickPicture(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    await org.setMyAvatar(await shrinkPicture(file))
+    toast.success(t('account.pictureSaved'))
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
+}
+async function removePicture() {
+  try {
+    await org.setMyAvatar(null)
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
+}
 
 onMounted(async () => {
   await account.load()
@@ -90,6 +117,19 @@ async function managePlan() {
     </CardHeader>
     <CardContent class="grid gap-4">
       <AccountSignIn sync-now />
+
+      <div v-if="account.status.signedIn" class="flex items-center gap-4">
+        <UserAvatar :user-id="org.myId" :name="account.status.user?.name ?? account.status.user?.email" :src="org.myAvatar" size="lg" />
+        <div class="grid gap-1">
+          <p class="text-sm font-medium">{{ $t('account.picture') }}</p>
+          <p class="text-xs text-muted-foreground">{{ $t('account.pictureHint') }}</p>
+          <div class="flex gap-2">
+            <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden" @change="pickPicture" />
+            <Button size="sm" variant="outline" @click="fileInput?.click()">{{ org.myAvatar ? $t('account.pictureChange') : $t('account.pictureChoose') }}</Button>
+            <Button v-if="org.myAvatar" size="sm" variant="ghost" @click="removePicture">{{ $t('account.pictureRemove') }}</Button>
+          </div>
+        </div>
+      </div>
 
       <div v-if="account.status.signedIn && account.sync?.joinChoice" class="grid gap-3 rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
         <div>

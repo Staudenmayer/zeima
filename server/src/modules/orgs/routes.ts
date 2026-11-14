@@ -18,7 +18,7 @@ import { reconcileOrganization } from './reconcile.ts'
 import { forgetRoles, loadRoles, roleOf } from './roles.ts'
 import { freeBusy } from '../../meetings/freebusy.ts'
 import { roomBookings } from '../../meetings/rooms.ts'
-import { audit, auditEntries, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
+import { audit, auditEntries, avatarsOf, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
 
 /** A role: a built-in one's name (`admin`) or the id of one the organization made. */
 const Role = Type.String({ minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9-]+$' })
@@ -662,17 +662,19 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       schema: {
         tags: ['organizations'],
         summary: 'Names of everyone in the organization (for lists that show other people)',
-        description: 'Only the display name, so presence, locations and timesheets can say who is who. No email addresses.',
+        description: 'Display name and profile picture, so presence, locations and timesheets can say who is who. No email addresses.',
         security: SECURITY,
         params: OrgParams,
-        response: { 200: Type.Array(Type.Object({ id: Type.String(), name: Type.Union([Type.String(), Type.Null()]) })), ...problems(401, 403, 503) },
+        response: { 200: Type.Array(Type.Object({ id: Type.String(), name: Type.Union([Type.String(), Type.Null()]), avatar: Type.Union([Type.String(), Type.Null()], { description: 'Profile picture as a data URL' }) })), ...problems(401, 403, 503) },
       },
     },
     async (request) => {
       const { orgId } = request.params
       actorIn({ user: request.user! }, orgId)
-      const rows = await listMembers(database(), orgId)
-      return rows.map((m) => ({ id: m.id, name: m.name }))
+      const db = database()
+      const rows = await listMembers(db, orgId)
+      const pictures = await avatarsOf(db, rows.map((m) => m.id))
+      return rows.map((m) => ({ id: m.id, name: m.name, avatar: pictures.get(m.id) ?? null }))
     },
   )
 
@@ -798,6 +800,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     id: Type.String(),
     name: Nullable(Type.String()),
     email: Nullable(Type.String()),
+    avatar: Nullable(Type.String({ description: 'Profile picture as a data URL' })),
     departments: Type.Array(Type.String(), { description: 'Department paths without the prefix, e.g. `dev/backend`' }),
     jobId: Nullable(Type.String()),
     jobTitle: Nullable(Type.String({ description: 'Name of the job description' })),
@@ -838,9 +841,10 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         if (!g.path.startsWith(head)) continue
         departments.set(g.userId, [...(departments.get(g.userId) ?? []), g.path.slice(head.length)].sort())
       }
+      const pictures = await avatarsOf(db, members.map((m) => m.id))
       return members.map((m) => {
         const job = jobs.get(jobOf.get(m.id) ?? '')
-        return { id: m.id, name: m.name, email: m.email, departments: departments.get(m.id) ?? [], jobId: job?.id ?? null, jobTitle: job?.name ?? null, jobDescription: job?.description || null }
+        return { id: m.id, name: m.name, email: m.email, avatar: pictures.get(m.id) ?? null, departments: departments.get(m.id) ?? [], jobId: job?.id ?? null, jobTitle: job?.name ?? null, jobDescription: job?.description || null }
       })
     },
   )
@@ -1078,14 +1082,15 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     {
       schema: {
         tags: ['organizations'],
-        summary: 'Reports the caller\'s presence (online, tracking, in a meeting, away)',
+        summary: 'Reports the caller\'s presence (online, in a meeting, traveling, away)',
         description:
           'Devices report on every change and about once a minute; a report older than two and a half minutes no longer counts, and neither does one from a person with no connected device. ' +
           'Send `projectId` only if the person chose to share what they work on. `offline` removes the report.',
         security: SECURITY,
         params: OrgParams,
         body: Type.Object({
-          state: Type.Union([...PRESENCE_STATES.map((s) => Type.Literal(s)), Type.Literal('offline')]),
+          // `tracking` is what older apps still send; it counts as online.
+          state: Type.Union([...PRESENCE_STATES.map((s) => Type.Literal(s)), Type.Literal('offline'), Type.Literal('tracking')]),
           projectId: Type.Optional(Type.Union([Type.String({ format: 'uuid' }), Type.Null()])),
         }),
         response: { 204: Type.Null(), ...problems(400, 401, 403) },
@@ -1094,7 +1099,8 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request, reply) => {
       const { orgId } = request.params
       const actor = actorIn({ user: request.user! }, orgId)
-      const { state, projectId } = request.body
+      const { state: reported, projectId } = request.body
+      const state = reported === 'tracking' ? 'online' : reported
       const changed =
         state === 'offline'
           ? app.presence.remove(actor.user.id, orgId).length > 0

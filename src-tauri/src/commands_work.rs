@@ -392,6 +392,8 @@ pub async fn location_set(
 ) -> CmdResult<()> {
     state.data().set_location(date, kind, office_id).await?;
     work_changed(&app).await;
+    // Colleagues see "traveling" (or not) right away.
+    crate::presence::report_now(&app);
     Ok(())
 }
 
@@ -533,6 +535,7 @@ pub async fn location_pattern_apply(
 ) -> CmdResult<u32> {
     let n = state.data().apply_location_pattern(from, to).await?;
     work_changed(&app).await;
+    crate::presence::report_now(&app);
     Ok(n)
 }
 

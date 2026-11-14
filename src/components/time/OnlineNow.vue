@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown } from '@lucide/vue'
@@ -6,6 +7,7 @@ import { events } from '@/bindings'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PRESENCE_COLORS } from '@/lib/presence'
 import { useOrgStore } from '@/stores/org'
 import { useProjectsStore } from '@/stores/projects'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -14,7 +16,6 @@ const { t } = useI18n()
 const org = useOrgStore()
 const projects = useProjectsStore()
 const workspaces = useWorkspaceStore()
-const COLORS: Record<string, string> = { online: '#22c55e', tracking: '#3b82f6', in_meeting: '#f59e0b', away: '#9ca3af' }
 
 /** Departments to show (empty = everyone); a department includes the ones inside it. */
 const selected = ref<string[]>([])
@@ -88,7 +89,7 @@ watch(() => workspaces.active?.id, load)
           <h3 v-if="groups.length > 1 || g.department" class="mb-1 text-xs font-medium text-muted-foreground">{{ g.department ?? $t('directory.noDepartment') }}</h3>
           <ul class="grid gap-1.5 text-sm sm:grid-cols-2">
             <li v-for="p in g.list" :key="p.userId" class="flex items-center gap-2">
-              <span class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: COLORS[p.state] }" />
+              <span class="relative inline-flex shrink-0"><UserAvatar :user-id="p.userId" size="sm" /><span class="absolute -right-0.5 -bottom-0.5 aspect-square size-2.5 min-h-2.5 min-w-2.5 rounded-full ring-2 ring-background" :style="{ backgroundColor: PRESENCE_COLORS[p.state] }" /></span>
               <RouterLink :to="{ path: '/directory', query: { user: p.userId } }" class="truncate hover:underline" :title="$t('directory.open')">{{ org.nameOf(p.userId) || $t('team.someone') }}</RouterLink>
               <span v-if="p.projectId" class="truncate text-xs text-muted-foreground">{{ projects.byId.get(p.projectId)?.name }}</span>
             </li>

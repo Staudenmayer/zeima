@@ -277,7 +277,7 @@ async function save() {
           <Label>{{ $t('meetings.attendees') }}</Label>
           <MultiSelect
             v-model="form.attendees"
-            :options="others.map((p) => ({ value: p.id, label: p.name || $t('team.someone') }))"
+            :options="others.map((p) => ({ value: p.id, label: p.name || $t('team.someone'), person: true }))"
             :placeholder="$t('meetings.addAttendees')"
             :empty="$t('meetings.noPeople')"
             :search-placeholder="$t('directory.search')"

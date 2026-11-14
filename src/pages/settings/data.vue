@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import { useTableSearch } from '@/composables/useTableSearch'
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -94,6 +96,7 @@ function backupDate(file: string) {
 }
 
 // The file name holds the date, so both columns sort the same way.
+const { search: backupSearch, matches: backupMatches, searching: backupSearching } = useTableSearch<string>([], (f) => [f, backupDate(f)])
 const { sort, apply: sortBackups } = useSort<string>(null, { date: (f) => f, file: (f) => f })
 </script>
 
@@ -156,7 +159,9 @@ const { sort, apply: sortBackups } = useSort<string>(null, { date: (f) => f, fil
           <Button variant="ghost" @click="run(() => call(commands.backupOpenDir()))"><FolderOpen /> {{ $t('settings.data.openFolder') }}</Button>
         </div>
         <p v-if="backups" class="truncate font-mono text-xs text-muted-foreground" :title="backups.dir">{{ backups.dir }}</p>
-        <div v-if="backups?.files.length" class="overflow-x-auto rounded-lg border">
+        <TableToolbar v-if="backups?.files.length" v-model="backupSearch" class="!mb-0" :active="backupSearching" @clear="backupSearch = ''" />
+        <p v-if="backups?.files.length && backups.files.filter(backupMatches).length === 0" class="py-4 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+        <div v-else-if="backups?.files.length" class="overflow-x-auto rounded-lg border">
           <table class="w-full text-sm">
             <thead class="text-left text-xs text-muted-foreground">
               <tr class="border-b">
@@ -165,7 +170,7 @@ const { sort, apply: sortBackups } = useSort<string>(null, { date: (f) => f, fil
               </tr>
             </thead>
             <tbody>
-              <tr v-for="file in sortBackups(backups.files)" :key="file" class="border-b last:border-b-0 hover:bg-muted/30">
+              <tr v-for="file in sortBackups(backups.files.filter(backupMatches))" :key="file" class="border-b last:border-b-0 hover:bg-muted/30">
                 <td class="whitespace-nowrap px-3 py-1.5">{{ backupDate(file) }}</td>
                 <td class="px-3 py-1.5 font-mono text-xs text-muted-foreground">{{ file }}</td>
               </tr>

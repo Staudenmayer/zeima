@@ -178,6 +178,8 @@ export interface paths {
                             email: string | null;
                             name: string | null;
                             locale: string | null;
+                            /** @description Profile picture as a data URL */
+                            avatar: string | null;
                             /** @description Realm roles */
                             roles: string[];
                             orgs: {
@@ -219,6 +221,130 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Sets the signed-in user's profile picture
+         * @description A PNG, JPEG or WebP as a data URL, at most 80000 characters (the app shrinks pictures to a small square first). Everyone in the user's organizations sees it.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        image: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Problem details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Removes the signed-in user's profile picture */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -1572,7 +1698,7 @@ export interface paths {
         };
         /**
          * Names of everyone in the organization (for lists that show other people)
-         * @description Only the display name, so presence, locations and timesheets can say who is who. No email addresses.
+         * @description Display name and profile picture, so presence, locations and timesheets can say who is who. No email addresses.
          */
         get: {
             parameters: {
@@ -1594,6 +1720,8 @@ export interface paths {
                         "application/json": {
                             id: string;
                             name: string | null;
+                            /** @description Profile picture as a data URL */
+                            avatar: string | null;
                         }[];
                     };
                 };
@@ -1983,6 +2111,7 @@ export interface paths {
                             id: string;
                             name: string | null;
                             email: string | null;
+                            avatar: string | null;
                             /** @description Department paths without the prefix, e.g. `dev/backend` */
                             departments: string[];
                             jobId: string | null;
@@ -2521,7 +2650,7 @@ export interface paths {
                     content: {
                         "application/json": {
                             userId: string;
-                            state: "online" | "tracking" | "in_meeting" | "away";
+                            state: "online" | "in_meeting" | "traveling" | "away";
                             /** @description Only when the person chose to share what they work on */
                             projectId: string | null;
                             /** @description Unix ms */
@@ -2550,7 +2679,7 @@ export interface paths {
             };
         };
         /**
-         * Reports the caller's presence (online, tracking, in a meeting, away)
+         * Reports the caller's presence (online, in a meeting, traveling, away)
          * @description Devices report on every change and about once a minute; a report older than two and a half minutes no longer counts, and neither does one from a person with no connected device. Send `projectId` only if the person chose to share what they work on. `offline` removes the report.
          */
         put: {
@@ -2565,7 +2694,7 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        state: "online" | "tracking" | "in_meeting" | "away" | "offline";
+                        state: "online" | "in_meeting" | "traveling" | "away" | "offline" | "tracking";
                         projectId?: string | null;
                     };
                 };

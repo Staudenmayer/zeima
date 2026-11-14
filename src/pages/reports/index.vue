@@ -35,6 +35,8 @@ import { useTagsStore } from '@/stores/tags'
 import { useTimerStore } from '@/stores/timer'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import { useTableSearch } from '@/composables/useTableSearch'
 
 definePage({ meta: { titleKey: 'nav.reports' } })
 
@@ -208,7 +210,12 @@ const { sort: summarySort, sorted: sortedRows } = useSort(() => report.value?.ro
   billable: (r) => r.billableMs,
   entries: (r) => r.entryCount,
 })
-const { sort: entrySort, sorted: sortedEntries } = useSort(() => report.value?.entries ?? [], {
+// The search narrows the entries listed below; the totals above stay those of the report's filters.
+const { search: entrySearch, filtered: shownEntries, searching: entrySearching } = useTableSearch(
+  () => report.value?.entries ?? [],
+  (e) => [e.note, e.activityId ? activities.byId.get(e.activityId)?.name : '', e.projectId ? projects.byId.get(e.projectId)?.name : '', ...e.tagIds.map((id) => tags.byId.get(id)?.name), e.costCenterId ? costCenters.byId.get(e.costCenterId)?.code : ''],
+)
+const { sort: entrySort, sorted: sortedEntries } = useSort(shownEntries, {
   date: (e) => e.startAt,
   time: (e) => e.startAt % 86_400_000,
   activity: (e) => (e.activityId ? activities.byId.get(e.activityId)?.name : '') ?? '',
@@ -431,7 +438,10 @@ const { sort: entrySort, sorted: sortedEntries } = useSort(() => report.value?.e
   </div>
 
   <!-- Entries -->
-  <div v-else-if="report" class="overflow-x-auto rounded-lg border">
+  <template v-else-if="report">
+  <TableToolbar v-model="entrySearch" :active="entrySearching" @clear="entrySearch = ''" />
+  <p v-if="sortedEntries.length === 0 && report.entries.length > 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+  <div v-else class="overflow-x-auto rounded-lg border">
     <table class="w-full text-sm">
       <thead class="text-left text-xs text-muted-foreground">
         <tr class="border-b">
@@ -466,4 +476,5 @@ const { sort: entrySort, sorted: sortedEntries } = useSort(() => report.value?.e
       </tbody>
     </table>
   </div>
+  </template>
 </template>

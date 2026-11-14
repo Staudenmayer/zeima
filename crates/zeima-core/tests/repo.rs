@@ -167,24 +167,6 @@ async fn project_scoped_tags_only_apply_to_their_project() {
 }
 
 #[tokio::test]
-async fn only_one_tag_per_group() {
-    let (core, _) = setup().await;
-    let dev = core
-        .create_tag(tag("Development", None, Some("Activity")))
-        .await
-        .unwrap();
-    let meet = core
-        .create_tag(tag("Meeting", None, Some("Activity")))
-        .await
-        .unwrap();
-    let err = core
-        .create_entry(manual(None, T0, T0 + MIN, vec![dev.id, meet.id]))
-        .await
-        .unwrap_err();
-    assert!(matches!(err, Error::Validation { ref field, .. } if field == "tagIds"));
-}
-
-#[tokio::test]
 async fn deleted_tags_disappear_from_entries() {
     let (core, _) = setup().await;
     let t = core.create_tag(tag("Temp", None, None)).await.unwrap();
@@ -367,7 +349,7 @@ async fn bulk_update_applies_patch_and_tag_rules() {
         .unwrap();
     let ids = vec![e1.id.clone(), e2.id.clone()];
 
-    // Ops replaces Dev (same group); moving to B drops A's scoped tag.
+    // Ops is added; moving to B drops A's scoped tag.
     let result = core
         .bulk_update_entries(
             &ids,
@@ -387,7 +369,8 @@ async fn bulk_update_applies_patch_and_tag_rules() {
         let e = core.get_entry(id).await.unwrap();
         assert_eq!(e.activity_id.as_deref(), Some(meeting.id.as_str()));
         assert_eq!(e.project_id.as_deref(), Some(b.id.as_str()));
-        assert_eq!(e.tag_ids, vec![ops.id.clone()]);
+        assert!(e.tag_ids.contains(&ops.id));
+        assert!(!e.tag_ids.contains(&only_a.id));
         assert!(e.billable);
     }
 
@@ -402,7 +385,7 @@ async fn bulk_update_applies_patch_and_tag_rules() {
     .await
     .unwrap();
     let e = core.get_entry(&e1.id).await.unwrap();
-    assert!(e.tag_ids.is_empty());
+    assert_eq!(e.tag_ids, vec![dev.id.clone()]);
     assert_eq!(e.project_id.as_deref(), Some(b.id.as_str()));
 
     let deleted = core.bulk_delete_entries(&ids).await.unwrap();

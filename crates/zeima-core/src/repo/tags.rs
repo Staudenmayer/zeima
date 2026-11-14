@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 
@@ -145,14 +143,13 @@ async fn write(tx: &mut WriteTx<'_>, t: &Tag, s: &Stamp, insert: bool) -> Result
 }
 
 /// Tags on an entry must exist, be global or belong to the entry's project,
-/// and at most one tag per tag group may be used.
+/// (tag groups are not enforced for now).
 pub(crate) async fn validate_entry_tags(
     conn: &mut SqliteConnection,
     workspace_id: &str,
     project_id: Option<&str>,
     tag_ids: &[String],
 ) -> Result<()> {
-    let mut groups = HashSet::new();
     for id in tag_ids {
         let tag = fetch_tag(&mut *conn, id)
             .await
@@ -165,14 +162,6 @@ pub(crate) async fn validate_entry_tags(
                 "tagIds",
                 format!("tag '{}' belongs to another project", tag.name),
             ));
-        }
-        if let Some(group) = tag.group_name {
-            if !groups.insert(group.clone()) {
-                return Err(Error::validation(
-                    "tagIds",
-                    format!("only one tag of group '{group}' can be used"),
-                ));
-            }
         }
     }
     Ok(())

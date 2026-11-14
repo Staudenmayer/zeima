@@ -35,7 +35,7 @@ watch(open, (isOpen) => {
 async function save() {
   saving.value = true
   try {
-    const input = { ...form.value, groupName: form.value.groupName?.trim() || null }
+    const input = { ...form.value }
     if (props.tag) await tags.update(props.tag.id, input)
     else await tags.create(input)
     open.value = false
@@ -65,11 +65,6 @@ async function save() {
         <div v-if="!fixedScope && !tag" class="grid gap-2">
           <Label>{{ $t('tags.scope') }}</Label>
           <ProjectSelect v-model="form.projectId" />
-        </div>
-        <div class="grid gap-2">
-          <Label for="tag-group">{{ $t('tags.group') }}</Label>
-          <Input id="tag-group" :model-value="form.groupName ?? ''" @update:model-value="form.groupName = String($event)" />
-          <p class="text-xs text-muted-foreground">{{ $t('tags.groupHint') }}</p>
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" @click="open = false">{{ $t('common.cancel') }}</Button>

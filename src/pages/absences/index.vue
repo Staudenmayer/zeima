@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { ChevronLeft, ChevronRight, Palmtree, Pencil, Plus, Trash2, X } from '@lucide/vue'
+import { ChevronLeft, ChevronRight, Palmtree, Pencil, Plus, Trash2 } from '@lucide/vue'
 import { commands, type Absence, type AbsenceType, type HolidayView, type VacationSummary } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
+import TableToolbar from '@/components/time/TableToolbar.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -124,11 +126,15 @@ watch(
 )
 
 const filter = ref({ people: [] as (string | null)[], types: [] as (string | null)[], statuses: [] as (string | null)[], months: [] as (string | null)[] })
-const hasFilter = computed(() => Object.values(filter.value).some((v) => v.length > 0))
-const clearFilter = () => (filter.value = { people: [], types: [], statuses: [], months: [] })
+const search = ref('')
+const hasFilter = computed(() => search.value.trim() !== '' || Object.values(filter.value).some((v) => v.length > 0))
+const clearFilter = () => {
+  search.value = ''
+  filter.value = { people: [], types: [], statuses: [], months: [] }
+}
 const personOptions = computed<FilterOption[]>(() => [
-  { value: me.value, label: t('timesheet.me') },
-  ...[...new Set(others.value.map((a) => a.userId))].map((id) => ({ value: id, label: org.nameOf(id) || t('approvals.someone') })),
+  { value: me.value, label: t('timesheet.me'), person: true },
+  ...[...new Set(others.value.map((a) => a.userId))].map((id) => ({ value: id, label: org.nameOf(id) || t('approvals.someone'), person: true })),
 ])
 const typeOptions = computed<FilterOption[]>(() => work.absenceTypes.map((x) => ({ value: x.id, label: work.absenceTypeName(x), color: x.color })))
 const statusOptions = computed<FilterOption[]>(() => (['requested', 'approved', 'rejected'] as const).map((v) => ({ value: v, label: t(`absences.status.${v}`) })))
@@ -144,8 +150,14 @@ function inMonths(a: Absence, months: string[]) {
 }
 const filtered = computed(() => {
   const f = filter.value
+  const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const text = (a: Absence) => {
+    const type = work.absenceTypesById.get(a.typeId)
+    return [personName(a), type ? work.absenceTypeName(type) : '', a.note, range(a), t(`absences.status.${a.status}`)].join(' ').toLowerCase()
+  }
   return everyone.value.filter(
     (a) =>
+      (words.length === 0 || words.every((w) => text(a).includes(w))) &&
       (!f.people.length || f.people.includes(a.userId)) &&
       (!f.types.length || f.types.includes(a.typeId)) &&
       (!f.statuses.length || f.statuses.includes(a.status)) &&
@@ -208,14 +220,13 @@ const { sort, sorted: sortedAbsences } = useSort(filtered, {
         <Button variant="outline" @click="open(null)"><Plus /> {{ $t('absences.add') }}</Button>
       </EmptyState>
       <template v-else>
-      <div class="-mb-3 flex flex-wrap items-center gap-2">
+      <TableToolbar v-model="search" class="-mb-3" :active="hasFilter" @clear="clearFilter">
         <MultiFilter v-if="withPeople" v-model="filter.people" :label="$t('timesheet.person')" :options="personOptions" />
         <MultiFilter v-model="filter.types" :label="$t('absences.type')" :options="typeOptions" />
         <MultiFilter v-model="filter.statuses" :label="$t('absences.statusColumn')" :options="statusOptions" />
         <MultiFilter v-model="filter.months" :label="$t('absences.month')" :options="monthOptions" />
-        <Button v-if="hasFilter" size="sm" variant="ghost" @click="clearFilter"><X /> {{ $t('reports.clearFilter') }}</Button>
-      </div>
-      <p v-if="sortedAbsences.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('timesheet.noMatch') }}</p>
+      </TableToolbar>
+      <p v-if="sortedAbsences.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
       <div v-else class="overflow-x-auto rounded-lg border">
         <table class="w-full text-sm">
           <thead class="text-left text-xs text-muted-foreground">
@@ -230,7 +241,7 @@ const { sort, sorted: sortedAbsences } = useSort(filtered, {
           </thead>
           <tbody>
             <tr v-for="a in sortedAbsences" :key="a.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="mine(a) ? 'cursor-pointer' : ''" @click="mine(a) && open(a)">
-              <td v-if="withPeople" class="whitespace-nowrap px-3 py-1.5 font-medium">{{ personName(a) }}</td>
+              <td v-if="withPeople" class="whitespace-nowrap px-3 py-1.5 font-medium"><span class="flex items-center gap-2"><UserAvatar :user-id="mine(a) ? org.myId : a.userId" :name="personName(a)" size="sm" />{{ personName(a) }}</span></td>
               <td class="whitespace-nowrap px-3 py-1.5 font-medium tabular-nums">{{ range(a) }}</td>
               <td class="whitespace-nowrap px-3 py-1.5">
                 <span class="flex items-center gap-2">

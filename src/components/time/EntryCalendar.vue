@@ -9,6 +9,8 @@ import type { PersonDay } from '@/lib/busy'
 import { textOn } from '@/lib/colors'
 import { layoutLanes, type Lanes } from '@/lib/lanes'
 import { HOUR, fromInputs, toDateInput, type DayRange } from '@/lib/time'
+import UserAvatar from '@/components/time/UserAvatar.vue'
+import { useOrgStore } from '@/stores/org'
 import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -233,7 +235,8 @@ interface BusyBlock extends Slot {
 }
 
 /** The people shown, own first. */
-const legend = computed(() => [t('timesheet.me'), ...(props.others ?? []).map((o) => o.name)])
+const org = useOrgStore()
+const legend = computed(() => [{ id: org.myId, name: t('timesheet.me') }, ...(props.others ?? []).map((o) => ({ id: o.id, name: o.name }))])
 
 const columns = computed(() =>
   props.days.map((day) => {
@@ -477,7 +480,7 @@ function hourLabel(h: number) {
       <!-- Who the columns in each day are -->
       <div v-if="others?.length" class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5 text-xs text-muted-foreground">
         <span>{{ $t('timesheet.columns') }}</span>
-        <span v-for="n in legend" :key="n" class="font-medium text-foreground">{{ n }}</span>
+        <span v-for="n in legend" :key="n.id ?? 'me'" class="flex items-center gap-1 font-medium text-foreground"><UserAvatar :user-id="n.id" :name="n.name" size="xs" />{{ n.name }}</span>
       </div>
       <!-- Day headers -->
       <div ref="header" class="sticky top-0 z-10 flex border-b bg-background">

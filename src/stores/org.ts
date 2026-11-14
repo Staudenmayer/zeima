@@ -72,7 +72,7 @@ export interface Department {
 }
 export interface PresenceItem {
   userId: string
-  state: 'online' | 'tracking' | 'in_meeting' | 'away'
+  state: 'online' | 'in_meeting' | 'traveling' | 'away'
   projectId: string | null
   since: number
 }
@@ -89,6 +89,8 @@ export interface DirectoryEntry {
   id: string
   name: string | null
   email: string | null
+  /** Profile picture as a data URL. */
+  avatar?: string | null
   /** Department paths, e.g. `dev/backend`. */
   departments: string[]
   jobId: string | null
@@ -118,7 +120,10 @@ export const useOrgStore = defineStore('org', () => {
   const presence = ref<PresenceItem[]>([])
   /** Names of everyone in the organization (every member may read them). */
   const policies = ref<OrgPolicy[]>([])
-  const people = ref<{ id: string; name: string | null }[]>([])
+  const people = ref<{ id: string; name: string | null; avatar?: string | null }[]>([])
+  /** The signed-in person's own profile picture. */
+  const myAvatar = ref<string | null>(null)
+  const myId = ref<string | null>(null)
   /** The coworkers: name, email, departments, job title (every member may read them). */
   const directory = ref<DirectoryEntry[]>([])
   /** The job descriptions the organization defines (every member may read them). */
@@ -147,10 +152,18 @@ export const useOrgStore = defineStore('org', () => {
     return m?.name || m?.email || people.value.find((x) => x.id === id)?.name || ''
   }
 
+  /** A person's profile picture (a data URL), if they have one. */
+  function avatarOf(id: string): string | null {
+    if (id === myId.value && myAvatar.value) return myAvatar.value
+    return people.value.find((x) => x.id === id)?.avatar ?? directory.value.find((x) => x.id === id)?.avatar ?? null
+  }
+
   const base = () => `/v1/orgs/${activeId.value}`
 
   async function loadOrgs() {
-    const me = await api<{ orgs: OrgSummary[] }>('GET', '/v1/me')
+    const me = await api<{ id: string; avatar: string | null; orgs: OrgSummary[] }>('GET', '/v1/me')
+    myId.value = me.id
+    myAvatar.value = me.avatar
     orgs.value = me.orgs
     if (!orgs.value.some((o) => o.id === activeId.value)) activeId.value = orgs.value[0]?.id ?? null
   }
@@ -162,7 +175,7 @@ export const useOrgStore = defineStore('org', () => {
       if (!activeId.value) return
       info.value = await api<OrgInfo>('GET', base())
       await loadRoles().catch(() => {})
-      people.value = await api<{ id: string; name: string | null }[]>('GET', `${base()}/people`).catch(() => [])
+      people.value = await api<{ id: string; name: string | null; avatar: string | null }[]>('GET', `${base()}/people`).catch(() => [])
       const [m, g, i] = await Promise.all([
         can('member.read') ? api<Member[]>('GET', `${base()}/members`) : Promise.resolve([] as Member[]),
         api<Department[]>('GET', `${base()}/groups`),
@@ -196,7 +209,7 @@ export const useOrgStore = defineStore('org', () => {
   /** Names and presence only: what a widget needs, without loading the whole organization. */
   async function loadGlance(orgId: string) {
     activeId.value = orgId
-    people.value = await api<{ id: string; name: string | null }[]>('GET', `${base()}/people`).catch(() => [])
+    people.value = await api<{ id: string; name: string | null; avatar: string | null }[]>('GET', `${base()}/people`).catch(() => [])
     await loadDirectory().catch(() => {})
     await loadPresence()
   }
@@ -224,6 +237,17 @@ export const useOrgStore = defineStore('org', () => {
   async function setJob(userId: string, jobId: string | null) {
     await api('PUT', `${base()}/members/${userId}/job`, { jobId })
     await Promise.all([loadJobs(), loadDirectory()])
+  }
+
+  /** Sets (a data URL from `shrinkPicture`) or removes (null) the signed-in person's profile picture. */
+  async function setMyAvatar(image: string | null) {
+    if (image) await api('PUT', '/v1/me/avatar', { image })
+    else await api('DELETE', '/v1/me/avatar')
+    myAvatar.value = image
+    const mine = people.value.find((x) => x.id === myId.value)
+    if (mine) mine.avatar = image
+    const entry = directory.value.find((x) => x.id === myId.value)
+    if (entry) entry.avatar = image
   }
 
   async function loadPresence() {
@@ -323,7 +347,7 @@ export const useOrgStore = defineStore('org', () => {
 
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role, roles, catalog, permissions, can, scopeOf, loadRoles, createRole, updateRole, deleteRole, roleName,
-    directory, loadDirectory, updateInvitation, jobs, loadJobs, createJob, updateJob, deleteJob, setJob, loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
+    directory, avatarOf, myAvatar, myId, setMyAvatar, loadDirectory, updateInvitation, jobs, loadJobs, createJob, updateJob, deleteJob, setJob, loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, renameDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

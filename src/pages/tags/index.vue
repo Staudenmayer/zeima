@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+import TableToolbar from '@/components/time/TableToolbar.vue'
+import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
+import { passes, useTableSearch } from '@/composables/useTableSearch'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
@@ -18,15 +22,34 @@ import { useSort } from '@/composables/useSort'
 
 definePage({ meta: { titleKey: 'nav.tags' } })
 
+const { t } = useI18n()
 const workspaces = useWorkspaceStore()
 
 const tags = useTagsStore()
 const projects = useProjectsStore()
 
+const scopes = ref<(string | null)[]>([])
+/** Where a tag applies: everywhere (`global`) or one project. */
+const scopeOf = (t: Tag) => t.projectId ?? 'global'
+const scopeOptions = computed<FilterOption[]>(() => [
+  { value: 'global', label: t('tags.global') },
+  ...[...new Set(tags.all.flatMap((x) => (x.projectId ? [x.projectId] : [])))].map((id) => ({ value: id, label: projects.byId.get(id)?.name ?? id })),
+])
+const { search, filtered, searching } = useTableSearch(
+  () => tags.all,
+  (tag) => [tag.name, tag.projectId ? projects.byId.get(tag.projectId)?.name : ''],
+  (tag) => passes(scopes.value, scopeOf(tag)),
+)
+const narrowed = computed(() => searching.value || scopes.value.length > 0)
+const clearFilters = () => {
+  search.value = ''
+  scopes.value = []
+}
+
 /** Global tags first, then one section per project with tags. */
 const sections = computed(() => {
   const byProject = new Map<string | null, Tag[]>()
-  for (const tag of tags.all) {
+  for (const tag of filtered.value) {
     byProject.set(tag.projectId, [...(byProject.get(tag.projectId) ?? []), tag])
   }
   return [...byProject.entries()]
@@ -56,7 +79,7 @@ async function confirmDelete() {
   }
 }
 
-const { sort, apply: sortTags } = useSort<Tag>(null, { name: (t) => t.name, group: (t) => t.groupName })
+const { sort, apply: sortTags } = useSort<Tag>(null, { name: (t) => t.name })
 </script>
 
 <template>
@@ -68,6 +91,11 @@ const { sort, apply: sortTags } = useSort<Tag>(null, { name: (t) => t.name, grou
     <Button v-if="workspaces.can('tag.write')" variant="outline" @click="open(null)"><Plus /> {{ $t('tags.new') }}</Button>
   </EmptyState>
 
+  <template v-else>
+  <TableToolbar v-model="search" :active="narrowed" @clear="clearFilters">
+    <MultiFilter v-if="scopeOptions.length > 1" v-model="scopes" :label="$t('entry.project')" :options="scopeOptions" />
+  </TableToolbar>
+  <p v-if="sections.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
   <div v-else class="grid gap-6">
     <section v-for="section in sections" :key="section.projectId ?? 'global'">
       <h2 class="mb-2 text-sm font-medium">
@@ -79,7 +107,6 @@ const { sort, apply: sortTags } = useSort<Tag>(null, { name: (t) => t.name, grou
           <thead class="text-left text-xs text-muted-foreground">
             <tr class="border-b">
               <SortHead :sort="sort" column="name" class="px-3 py-2 font-medium">{{ $t('tags.name') }}</SortHead>
-              <SortHead :sort="sort" column="group" class="px-3 py-2 font-medium">{{ $t('tags.group') }}</SortHead>
               <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
             </tr>
           </thead>
@@ -88,7 +115,6 @@ const { sort, apply: sortTags } = useSort<Tag>(null, { name: (t) => t.name, grou
               <td class="px-3 py-1.5">
                 <span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-full" :style="{ backgroundColor: tag.color }" />{{ tag.name }}</span>
               </td>
-              <td class="px-3 py-1.5 text-muted-foreground">{{ tag.groupName || '–' }}</td>
               <td class="px-1 py-0.5" @click.stop>
                 <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                   <Button v-if="workspaces.can('tag.write')" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(tag)"><Pencil /></Button>
@@ -101,6 +127,7 @@ const { sort, apply: sortTags } = useSort<Tag>(null, { name: (t) => t.name, grou
       </div>
     </section>
   </div>
+  </template>
 
   <TagDialog v-model:open="dialogOpen" :tag="editing" />
   <ConfirmDialog

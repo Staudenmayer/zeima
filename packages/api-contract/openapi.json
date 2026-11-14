@@ -320,6 +320,7 @@
                     "email",
                     "name",
                     "locale",
+                    "avatar",
                     "roles",
                     "orgs",
                     "activeOrgId"
@@ -358,6 +359,17 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "avatar": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Profile picture as a data URL"
                     },
                     "roles": {
                       "type": "array",
@@ -429,6 +441,130 @@
             }
           },
           "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/avatar": {
+      "put": {
+        "summary": "Sets the signed-in user's profile picture",
+        "tags": [
+          "me"
+        ],
+        "description": "A PNG, JPEG or WebP as a data URL, at most 80000 characters (the app shrinks pictures to a small square first). Everyone in the user's organizations sees it.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "image"
+                ],
+                "properties": {
+                  "image": {
+                    "type": "string",
+                    "maxLength": 80000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          },
+          "400": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Removes the signed-in user's profile picture",
+        "tags": [
+          "me"
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "Problem details (RFC 9457)",
             "content": {
               "application/problem+json": {
@@ -2418,7 +2554,7 @@
         "tags": [
           "organizations"
         ],
-        "description": "Only the display name, so presence, locations and timesheets can say who is who. No email addresses.",
+        "description": "Display name and profile picture, so presence, locations and timesheets can say who is who. No email addresses.",
         "parameters": [
           {
             "schema": {
@@ -2446,7 +2582,8 @@
                     "type": "object",
                     "required": [
                       "id",
-                      "name"
+                      "name",
+                      "avatar"
                     ],
                     "properties": {
                       "id": {
@@ -2461,6 +2598,17 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "avatar": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Profile picture as a data URL"
                       }
                     }
                   }
@@ -2981,6 +3129,7 @@
                       "id",
                       "name",
                       "email",
+                      "avatar",
                       "departments",
                       "jobId",
                       "jobTitle",
@@ -3004,6 +3153,17 @@
                         "anyOf": [
                           {
                             "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "avatar": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "description": "Profile picture as a data URL"
                           },
                           {
                             "type": "null"
@@ -3839,7 +3999,7 @@
     },
     "/v1/orgs/{orgId}/presence": {
       "put": {
-        "summary": "Reports the caller's presence (online, tracking, in a meeting, away)",
+        "summary": "Reports the caller's presence (online, in a meeting, traveling, away)",
         "tags": [
           "organizations"
         ],
@@ -3865,13 +4025,13 @@
                       {
                         "type": "string",
                         "enum": [
-                          "tracking"
+                          "in_meeting"
                         ]
                       },
                       {
                         "type": "string",
                         "enum": [
-                          "in_meeting"
+                          "traveling"
                         ]
                       },
                       {
@@ -3884,6 +4044,12 @@
                         "type": "string",
                         "enum": [
                           "offline"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "tracking"
                         ]
                       }
                     ]
@@ -4007,13 +4173,13 @@
                           {
                             "type": "string",
                             "enum": [
-                              "tracking"
+                              "in_meeting"
                             ]
                           },
                           {
                             "type": "string",
                             "enum": [
-                              "in_meeting"
+                              "traveling"
                             ]
                           },
                           {

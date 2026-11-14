@@ -57,6 +57,8 @@ export const kcUser = pgTable('kc_user', {
   email: text('email'),
   displayName: text('display_name'),
   locale: text('locale'),
+  /** Profile picture as a small `data:image/…;base64,…` URL (the app shrinks it before sending). */
+  avatar: text('avatar'),
   active: boolean('active').notNull().default(true),
   lastSeenAt: ms('last_seen_at'),
 })
