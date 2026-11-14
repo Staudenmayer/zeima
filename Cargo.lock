@@ -8266,7 +8266,7 @@ dependencies = [
 
 [[package]]
 name = "zeima"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -8310,7 +8310,7 @@ dependencies = [
 
 [[package]]
 name = "zeima-addon-sdk"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.2"
 dependencies = [
  "extism-pdk",
  "serde",
@@ -8319,7 +8319,7 @@ dependencies = [
 
 [[package]]
 name = "zeima-core"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -8339,7 +8339,7 @@ dependencies = [
 
 [[package]]
 name = "zeima-core-wasm"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.2"
 dependencies = [
  "chrono",
  "chrono-tz",
