@@ -3,7 +3,7 @@
 // Keycloak first (src/keycloak/admin.ts), then to the mirror tables.
 
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
-import { and, eq, ne, sql } from 'drizzle-orm'
+import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { Type } from 'typebox'
 import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
@@ -346,6 +346,173 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       return reply.code(204).send(null)
     },
   )
+
+  // ------------------------------------------------------------ departments
+
+  const GroupParams = Type.Object({ orgId: Type.String({ format: 'uuid' }), groupId: Type.String({ format: 'uuid' }) })
+  const Group = Type.Object(
+    {
+      id: Type.String(),
+      name: Type.String(),
+      path: Type.String({ description: 'Below the organization, e.g. `dev/backend`' }),
+      parentId: Type.Union([Type.String(), Type.Null()]),
+      memberIds: Type.Array(Type.String()),
+    },
+    { description: 'A department' },
+  )
+  const prefix = (orgId: string) => `/orgs/${orgId}/groups/`
+
+  /** Departments of the org as the API returns them. */
+  const loadGroups = async (orgId: string) => {
+    const db = database()
+    const groups = await db.select().from(schema.kcGroup).where(eq(schema.kcGroup.orgId, orgId)).orderBy(asc(schema.kcGroup.path))
+    const members = await db
+      .select({ groupId: schema.kcGroupMember.groupId, userId: schema.kcGroupMember.userId })
+      .from(schema.kcGroupMember)
+      .innerJoin(schema.kcGroup, eq(schema.kcGroup.id, schema.kcGroupMember.groupId))
+      .where(eq(schema.kcGroup.orgId, orgId))
+    const byPath = new Map(groups.map((g) => [g.path, g.id]))
+    return groups.map((g) => {
+      const path = g.path.slice(prefix(orgId).length)
+      const parent = path.includes('/') ? byPath.get(`${prefix(orgId)}${path.slice(0, path.lastIndexOf('/'))}`) ?? null : null
+      return {
+        id: g.id,
+        name: path.slice(path.lastIndexOf('/') + 1),
+        path,
+        parentId: parent,
+        memberIds: members.filter((m) => m.groupId === g.id).map((m) => m.userId),
+      }
+    })
+  }
+
+  app.get(
+    '/orgs/:orgId/groups',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Departments: all of them for owners and admins, the caller\'s own for everyone else',
+        security: SECURITY,
+        params: OrgParams,
+        response: { 200: Type.Array(Group), ...problems(401, 403, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      const all = await loadGroups(orgId)
+      if (scopeOf(actor, 'group.manage') === 'org') return all
+      const mine = new Set(actor.user.orgs[orgId]!.groups.map((p) => p.slice(prefix(orgId).length)))
+      return all.filter((g) => mine.has(g.path))
+    },
+  )
+
+  app.post(
+    '/orgs/:orgId/groups',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Creates a department, optionally below another one',
+        security: SECURITY,
+        params: OrgParams,
+        body: Type.Object({
+          name: Type.String({ minLength: 1, maxLength: 60, pattern: '^[^/\\s][^/]*$', description: 'No slash; not starting with a space' }),
+          parentId: Type.Optional(Type.String({ format: 'uuid' })),
+        }),
+        response: { 201: Group, ...problems(400, 401, 403, 404, 409, 502, 503) },
+      },
+    },
+    async (request, reply) => {
+      const { orgId } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      authorize(actor, 'group.manage', { orgId })
+      const db = database()
+      const kc = keycloak()
+      const name = request.body.name.trim()
+      let parentPath = ''
+      if (request.body.parentId) {
+        const [parent] = await db
+          .select()
+          .from(schema.kcGroup)
+          .where(and(eq(schema.kcGroup.id, request.body.parentId), eq(schema.kcGroup.orgId, orgId)))
+        if (!parent) throw new HttpProblem(404, 'not_found', 'parent department not found')
+        parentPath = `${parent.path.slice(prefix(orgId).length)}/`
+      }
+      const path = `${parentPath}${name}`
+      const [clash] = await db.select().from(schema.kcGroup).where(eq(schema.kcGroup.path, `${prefix(orgId)}${path}`))
+      if (clash) throw new HttpProblem(409, 'already_exists', 'a department with this name already exists here')
+      const id = await kc.createGroup(orgId, path.split('/'))
+      await db.insert(schema.kcGroup).values({ id, orgId, path: `${prefix(orgId)}${path}` })
+      await audit(db, { orgId, actorId: actor.user.id, action: 'group.create', target: path })
+      return reply.code(201).send({ id, name, path, parentId: request.body.parentId ?? null, memberIds: [] })
+    },
+  )
+
+  app.delete(
+    '/orgs/:orgId/groups/:groupId',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Deletes a department and the departments below it',
+        security: SECURITY,
+        params: GroupParams,
+        response: { 204: Type.Null(), ...problems(401, 403, 404, 502, 503) },
+      },
+    },
+    async (request, reply) => {
+      const { orgId, groupId } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      authorize(actor, 'group.manage', { orgId })
+      const db = database()
+      const [group] = await db.select().from(schema.kcGroup).where(and(eq(schema.kcGroup.id, groupId), eq(schema.kcGroup.orgId, orgId)))
+      if (!group) throw new HttpProblem(404, 'not_found', 'department not found')
+      await keycloak().deleteGroup(groupId)
+      // Keycloak removes the subgroups too; the mirror follows (members cascade).
+      await db
+        .delete(schema.kcGroup)
+        .where(and(eq(schema.kcGroup.orgId, orgId), sql`(${schema.kcGroup.path} = ${group.path} or ${schema.kcGroup.path} like ${`${group.path.replace(/[\\%_]/g, '\\$&')}/%`})`))
+      await audit(db, { orgId, actorId: actor.user.id, action: 'group.delete', target: group.path.slice(prefix(orgId).length) })
+      return reply.code(204).send(null)
+    },
+  )
+
+  for (const method of ['PUT', 'DELETE'] as const) {
+    app.route({
+      method,
+      url: '/orgs/:orgId/groups/:groupId/members/:userId',
+      schema: {
+        tags: ['organizations'],
+        summary: method === 'PUT' ? 'Puts a member into a department' : 'Takes a member out of a department',
+        security: SECURITY,
+        params: Type.Object({ orgId: Type.String({ format: 'uuid' }), groupId: Type.String({ format: 'uuid' }), userId: Type.String({ format: 'uuid' }) }),
+        response: { 204: Type.Null(), ...problems(401, 403, 404, 502, 503) },
+      },
+      handler: async (request, reply) => {
+        const { orgId, groupId, userId } = request.params as { orgId: string; groupId: string; userId: string }
+        const actor = actorIn({ user: request.user! }, orgId)
+        authorize(actor, 'group.manage', { orgId })
+        const db = database()
+        const [group] = await db.select().from(schema.kcGroup).where(and(eq(schema.kcGroup.id, groupId), eq(schema.kcGroup.orgId, orgId)))
+        if (!group) throw new HttpProblem(404, 'not_found', 'department not found')
+        if (!(await memberOf(db, orgId, userId))) throw new HttpProblem(404, 'not_found', 'not a member of this organization')
+        const kc = keycloak()
+        if (method === 'PUT') {
+          await kc.addToGroup(userId, groupId)
+          await db.insert(schema.kcGroupMember).values({ groupId, userId }).onConflictDoNothing()
+        } else {
+          await kc.removeFromGroup(userId, groupId)
+          await db.delete(schema.kcGroupMember).where(and(eq(schema.kcGroupMember.groupId, groupId), eq(schema.kcGroupMember.userId, userId)))
+        }
+        await audit(db, {
+          orgId,
+          actorId: actor.user.id,
+          action: method === 'PUT' ? 'group.add' : 'group.remove',
+          target: userId,
+          detail: { group: group.path.slice(prefix(orgId).length) },
+        })
+        return reply.code(204).send(null)
+      },
+    })
+  }
 
   app.get(
     '/orgs/:orgId/audit',

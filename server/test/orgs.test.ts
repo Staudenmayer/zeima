@@ -36,7 +36,7 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       groups: [...(role ? [`/orgs/${ORG}/roles/${role}`] : []), ...(extra.groups ?? [])],
     })}`,
   })
-  const call = async (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, userId: string, role: string | null, payload?: object) =>
+  const call = async (method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', url: string, userId: string, role: string | null, payload?: object) =>
     app.inject({ method, url, headers: await as(userId, role), payload })
 
   beforeAll(async () => {
@@ -262,6 +262,56 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect(last.json().code).toBe('last_owner')
       const left = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, ORG))
       expect(left.map((m) => m.userId).sort()).toEqual([OWNER, ADMIN])
+    })
+  })
+
+  describe('departments', () => {
+    it('creates nested departments, fills them and deletes them', async () => {
+      await reset()
+      const post = (uid: string, role: string, body: object) => call('POST', `/v1/orgs/${ORG}/groups`, uid, role, body)
+      expect((await post(MANAGER, 'manager', { name: 'dev' })).statusCode).toBe(403)
+      const dev = await post(ADMIN, 'admin', { name: 'dev' })
+      expect(dev.statusCode).toBe(201)
+      expect(dev.json()).toMatchObject({ name: 'dev', path: 'dev', parentId: null, memberIds: [] })
+      const backend = await post(ADMIN, 'admin', { name: 'backend', parentId: dev.json().id })
+      expect(backend.json()).toMatchObject({ path: 'dev/backend', parentId: dev.json().id })
+      expect(kc.calls).toEqual([`createGroup ${ORG} dev`, `createGroup ${ORG} dev/backend`])
+      const clash = await post(ADMIN, 'admin', { name: 'dev' })
+      expect(clash.statusCode).toBe(409)
+      expect((await post(ADMIN, 'admin', { name: 'a/b' })).statusCode).toBe(400)
+      expect((await post(ADMIN, 'admin', { name: 'x', parentId: id(999) })).statusCode).toBe(404)
+
+      const gid = backend.json().id
+      const put = (userId: string) => call('PUT', `/v1/orgs/${ORG}/groups/${gid}/members/${userId}`, ADMIN, 'admin')
+      expect((await put(MEMBER)).statusCode).toBe(204)
+      expect((await put(MEMBER)).statusCode).toBe(204)
+      expect((await put(OTHER)).statusCode).toBe(404)
+      const list = await call('GET', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin')
+      expect(list.json().map((g: { path: string; memberIds: string[] }) => [g.path, g.memberIds])).toEqual([
+        ['dev', []],
+        ['dev/backend', [MEMBER]],
+      ])
+      // Others see only their own departments.
+      const mine = await app.inject({ url: `/v1/orgs/${ORG}/groups`, headers: await as(MEMBER, 'member', { groups: [`/orgs/${ORG}/groups/dev/backend`] }) })
+      expect(mine.json().map((g: { path: string }) => g.path)).toEqual(['dev/backend'])
+      expect((await call('GET', `/v1/orgs/${ORG}/groups`, MEMBER, 'member')).json()).toEqual([])
+
+      expect((await call('DELETE', `/v1/orgs/${ORG}/groups/${gid}/members/${MEMBER}`, ADMIN, 'admin')).statusCode).toBe(204)
+      expect(await db.db.select().from(schema.kcGroupMember)).toEqual([])
+      // Deleting a department takes the ones below it along.
+      expect((await call('DELETE', `/v1/orgs/${ORG}/groups/${dev.json().id}`, ADMIN, 'admin')).statusCode).toBe(204)
+      expect(await db.db.select().from(schema.kcGroup)).toEqual([])
+      expect((await call('DELETE', `/v1/orgs/${ORG}/groups/${dev.json().id}`, ADMIN, 'admin')).statusCode).toBe(404)
+      const log = await db.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'group.create'))
+      expect(log.map((l) => l.target)).toEqual(['dev', 'dev/backend'])
+    })
+
+    it('forgets department memberships when a member is removed', async () => {
+      await reset()
+      const g = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'ops' })).json()
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MEMBER}`, ADMIN, 'admin')
+      await call('DELETE', `/v1/orgs/${ORG}/members/${MEMBER}`, ADMIN, 'admin')
+      expect(await db.db.select().from(schema.kcGroupMember)).toEqual([])
     })
   })
 
