@@ -1,6 +1,6 @@
 {
   "name": "@zeima/shared-fixtures",
-  "version": "1.0.0-alpha.0",
+  "version": "1.0.0-alpha.1",
   "private": true,
   "description": "Data shared by the desktop app and the server: the permission rule table (SPEC §5.9) and test vectors.",
   "type": "module",
