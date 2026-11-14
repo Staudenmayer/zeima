@@ -12,6 +12,7 @@ import { type Actor, authorize, scopeOf } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
 import { PRESENCE_STATES } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
+import { reconcileOrganization } from './reconcile.ts'
 import { audit, auditEntries, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
 
 const Role = Type.Union(ORG_ROLES.map((r) => Type.Literal(r)))
@@ -605,6 +606,28 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         else if (effective(policies, await departmentsOf(database(), orgId, p.userId)).presenceVisibility === 'org') shown.push(p)
       }
       return shown
+    },
+  )
+
+  app.post(
+    '/orgs/:orgId/reconcile',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Checks the member and department lists against Keycloak now',
+        description: 'The API does this every night and when Keycloak reports a change; this is for after changes made in the Keycloak console.',
+        security: SECURITY,
+        params: OrgParams,
+        response: {
+          200: Type.Object({ members: Type.Integer(), addedMembers: Type.Integer(), removedMembers: Type.Integer(), groups: Type.Integer() }),
+          ...problems(401, 403, 502, 503),
+        },
+      },
+    },
+    async (request) => {
+      const { orgId } = request.params
+      authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
+      return reconcileOrganization(database(), keycloak(), orgId)
     },
   )
 

@@ -3,6 +3,7 @@
 import { buildApp } from './app.ts'
 import { ConfigError, loadConfig } from './config.ts'
 import { connect, migrateDb } from './db/index.ts'
+import { reconcileAll } from './modules/orgs/reconcile.ts'
 
 let config: ReturnType<typeof loadConfig>
 try {
@@ -22,6 +23,19 @@ const app = await buildApp(config, { db })
 app.addHook('onClose', async () => {
   await client.end()
 })
+
+// The member and department mirror is checked against Keycloak now and then,
+// in case an event was missed.
+if (config.reconcileIntervalHours > 0 && app.keycloakAdmin) {
+  const kc = app.keycloakAdmin
+  const run = () => reconcileAll(db, kc, (msg, err) => (err ? app.log.warn({ err }, msg) : app.log.info(msg)))
+  const first = setTimeout(run, 60_000)
+  const every = setInterval(run, config.reconcileIntervalHours * 3_600_000)
+  app.addHook('onClose', async () => {
+    clearTimeout(first)
+    clearInterval(every)
+  })
+}
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {

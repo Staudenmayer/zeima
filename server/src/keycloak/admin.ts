@@ -28,9 +28,29 @@ export interface KeycloakAdmin {
   setEnabled(userId: string, enabled: boolean): Promise<void>
   /** Creates a department (`['dev', 'backend']` is `/orgs/<id>/groups/dev/backend`); returns its group id. */
   createGroup(orgId: string, path: readonly string[]): Promise<string>
+  /** The organization's members as Keycloak has them (for the nightly check of the mirror). */
+  listMembers(orgId: string): Promise<KcUser[]>
+  /** The departments under `/orgs/<orgId>/groups`, each with its members; paths are full. */
+  listDepartments(orgId: string): Promise<KcDepartment[]>
+  /** The people in each role group of the organization. */
+  listRoleMembers(orgId: string): Promise<Record<OrgRole, string[]>>
   deleteGroup(groupId: string): Promise<void>
   addToGroup(userId: string, groupId: string): Promise<void>
   removeFromGroup(userId: string, groupId: string): Promise<void>
+}
+
+export interface KcUser {
+  id: string
+  email: string | null
+  name: string | null
+  enabled: boolean
+}
+
+export interface KcDepartment {
+  id: string
+  /** Full path, `/orgs/<orgId>/groups/dev/backend`. */
+  path: string
+  memberIds: string[]
 }
 
 interface GroupRep {
@@ -185,6 +205,51 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
   async createGroup(orgId: string, path: readonly string[]): Promise<string> {
     const id = await this.groupId(['orgs', orgId, 'groups', ...path], true)
     return id!
+  }
+
+  /** Every page of a Keycloak list. */
+  private async all<T>(path: string): Promise<T[]> {
+    const out: T[] = []
+    const sep = path.includes('?') ? '&' : '?'
+    for (let first = 0; ; first += 100) {
+      const page = (await this.call('GET', `${path}${sep}first=${first}&max=100`).then((r) => r.json())) as T[]
+      out.push(...page)
+      if (page.length < 100) return out
+    }
+  }
+
+  async listMembers(orgId: string): Promise<KcUser[]> {
+    const users = await this.all<{ id: string; email?: string; firstName?: string; lastName?: string; enabled?: boolean }>(`/organizations/${orgId}/members`)
+    return users.map((u) => ({
+      id: u.id,
+      email: u.email ?? null,
+      name: [u.firstName, u.lastName].filter(Boolean).join(' ') || null,
+      enabled: u.enabled !== false,
+    }))
+  }
+
+  async listDepartments(orgId: string): Promise<KcDepartment[]> {
+    const root = await this.groupId(['orgs', orgId, 'groups'], false)
+    if (!root) return []
+    const out: KcDepartment[] = []
+    const walk = async (id: string) => {
+      for (const child of await this.all<GroupRep>(`/groups/${id}/children?briefRepresentation=true`)) {
+        const members = await this.all<{ id: string }>(`/groups/${child.id}/members`)
+        out.push({ id: child.id, path: child.path, memberIds: members.map((m) => m.id) })
+        await walk(child.id)
+      }
+    }
+    await walk(root)
+    return out
+  }
+
+  async listRoleMembers(orgId: string): Promise<Record<OrgRole, string[]>> {
+    const out = { owner: [], admin: [], manager: [], member: [] } as Record<OrgRole, string[]>
+    for (const role of ORG_ROLES) {
+      const id = await this.groupId(['orgs', orgId, 'roles', role], false)
+      if (id) out[role] = (await this.all<{ id: string }>(`/groups/${id}/members`)).map((m) => m.id)
+    }
+    return out
   }
 
   async deleteGroup(groupId: string): Promise<void> {

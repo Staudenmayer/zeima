@@ -42,6 +42,11 @@ export const EnvSchema = Type.Object({
   /** Its secret. Without it, organization management is switched off. */
   KEYCLOAK_ADMIN_CLIENT_SECRET: Type.Optional(Type.String({ minLength: 1 })),
 
+  /** Secret that signs the calls of Keycloak's event listener (`POST /v1/internal/keycloak-events`). Without it the endpoint is off. */
+  KEYCLOAK_WEBHOOK_SECRET: Type.Optional(Type.String({ minLength: 16 })),
+  /** Hours between checks of the member and department mirror against Keycloak; 0 turns the check off. */
+  RECONCILE_INTERVAL_HOURS: Type.Integer({ minimum: 0, maximum: 720, default: 24 }),
+
   DOCS_ENABLED: Type.Boolean({ default: true }),
   METRICS_ENABLED: Type.Boolean({ default: true }),
   /** Browser origins allowed by CORS, comma-separated (the desktop app needs none). */
@@ -87,6 +92,8 @@ export interface Config {
     admin: { clientId: string; clientSecret: string; tokenUrl: string; apiUrl: string } | null
   }
   audience: string
+  keycloakWebhookSecret: string | null
+  reconcileIntervalHours: number
   allowedClients: string[]
   docsClientId: string
   docsEnabled: boolean
@@ -195,6 +202,8 @@ export function loadConfig(source: Record<string, string | undefined> = process.
         : null,
     },
     audience: env.API_AUDIENCE,
+    keycloakWebhookSecret: env.KEYCLOAK_WEBHOOK_SECRET ?? null,
+    reconcileIntervalHours: env.RECONCILE_INTERVAL_HOURS,
     allowedClients: list(env.ALLOWED_CLIENTS),
     docsClientId: env.DOCS_CLIENT_ID,
     docsEnabled: env.DOCS_ENABLED,

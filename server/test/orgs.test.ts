@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
 import { schema } from '../src/db/index.ts'
+import { sign } from '../src/modules/internal/routes.ts'
 import { FakeKeycloak } from './fake-keycloak.ts'
 import { keys, token } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
@@ -134,6 +135,73 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     ])
     expect(await names(MANAGER, 'manager', [group])).toEqual(['Max', 'Mia'])
     expect(await names(MANAGER, 'manager')).toEqual(['Mia'])
+  })
+
+  describe('keeping the mirror in line with Keycloak', () => {
+    const NEWCOMER = id(30)
+    const keycloakView = () => {
+      // Keycloak knows Olga (owner), Adam (now manager), Max, and a newcomer; Mia has left.
+      kc.members = [OWNER, ADMIN, MEMBER, NEWCOMER].map((uid) => ({ id: uid, email: `${uid.slice(-1)}@example.com`, name: uid === NEWCOMER ? 'Nina' : null, enabled: uid !== MEMBER }))
+      kc.roles = { owner: [OWNER], admin: [], manager: [ADMIN], member: [MEMBER, NEWCOMER] }
+      kc.departments = [{ id: id(810), path: `/orgs/${ORG}/groups/dev`, memberIds: [ADMIN, NEWCOMER, MANAGER] }]
+    }
+
+    it('a signed-in admin can ask for a check', async () => {
+      await reset()
+      keycloakView()
+      expect((await call('POST', `/v1/orgs/${ORG}/reconcile`, MEMBER, 'member')).statusCode).toBe(403)
+      const res = await call('POST', `/v1/orgs/${ORG}/reconcile`, ADMIN, 'admin')
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ members: 4, addedMembers: 1, removedMembers: 1, groups: 1 })
+      const members = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, ORG))
+      expect(members.map((m) => [m.userId, m.role]).sort()).toEqual([[ADMIN, 'manager'], [MEMBER, 'member'], [NEWCOMER, 'member'], [OWNER, 'owner']].sort())
+      const [nina] = await db.db.select().from(schema.kcUser).where(eq(schema.kcUser.id, NEWCOMER))
+      expect(nina).toMatchObject({ displayName: 'Nina', active: true })
+      const [max] = await db.db.select().from(schema.kcUser).where(eq(schema.kcUser.id, MEMBER))
+      expect(max).toMatchObject({ displayName: 'Max', active: false }) // switched off in Keycloak; the known name stays
+      // Departments and who is in them (Mia left, so she is not listed).
+      const inDev = await db.db.select().from(schema.kcGroupMember).where(eq(schema.kcGroupMember.groupId, id(810)))
+      expect(inDev.map((m) => m.userId).sort()).toEqual([ADMIN, NEWCOMER].sort())
+      // Again: nothing changes.
+      expect((await call('POST', `/v1/orgs/${ORG}/reconcile`, ADMIN, 'admin')).json()).toMatchObject({ addedMembers: 0, removedMembers: 0 })
+    })
+
+    it('Keycloak events, signed with the shared secret, start a check', async () => {
+      await reset()
+      keycloakView()
+      const secret = 'a-long-enough-secret'
+      const hooked = await buildApp(loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'silent', METRICS_ENABLED: 'false', KEYCLOAK_WEBHOOK_SECRET: secret }), {
+        logger: false,
+        keys,
+        readiness: {},
+        db: db.db,
+        keycloakAdmin: kc,
+      })
+      const send = (body: object, signature?: string) =>
+        hooked.inject({
+          method: 'POST',
+          url: '/v1/internal/keycloak-events',
+          headers: { 'content-type': 'application/json', 'x-zeima-signature': signature ?? sign(secret, JSON.stringify(body)) },
+          payload: JSON.stringify(body),
+        })
+      expect((await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG }, 'sha256=00')).statusCode).toBe(401)
+      expect((await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG }, sign('another-secret-entirely', JSON.stringify({ type: 'GROUP_MEMBERSHIP', orgId: ORG })))).statusCode).toBe(401)
+      const ok = await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG })
+      expect(ok.statusCode).toBe(202)
+      expect(ok.json()).toEqual({ organizations: 1 })
+      // By person: the organizations they are in.
+      expect((await send({ type: 'UPDATE_PROFILE', userId: ADMIN })).json()).toEqual({ organizations: 1 })
+      expect((await send({ type: 'UPDATE_PROFILE', userId: OTHER })).json()).toEqual({ organizations: 0 })
+      await new Promise((resolve) => setTimeout(resolve, 200)) // the check runs after the answer
+      const members = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, ORG))
+      expect(members.map((m) => m.userId)).toContain(NEWCOMER)
+      await hooked.close()
+    })
+
+    it('has no endpoint for events without a secret', async () => {
+      const res = await app.inject({ method: 'POST', url: '/v1/internal/keycloak-events', payload: { type: 'x' } })
+      expect(res.statusCode).toBe(404)
+    })
   })
 
   it('needs a plan with organizations on the cloud', async () => {

@@ -1,7 +1,8 @@
 // A Keycloak admin client that only records what it was asked to do.
 
 import { randomUUID } from 'node:crypto'
-import type { KeycloakAdmin } from '../src/keycloak/admin.ts'
+import type { KcDepartment, KcUser, KeycloakAdmin } from '../src/keycloak/admin.ts'
+import type { OrgRole } from '../src/plugins/auth.ts'
 
 export class FakeKeycloak implements KeycloakAdmin {
   calls: string[] = []
@@ -14,6 +15,21 @@ export class FakeKeycloak implements KeycloakAdmin {
       throw new Error(`${name} failed`)
     }
     this.calls.push([name, ...args].join(' '))
+  }
+
+  /** What the next `list…` calls report: Keycloak's view of an organization. */
+  members: KcUser[] = []
+  departments: KcDepartment[] = []
+  roles: Record<OrgRole, string[]> = { owner: [], admin: [], manager: [], member: [] }
+
+  async listMembers(_orgId: string) {
+    return this.members
+  }
+  async listDepartments(_orgId: string) {
+    return this.departments
+  }
+  async listRoleMembers(_orgId: string) {
+    return this.roles
   }
 
   async createOrganization(input: { name: string; alias: string }) {

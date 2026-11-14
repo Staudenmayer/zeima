@@ -12,6 +12,7 @@ import { discoveryRoutes } from './modules/discovery/routes.ts'
 import { healthRoutes, keycloakCheck, type ReadinessCheck } from './modules/health/routes.ts'
 import { billingRoutes } from './modules/billing/routes.ts'
 import { licenseRoutes, licensingRoutes } from './modules/licensing/routes.ts'
+import { internalRoutes } from './modules/internal/routes.ts'
 import { orgRoutes } from './modules/orgs/routes.ts'
 import { HttpKeycloakAdmin, type KeycloakAdmin } from './keycloak/admin.ts'
 import { syncRoutes } from './modules/sync/routes.ts'
@@ -74,6 +75,7 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
     async (v1) => {
       await v1.register(meRoutes)
       await v1.register(orgRoutes)
+      await v1.register(internalRoutes, { config })
       await v1.register(syncRoutes)
       await v1.register(licensingRoutes)
       // Offline licenses are for self-hosted installs; the cloud has billing.
