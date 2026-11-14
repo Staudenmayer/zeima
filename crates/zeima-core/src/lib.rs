@@ -45,11 +45,15 @@ pub use repo::{
     default_schedule, AddonRecord, Balance, BudgetStatus, HolidayView, ProfileSummary, VacationSummary,
     WorkScheduleInput,
 };
+#[cfg(feature = "db")]
 pub use repo::{ApplyReport, FieldView, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
+#[cfg(feature = "db")]
 pub use repo::{IdTotal, SubmissionStatus, TeamMember, TimesheetSubmission};
+#[cfg(feature = "db")]
 pub use repo::{
     ImportPreview, ImportReport, LocationKind, LocationPattern, Office, PatternDay, WorkLocation,
 };
+#[cfg(feature = "db")]
 pub use repo::{Meeting, MeetingInput, MeetingOccurrence, MeetingResponse, RsvpStatus};
 
 #[cfg(feature = "db")]
