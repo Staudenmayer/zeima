@@ -165,3 +165,105 @@ async fn a_persons_own_rows_carry_their_account_in_a_shared_workspace() {
         .unwrap();
     assert!(!adjustment.fields.contains_key("userId"));
 }
+
+#[tokio::test]
+async fn absences_in_a_shared_workspace_are_requests_someone_else_decides() {
+    use zeima_core::model::{AbsenceInput, AbsenceStatus, AbsenceTypeInput};
+    let (personal, ada, ben) = setup().await;
+    let kind = ben
+        .save_absence_type(
+            None,
+            AbsenceTypeInput {
+                name: "Vacation".into(),
+                color: "#22c55e".into(),
+                reduces_target: true,
+                affects_vacation: true,
+            },
+        )
+        .await
+        .unwrap();
+    let request = |from: &str, to: &str| AbsenceInput {
+        type_id: kind.id.clone(),
+        start_date: date(from),
+        end_date: date(to),
+        half_day: None,
+        note: String::new(),
+    };
+
+    let mine = ada
+        .save_absence(None, request("2026-10-19", "2026-10-21"))
+        .await
+        .unwrap();
+    assert_eq!(mine.status, AbsenceStatus::Requested);
+    // The request waits for somebody else, who sees it; Ada does not see her own there.
+    assert!(ada.list_absence_requests().await.unwrap().is_empty());
+    assert_eq!(ben.list_absence_requests().await.unwrap().len(), 1);
+    assert!(matches!(
+        ada.decide_absence(&mine.id, true, "").await,
+        Err(Error::Validation { .. })
+    ));
+
+    let approved = ben.decide_absence(&mine.id, true, "enjoy").await.unwrap();
+    assert_eq!(
+        (
+            approved.status,
+            approved.decided_by.as_deref(),
+            approved.decision_note.as_str()
+        ),
+        (AbsenceStatus::Approved, Some(BEN), "enjoy")
+    );
+    assert!(matches!(
+        ben.decide_absence(&mine.id, false, "").await,
+        Err(Error::Conflict(_))
+    ));
+
+    // Changing an approved absence asks again and forgets the decision.
+    let moved = ada
+        .save_absence(Some(&mine.id), request("2026-10-20", "2026-10-22"))
+        .await
+        .unwrap();
+    assert_eq!((moved.status, moved.decided_by), (AbsenceStatus::Requested, None));
+
+    // A rejected request stays visible to the person, with the reason.
+    let second = ada
+        .save_absence(None, request("2026-11-02", "2026-11-03"))
+        .await
+        .unwrap();
+    ben.decide_absence(&second.id, false, "busy week").await.unwrap();
+    let rejected = ada
+        .list_absences(date("2026-11-01"), date("2026-11-30"))
+        .await
+        .unwrap();
+    assert_eq!(
+        (rejected[0].status, rejected[0].decision_note.as_str()),
+        (AbsenceStatus::Rejected, "busy week")
+    );
+
+    // In the personal workspace there is nothing to decide.
+    let own = personal
+        .save_absence_type(
+            None,
+            AbsenceTypeInput {
+                name: "Leave".into(),
+                color: "#111111".into(),
+                reduces_target: true,
+                affects_vacation: true,
+            },
+        )
+        .await
+        .unwrap();
+    let a = personal
+        .save_absence(
+            None,
+            AbsenceInput {
+                type_id: own.id,
+                start_date: date("2026-10-19"),
+                end_date: date("2026-10-19"),
+                half_day: None,
+                note: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(a.status, AbsenceStatus::Approved);
+}

@@ -204,6 +204,37 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     })
   })
 
+  describe('absence requests', () => {
+    const A1 = id(50)
+    const request = { userId: ANNA, typeId: id(51), startDate: '2026-11-02', endDate: '2026-11-03', halfDay: null, note: '', status: 'requested', decidedBy: null, decisionNote: '' }
+
+    it('are made by their owner, always as requests', async () => {
+      expect(await results(ANNA, [upsert('absence', A1, 400, request)])).toEqual([{ status: 'applied' }])
+      expect(await results(ANNA, [upsert('absence', id(52), 400, { ...request, status: 'approved' })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      expect(await results(ANNA, [upsert('absence', id(53), 400, { ...request, startDate: '2026-12-01' })].map((c) => ({ ...c, fields: { ...c.fields, status: undefined } })))).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      expect(await results(ANNA, [upsert('absence', A1, 410, { status: 'approved', decidedBy: ANNA })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      // Nobody makes a request for someone else.
+      expect(await results(BEN, [upsert('absence', id(54), 400, request)])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+    })
+
+    it('are decided by someone with the right over the owner', async () => {
+      const decide = (who: string, fields: Record<string, unknown>, h = 420) => results(who, [upsert('absence', A1, h, fields)])
+      expect(await decide(BEN, { status: 'approved', decidedBy: BEN })).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await decide(MANAGER, { status: 'approved', decidedBy: MANAGER, endDate: '2026-12-31' })).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      expect(await decide(MANAGER, { status: 'rejected', decidedBy: MANAGER, decisionNote: 'busy' })).toEqual([{ status: 'applied' }])
+      // Decided: nobody else decides it again.
+      expect(await decide(OWNER, { status: 'approved', decidedBy: OWNER }, 430)).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+    })
+
+    it('ask again when a decided request is changed', async () => {
+      // Changing the dates while leaving the decision in place is refused ...
+      expect(await results(ANNA, [upsert('absence', A1, 440, { endDate: '2026-11-10' })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      // ... changing them as a new request is fine, and waits for a decision again.
+      expect(await results(ANNA, [upsert('absence', A1, 450, { endDate: '2026-11-10', status: 'requested', decidedBy: null, decisionNote: '' })])).toEqual([{ status: 'applied' }])
+      expect(await results(OWNER, [upsert('absence', A1, 460, { status: 'approved', decidedBy: OWNER, decisionNote: 'ok' })])).toEqual([{ status: 'applied' }])
+    })
+  })
+
   it('does not change personal workspaces', async () => {
     const mine = id(300)
     expect((await app.inject({ method: 'POST', url: '/v1/workspaces', headers: await headers(ANNA), payload: { id: mine, name: 'Anna' } })).statusCode).toBe(200)

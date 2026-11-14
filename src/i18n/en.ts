@@ -329,6 +329,7 @@ export default {
     morningHint: 'Offer to start tracking at the first activity of the day.',
   },
   absences: {
+    status: { requested: 'Requested', approved: 'Approved', rejected: 'Rejected' },
     title: 'Absences',
     add: 'Add absence',
     edit: 'Edit absence',
@@ -614,6 +615,7 @@ export default {
     lockHint: 'Once approved, the entries of this period are locked: only a manager can change them.',
     mine: 'My timesheets',
     noneYet: 'You have not submitted a timesheet yet.',
+    absenceRequests: 'Absence requests',
     toApprove: 'Waiting for your decision',
     approveHint: 'Approving locks the entries of the period.',
     approve: 'Approve',

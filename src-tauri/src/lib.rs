@@ -144,6 +144,8 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             updates::update_install,
             license::plan_status,
             org::org_request,
+            commands_work::absence_requests,
+            commands_work::absence_decide,
             commands_work::submissions_list,
             commands_work::submission_submit,
             commands_work::submission_decide,

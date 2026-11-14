@@ -114,6 +114,45 @@ async function checkSubmission(
   return null
 }
 
+/**
+ * An absence in an organization is a request. Its owner writes it (always as
+ * `requested`, so changing a decided one asks again); someone with
+ * `absence.approve` over the owner decides a waiting one and changes nothing else.
+ */
+async function checkAbsence(
+  db: Db,
+  actor: Actor,
+  orgId: string,
+  change: Change,
+  current: RowState | null,
+  owner: string,
+): Promise<Outcome | null> {
+  const forbidden: Outcome = { status: 'rejected', reason: 'forbidden' }
+  const badField: Outcome = { status: 'rejected', reason: 'forbidden_field' }
+  const fields = change.fields ?? {}
+  if (owner === actor.user.id) {
+    if (change.op === 'delete') return null
+    if (fields.status !== undefined && fields.status !== 'requested') return badField
+    // A new request, or a decided one that is changed, goes back to waiting.
+    const decided = current && plain(current.fields.status) !== 'requested'
+    const touchesMore = Object.keys(fields).some((f) => !['status', ...DECISION_FIELDS].includes(f))
+    if ((!current || (decided && touchesMore)) && fields.status !== 'requested') return badField
+    for (const f of DECISION_FIELDS) {
+      const v = fields[f]
+      if (v !== undefined && v !== null && v !== '') return badField
+    }
+    return null
+  }
+  if (!current || change.op === 'delete' || plain(current.fields.status) !== 'requested') return forbidden
+  const scope = scopeOf(actor, 'absence.approve')
+  const covered = scope === 'org' || (scope === 'group' && (await sharesGroup(db, orgId, actor.user.orgs[orgId]?.groups ?? [], owner)))
+  if (!covered) return forbidden
+  if (fields.status !== 'approved' && fields.status !== 'rejected') return badField
+  if (Object.keys(fields).some((f) => f !== 'status' && !DECISION_FIELDS.includes(f))) return badField
+  if (fields.decidedBy !== undefined && fields.decidedBy !== actor.user.id) return badField
+  return null
+}
+
 /** Null if the change may go on to the merge; otherwise the reason it is refused. */
 export async function checkOrgWrite(
   db: Db,
@@ -140,6 +179,7 @@ export async function checkOrgWrite(
   const owner = ownerOf(current, change)
   if (!owner) return { status: 'rejected', reason: 'forbidden' }
   if (change.table === 'timesheet_submission') return checkSubmission(db, actor, orgId, change, current, owner)
+  if (change.table === 'absence') return checkAbsence(db, actor, orgId, change, current, owner)
   const moved = change.fields?.userId
   if (current && typeof moved === 'string' && moved !== owner) return { status: 'rejected', reason: 'forbidden_field' }
   if (owner === actor.user.id) return null

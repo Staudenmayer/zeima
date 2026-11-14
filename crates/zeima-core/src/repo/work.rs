@@ -122,6 +122,8 @@ fn absence_from_row(r: &SqliteRow) -> Result<Absence> {
             .transpose()?,
         status: r.try_get::<String, _>("status")?.parse()?,
         note: r.try_get("note")?,
+        decided_by: r.try_get("decided_by")?,
+        decision_note: r.try_get("decision_note")?,
     })
 }
 
@@ -503,7 +505,7 @@ impl Core {
     /// Absences overlapping `[from, to]`.
     pub async fn list_absences(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Absence>> {
         let rows = sqlx::query(
-            "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note FROM absence
+            "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note, decided_by, decision_note FROM absence
              WHERE user_id = ? AND deleted_at IS NULL AND start_date <= ? AND end_date >= ?
              ORDER BY start_date",
         )
@@ -533,7 +535,7 @@ impl Core {
         let previous = match id {
             Some(id) => {
                 let row = sqlx::query(
-                    "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note FROM absence
+                    "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note, decided_by, decision_note FROM absence
                      WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                 )
                 .bind(id)
@@ -554,8 +556,15 @@ impl Core {
             start_date: input.start_date,
             end_date: input.end_date,
             half_day: input.half_day,
-            status: crate::model::AbsenceStatus::Approved,
+            // In a shared workspace every new or changed absence is a request.
+            status: if tx.ctx().shared {
+                crate::model::AbsenceStatus::Requested
+            } else {
+                crate::model::AbsenceStatus::Approved
+            },
             note: input.note,
+            decided_by: None,
+            decision_note: String::new(),
         };
         let s = tx.stamp();
         sqlx::query(
@@ -564,6 +573,7 @@ impl Core {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (id) DO UPDATE SET type_id = excluded.type_id, start_date = excluded.start_date,
                 end_date = excluded.end_date, half_day = excluded.half_day, note = excluded.note,
+                status = excluded.status, decided_by = NULL, decision_note = '',
                 updated_at = excluded.updated_at, hlc = excluded.hlc, origin_device = excluded.origin_device",
         )
         .bind(&absence.id)
@@ -589,6 +599,80 @@ impl Core {
             .as_ref()
             .map_or(absence.end_date, |p| p.end_date.max(absence.end_date));
         invalidate_days(tx.conn(), &user, from, Some(to)).await?;
+        tx.commit().await?;
+        Ok(absence)
+    }
+
+    /// Absence requests of other people waiting for a decision (shared
+    /// workspaces: those this device has received).
+    pub async fn list_absence_requests(&self) -> Result<Vec<Absence>> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note, decided_by, decision_note FROM absence
+             WHERE workspace_id = ? AND user_id != ? AND status = 'requested' AND deleted_at IS NULL
+             ORDER BY start_date",
+        )
+        .bind(&self.ctx().workspace_id)
+        .bind(&self.ctx().user_id)
+        .fetch_all(self.pool())
+        .await?;
+        rows.iter().map(absence_from_row).collect()
+    }
+
+    /// Approves or rejects somebody else's waiting absence request. The
+    /// server checks that the person may.
+    pub async fn decide_absence(&self, id: &str, approve: bool, note: &str) -> Result<Absence> {
+        if !self.ctx().shared {
+            return Err(Error::validation(
+                "workspace",
+                "absence requests exist in an organization's workspace",
+            ));
+        }
+        let mut tx = self.begin().await?;
+        let row = sqlx::query(
+            "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note, decided_by, decision_note FROM absence
+             WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .bind(&tx.ctx().workspace_id)
+        .fetch_optional(tx.conn())
+        .await?
+        .ok_or_else(|| not_found("absence", id))?;
+        let mut absence = absence_from_row(&row)?;
+        if absence.user_id == tx.ctx().user_id {
+            return Err(Error::validation("id", "you cannot decide on your own absence"));
+        }
+        if absence.status != crate::model::AbsenceStatus::Requested {
+            return Err(Error::Conflict("This request has been decided already.".into()));
+        }
+        let s = tx.stamp();
+        absence.status = if approve {
+            crate::model::AbsenceStatus::Approved
+        } else {
+            crate::model::AbsenceStatus::Rejected
+        };
+        absence.decided_by = Some(tx.ctx().user_id.clone());
+        absence.decision_note = note.trim().to_string();
+        sqlx::query(
+            "UPDATE absence SET status = ?, decided_by = ?, decision_note = ?, updated_at = ?, hlc = ?, origin_device = ?
+             WHERE id = ?",
+        )
+        .bind(absence.status.as_str())
+        .bind(&absence.decided_by)
+        .bind(&absence.decision_note)
+        .bind(s.now)
+        .bind(&s.hlc)
+        .bind(&s.device)
+        .bind(id)
+        .execute(tx.conn())
+        .await?;
+        tx.log_upsert("absence", id, &s, &absence).await?;
+        invalidate_days(
+            tx.conn(),
+            &absence.user_id,
+            absence.start_date,
+            Some(absence.end_date),
+        )
+        .await?;
         tx.commit().await?;
         Ok(absence)
     }
@@ -886,6 +970,10 @@ impl Core {
             .collect();
         let mut absences: HashMap<NaiveDate, Vec<AbsenceOnDay>> = HashMap::new();
         for a in self.list_absences(first, to).await? {
+            // A rejected request takes no time off.
+            if a.status == crate::model::AbsenceStatus::Rejected {
+                continue;
+            }
             let Some(t) = types.get(&a.type_id) else { continue };
             let fraction = if a.half_day.is_some() { 0.5 } else { 1.0 };
             let mut d = a.start_date.max(first);
@@ -966,7 +1054,9 @@ impl Core {
         let today = self.today()?;
         let (mut used, mut planned) = (0.0, 0.0);
         for a in self.list_absences(start, end).await? {
-            if !types.get(&a.type_id).is_some_and(|t| t.affects_vacation) {
+            if a.status == crate::model::AbsenceStatus::Rejected
+                || !types.get(&a.type_id).is_some_and(|t| t.affects_vacation)
+            {
                 continue;
             }
             let fraction = if a.half_day.is_some() { 0.5 } else { 1.0 };

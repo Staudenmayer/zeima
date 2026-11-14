@@ -442,8 +442,12 @@ pub struct Absence {
     /// Inclusive.
     pub end_date: chrono::NaiveDate,
     pub half_day: Option<HalfDay>,
+    /// `requested` until someone with the right decides, in a shared workspace.
     pub status: AbsenceStatus,
     pub note: String,
+    /// Account id of whoever approved or rejected the request.
+    pub decided_by: Option<String>,
+    pub decision_note: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

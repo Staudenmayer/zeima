@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Check, ClipboardCheck, Send, Undo2, X } from '@lucide/vue'
-import type { TimesheetSubmission } from '@/bindings'
+import { commands, type Absence, type TimesheetSubmission } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -12,10 +12,11 @@ import { Label } from '@/components/ui/label'
 import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
-import { errorMessage } from '@/lib/ipc'
+import { call, errorMessage } from '@/lib/ipc'
 import { useAccountStore } from '@/stores/account'
 import { useOrgStore } from '@/stores/org'
 import { useSubmissionsStore } from '@/stores/submissions'
+import { useWorkStore } from '@/stores/work'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 definePage({ meta: { titleKey: 'nav.approvals' } })
@@ -25,6 +26,21 @@ const account = useAccountStore()
 const org = useOrgStore()
 const workspaces = useWorkspaceStore()
 const submissions = useSubmissionsStore()
+const work = useWorkStore()
+
+/** Absence requests of other people waiting for a decision. */
+const absenceRequests = ref<Absence[]>([])
+const absenceRange = (a: Absence) => (a.startDate === a.endDate ? day(a.startDate) : `${day(a.startDate)} – ${day(a.endDate)}`)
+const typeName = (a: Absence) => {
+  const type = work.absenceTypesById.get(a.typeId)
+  return type ? work.absenceTypeName(type) : ''
+}
+async function decideAbsence(a: Absence, approve: boolean, why = '') {
+  await run(async () => {
+    await call(commands.absenceDecide(a.id, approve, why))
+    absenceRequests.value = await call(commands.absenceRequests())
+  })
+}
 
 const me = computed(() => account.status.user?.id ?? null)
 const mine = computed(() => submissions.all.filter((s) => s.userId === me.value))
@@ -39,6 +55,7 @@ async function load() {
   if (!workspaces.inOrg) return
   try {
     await submissions.load()
+    absenceRequests.value = await call(commands.absenceRequests())
     if (org.members.length === 0) await org.load().catch(() => {})
   } catch (err) {
     toast.error(errorMessage(err))
@@ -87,9 +104,9 @@ async function submit() {
 }
 
 // ----------------------------------------------------------------- deciding
-const deciding = ref<TimesheetSubmission | null>(null)
+const deciding = ref<TimesheetSubmission | Absence | null>(null)
 const decisionNote = ref('')
-function askReject(s: TimesheetSubmission) {
+function askReject(s: TimesheetSubmission | Absence) {
   deciding.value = s
   decisionNote.value = ''
 }
@@ -97,7 +114,8 @@ async function reject() {
   const s = deciding.value
   if (!s) return
   await run(async () => {
-    await submissions.decide(s.id, false, decisionNote.value)
+    if ('periodStart' in s) await submissions.decide(s.id, false, decisionNote.value)
+    else await decideAbsence(s, false, decisionNote.value)
     deciding.value = null
   })
 }
@@ -114,6 +132,20 @@ const { t } = useI18n()
   <EmptyState v-if="!workspaces.inOrg" :icon="ClipboardCheck" :text="$t('approvals.personal')" />
 
   <div v-else class="grid gap-8">
+    <section v-if="absenceRequests.length" class="grid gap-2">
+      <h2 class="text-sm font-medium">{{ $t('approvals.absenceRequests') }}</h2>
+      <ul class="divide-y rounded-lg border">
+        <li v-for="a in absenceRequests" :key="a.id" class="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
+          <div class="min-w-0 flex-1">
+            <p class="font-medium">{{ nameOf(a.userId) || $t('approvals.someone') }} · {{ absenceRange(a) }}</p>
+            <p class="truncate text-xs text-muted-foreground">{{ typeName(a) }}<span v-if="a.note"> · {{ a.note }}</span></p>
+          </div>
+          <Button size="sm" @click="decideAbsence(a, true)"><Check /> {{ $t('approvals.approve') }}</Button>
+          <Button size="sm" variant="outline" @click="askReject(a)"><X /> {{ $t('approvals.reject') }}</Button>
+        </li>
+      </ul>
+    </section>
+
     <section v-if="toApprove.length" class="grid gap-2">
       <h2 class="text-sm font-medium">{{ $t('approvals.toApprove') }}</h2>
       <ul class="divide-y rounded-lg border">

@@ -188,6 +188,9 @@ export const commands = {
 	 *  details become the error, with its `code`.
 	 */
 	orgRequest: (method: string, path: string, body: string | null) => typedError<string | null, CmdError>(__TAURI_INVOKE("org_request", { method, path, body })),
+	/**  Absence requests of other people waiting for a decision. */
+	absenceRequests: () => typedError<Absence[], CmdError>(__TAURI_INVOKE("absence_requests")),
+	absenceDecide: (id: string, approve: boolean, note: string) => typedError<Absence, CmdError>(__TAURI_INVOKE("absence_decide", { id, approve, note })),
 	submissionsList: () => typedError<TimesheetSubmission[], CmdError>(__TAURI_INVOKE("submissions_list")),
 	submissionSubmit: (from: string, to: string, note: string) => typedError<TimesheetSubmission, CmdError>(__TAURI_INVOKE("submission_submit", { from, to, note })),
 	submissionDecide: (id: string, approve: boolean, note: string) => typedError<TimesheetSubmission, CmdError>(__TAURI_INVOKE("submission_decide", { id, approve, note })),
@@ -239,8 +242,12 @@ export type Absence = {
 	/**  Inclusive. */
 	endDate: string,
 	halfDay: HalfDay | null,
+	/**  `requested` until someone with the right decides, in a shared workspace. */
 	status: AbsenceStatus,
 	note: string,
+	/**  Account id of whoever approved or rejected the request. */
+	decidedBy: string | null,
+	decisionNote: string,
 };
 
 export type AbsenceInput = {

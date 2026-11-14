@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { ChevronLeft, ChevronRight, Palmtree, Pencil, Plus, Trash2 } from '@lucide/vue'
 import { commands, type Absence, type AbsenceType, type HolidayView, type VacationSummary } from '@/bindings'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -143,6 +144,8 @@ async function addHoliday() {
           <span class="w-40 font-medium">{{ range(a) }}</span>
           <span>{{ work.absenceTypesById.get(a.typeId) ? work.absenceTypeName(work.absenceTypesById.get(a.typeId)!) : '' }}</span>
           <span v-if="a.halfDay" class="text-xs text-muted-foreground">{{ $t(`absences.halfDays.${a.halfDay}`) }}</span>
+          <Badge v-if="a.status !== 'approved'" :variant="a.status === 'rejected' ? 'destructive' : 'secondary'">{{ $t(`absences.status.${a.status}`) }}</Badge>
+          <span v-if="a.status === 'rejected' && a.decisionNote" class="text-xs text-muted-foreground">{{ a.decisionNote }}</span>
           <span class="flex-1 truncate text-muted-foreground">{{ a.note }}</span>
           <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
             <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(a)"><Pencil /></Button>

@@ -331,6 +331,7 @@ const de: typeof en = {
     morningHint: 'Bei der ersten Aktivität des Tages anbieten, die Erfassung zu starten.',
   },
   absences: {
+    status: { requested: 'Beantragt', approved: 'Genehmigt', rejected: 'Abgelehnt' },
     title: 'Abwesenheiten',
     add: 'Abwesenheit hinzufügen',
     edit: 'Abwesenheit bearbeiten',
@@ -616,6 +617,7 @@ const de: typeof en = {
     lockHint: 'Nach der Freigabe sind die Einträge dieses Zeitraums gesperrt: nur Manager können sie ändern.',
     mine: 'Meine Zeitnachweise',
     noneYet: 'Du hast noch keinen Zeitnachweis eingereicht.',
+    absenceRequests: 'Abwesenheitsanträge',
     toApprove: 'Wartet auf deine Entscheidung',
     approveHint: 'Mit der Freigabe werden die Einträge des Zeitraums gesperrt.',
     approve: 'Freigeben',

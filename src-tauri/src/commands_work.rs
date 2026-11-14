@@ -370,3 +370,24 @@ pub async fn submission_withdraw(app: AppHandle, state: State<'_, AppState>, id:
     work_changed(&app).await;
     Ok(())
 }
+
+/// Absence requests of other people waiting for a decision.
+#[tauri::command]
+#[specta::specta]
+pub async fn absence_requests(state: State<'_, AppState>) -> CmdResult<Vec<Absence>> {
+    Ok(state.data().list_absence_requests().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn absence_decide(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    approve: bool,
+    note: String,
+) -> CmdResult<Absence> {
+    let absence = state.data().decide_absence(&id, approve, &note).await?;
+    work_changed(&app).await;
+    Ok(absence)
+}
