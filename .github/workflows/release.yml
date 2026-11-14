@@ -41,8 +41,26 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
+  release:
+    # Creates the release once, so the three platform builds (which run in
+    # parallel) only upload to it instead of racing to create it.
     needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the release if it does not exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then exit 0; fi
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Zeima $GITHUB_REF_NAME" \
+            --notes "See the assets below to download and install." "${flags[@]}"
+
+  build:
+    needs: [verify, release]
     strategy:
       fail-fast: false
       matrix:
@@ -112,7 +130,7 @@ jobs:
     # Runs after the app builds: they create the release, which the addon
     # zips are attached to. Waiting inside this job timed out, because the
     # builds take longer than the wait. Still runs if one platform failed.
-    needs: [verify, build]
+    needs: [verify, release, build]
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
