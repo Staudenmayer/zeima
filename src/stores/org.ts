@@ -27,6 +27,10 @@ export interface Invitation {
   id: string
   email: string
   role: 'admin' | 'manager' | 'member'
+  /** Departments the person is put into when they join. */
+  groupIds: string[]
+  /** The job description they get when they join. */
+  jobId: string | null
   createdAt: number
 }
 export interface Department {
@@ -140,6 +144,7 @@ export const useOrgStore = defineStore('org', () => {
       invitations.value = i
       audit.value = []
       auditDone.value = false
+      await Promise.all([loadDirectory().catch(() => {}), loadJobs().catch(() => {})])
       if (CAN.audit(r)) await loadMoreAudit()
     } finally {
       loading.value = false
@@ -209,8 +214,14 @@ export const useOrgStore = defineStore('org', () => {
     await load()
   }
 
-  async function invite(email: string, inviteRole: Invitation['role']) {
-    await api('POST', `${base()}/invitations`, { email, role: inviteRole })
+  async function invite(email: string, inviteRole: Invitation['role'], groupIds: string[] = [], jobId: string | null = null) {
+    await api('POST', `${base()}/invitations`, { email, role: inviteRole, groupIds, jobId })
+    await load()
+  }
+
+  /** Changes the departments and job description a pending invitation gives. */
+  async function updateInvitation(invitationId: string, change: { groupIds?: string[]; jobId?: string | null }) {
+    await api('PATCH', `${base()}/invitations/${invitationId}`, change)
     await load()
   }
 
@@ -253,7 +264,7 @@ export const useOrgStore = defineStore('org', () => {
 
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
-    directory, loadDirectory, jobs, loadJobs, createJob, updateJob, deleteJob, setJob, loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
+    directory, loadDirectory, updateInvitation, jobs, loadJobs, createJob, updateJob, deleteJob, setJob, loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

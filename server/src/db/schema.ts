@@ -133,6 +133,10 @@ export const orgInvitation = pgTable(
     email: text('email').notNull(),
     role: text('role').notNull(),
     invitedBy: uuid('invited_by'),
+    /** Departments the person is put into when they join. */
+    groupIds: uuid('group_ids').array().notNull().default(sql`'{}'::uuid[]`),
+    /** The job description they get when they join. */
+    jobId: uuid('job_id').references(() => orgJob.id, { onDelete: 'set null' }),
     createdAt: ms('created_at').notNull(),
     acceptedAt: ms('accepted_at'),
   },

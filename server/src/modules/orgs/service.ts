@@ -186,11 +186,20 @@ export async function acceptInvitations(db: Db, kc: KeycloakAdmin, user: { id: s
     const role = invitation.role as OrgRole
     await kc.addMember(invitation.orgId, user.id)
     await kc.setRole(invitation.orgId, user.id, role)
+    // The departments the inviter chose (those that still exist in the organization).
+    const groups = invitation.groupIds.length
+      ? await db
+          .select({ id: schema.kcGroup.id })
+          .from(schema.kcGroup)
+          .where(and(eq(schema.kcGroup.orgId, invitation.orgId), inArray(schema.kcGroup.id, invitation.groupIds)))
+      : []
+    for (const g of groups) await kc.addToGroup(user.id, g.id)
     await db.transaction(async (tx) => {
       await tx
         .insert(schema.kcOrgMember)
-        .values({ orgId: invitation.orgId, userId: user.id, role })
+        .values({ orgId: invitation.orgId, userId: user.id, role, jobId: invitation.jobId })
         .onConflictDoNothing()
+      for (const g of groups) await tx.insert(schema.kcGroupMember).values({ groupId: g.id, userId: user.id }).onConflictDoNothing()
       await tx.update(schema.orgInvitation).set({ acceptedAt: Date.now() }).where(eq(schema.orgInvitation.id, invitation.id))
     })
     await audit(db, { orgId: invitation.orgId, actorId: user.id, action: 'member.join', target: user.id, detail: { role } })

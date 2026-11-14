@@ -4,9 +4,9 @@
 
 import { randomUUID } from 'node:crypto'
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
-import { and, asc, eq, ne, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { Type } from 'typebox'
-import { schema } from '../../db/index.ts'
+import { type Db, schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { ORG_ROLES, type OrgRole, SECURITY } from '../../plugins/auth.ts'
 import { type Actor, authorize, scopeOf } from '../../plugins/authz.ts'
@@ -24,6 +24,18 @@ const OrgParams = Type.Object({ orgId: Type.String({ format: 'uuid' }) })
 const MemberParams = Type.Object({ orgId: Type.String({ format: 'uuid' }), userId: Type.String({ format: 'uuid' }) })
 const Nullable = <T extends ReturnType<typeof Type.String>>(t: T) => Type.Union([t, Type.Null()])
 
+/** The departments and the job description must belong to the organization. */
+async function checkDepartmentsAndJob(db: Db, orgId: string, groupIds: readonly string[], jobId: string | null) {
+  if (groupIds.length) {
+    const found = await db.select({ id: schema.kcGroup.id }).from(schema.kcGroup).where(and(eq(schema.kcGroup.orgId, orgId), inArray(schema.kcGroup.id, [...groupIds])))
+    if (found.length !== groupIds.length) throw new HttpProblem(404, 'not_found', 'department not found')
+  }
+  if (jobId) {
+    const [job] = await db.select({ id: schema.orgJob.id }).from(schema.orgJob).where(and(eq(schema.orgJob.id, jobId), eq(schema.orgJob.orgId, orgId)))
+    if (!job) throw new HttpProblem(404, 'not_found', 'no such job description')
+  }
+}
+
 const Member = Type.Object(
   {
     id: Type.String({ description: 'Keycloak user id' }),
@@ -40,6 +52,8 @@ const Invitation = Type.Object({
   id: Type.String(),
   email: Type.String(),
   role: InviteRole,
+  groupIds: Type.Array(Type.String(), { description: 'Departments the person is put into when they join' }),
+  jobId: Type.Union([Type.String(), Type.Null()], { description: 'The job description they get when they join' }),
   createdAt: Type.Integer({ description: 'Unix ms' }),
 })
 
@@ -277,7 +291,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const { orgId } = request.params
       authorize(actorIn({ user: request.user! }, orgId), 'member.invite', { orgId })
       const rows = await pendingInvitations(database(), orgId)
-      return rows.map((r) => ({ id: r.id, email: r.email, role: r.role as 'admin' | 'manager' | 'member', createdAt: r.createdAt }))
+      return rows.map((r) => ({ id: r.id, email: r.email, role: r.role as 'admin' | 'manager' | 'member', groupIds: r.groupIds, jobId: r.jobId, createdAt: r.createdAt }))
     },
   )
 
@@ -292,7 +306,12 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
           'Only owners can invite admins and managers. A pending invitation uses a seat.',
         security: SECURITY,
         params: OrgParams,
-        body: Type.Object({ email: Type.String({ format: 'email', maxLength: 254 }), role: Type.Optional(InviteRole) }),
+        body: Type.Object({
+          email: Type.String({ format: 'email', maxLength: 254 }),
+          role: Type.Optional(InviteRole),
+          groupIds: Type.Optional(Type.Array(Type.String({ format: 'uuid' }), { maxItems: 50, description: 'Departments to put the person into when they join' })),
+          jobId: Type.Optional(Nullable(Type.String({ format: 'uuid' }))),
+        }),
         response: { 201: Invitation, ...problems(400, 401, 403, 409, 502, 503) },
       },
     },
@@ -314,9 +333,12 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       if (existing) throw new HttpProblem(409, 'already_member', 'this person is already a member')
       requireSeat(await seatLimit(actor.user, orgId), await seatUsage(db, orgId))
 
+      const groupIds = [...new Set(request.body.groupIds ?? [])]
+      const jobId = request.body.jobId ?? null
+      await checkDepartmentsAndJob(db, orgId, groupIds, jobId)
       const [row] = await db
         .insert(schema.orgInvitation)
-        .values({ orgId, email, role, invitedBy: actor.user.id, createdAt: Date.now() })
+        .values({ orgId, email, role, groupIds, jobId, invitedBy: actor.user.id, createdAt: Date.now() })
         .onConflictDoNothing()
         .returning()
       if (!row) throw new HttpProblem(409, 'already_invited', 'this address has a pending invitation')
@@ -327,7 +349,41 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         throw err
       }
       await audit(db, { orgId, actorId: actor.user.id, action: 'member.invite', target: email, detail: { role } })
-      return reply.code(201).send({ id: row.id, email, role, createdAt: row.createdAt })
+      return reply.code(201).send({ id: row.id, email, role, groupIds, jobId, createdAt: row.createdAt })
+    },
+  )
+
+  app.patch(
+    '/orgs/:orgId/invitations/:invitationId',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Changes the departments and job description a pending invitation gives',
+        security: SECURITY,
+        params: Type.Object({ orgId: Type.String({ format: 'uuid' }), invitationId: Type.String({ format: 'uuid' }) }),
+        body: Type.Object(
+          {
+            groupIds: Type.Optional(Type.Array(Type.String({ format: 'uuid' }), { maxItems: 50 })),
+            jobId: Type.Optional(Nullable(Type.String({ format: 'uuid' }))),
+          },
+          { minProperties: 1 },
+        ),
+        response: { 200: Invitation, ...problems(400, 401, 403, 404, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId, invitationId } = request.params
+      authorize(actorIn({ user: request.user! }, orgId), 'member.invite', { orgId })
+      const db = database()
+      const groupIds = request.body.groupIds ? [...new Set(request.body.groupIds)] : undefined
+      await checkDepartmentsAndJob(db, orgId, groupIds ?? [], request.body.jobId ?? null)
+      const [row] = await db
+        .update(schema.orgInvitation)
+        .set({ ...(groupIds ? { groupIds } : {}), ...(request.body.jobId !== undefined ? { jobId: request.body.jobId } : {}) })
+        .where(and(eq(schema.orgInvitation.id, invitationId), eq(schema.orgInvitation.orgId, orgId), isNull(schema.orgInvitation.acceptedAt)))
+        .returning()
+      if (!row) throw new HttpProblem(404, 'not_found', 'invitation not found')
+      return { id: row.id, email: row.email, role: row.role as 'admin' | 'manager' | 'member', groupIds: row.groupIds, jobId: row.jobId, createdAt: row.createdAt }
     },
   )
 

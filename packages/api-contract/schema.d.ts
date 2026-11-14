@@ -743,6 +743,10 @@ export interface paths {
                             id: string;
                             email: string;
                             role: "admin" | "manager" | "member";
+                            /** @description Departments the person is put into when they join */
+                            groupIds: string[];
+                            /** @description The job description they get when they join */
+                            jobId: string | null;
                             /** @description Unix ms */
                             createdAt: number;
                         }[];
@@ -797,6 +801,9 @@ export interface paths {
                         /** Format: email */
                         email: string;
                         role?: "admin" | "manager" | "member";
+                        /** @description Departments to put the person into when they join */
+                        groupIds?: string[];
+                        jobId?: string | null;
                     };
                 };
             };
@@ -811,6 +818,10 @@ export interface paths {
                             id: string;
                             email: string;
                             role: "admin" | "manager" | "member";
+                            /** @description Departments the person is put into when they join */
+                            groupIds: string[];
+                            /** @description The job description they get when they join */
+                            jobId: string | null;
                             /** @description Unix ms */
                             createdAt: number;
                         };
@@ -951,7 +962,92 @@ export interface paths {
         };
         options?: never;
         head?: never;
-        patch?: never;
+        /** Changes the departments and job description a pending invitation gives */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    orgId: string;
+                    invitationId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        groupIds?: string[];
+                        jobId?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            id: string;
+                            email: string;
+                            role: "admin" | "manager" | "member";
+                            /** @description Departments the person is put into when they join */
+                            groupIds: string[];
+                            /** @description The job description they get when they join */
+                            jobId: string | null;
+                            /** @description Unix ms */
+                            createdAt: number;
+                        };
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
         trace?: never;
     };
     "/v1/orgs/{orgId}/groups": {

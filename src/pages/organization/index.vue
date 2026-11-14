@@ -13,12 +13,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import PolicyDialog from '@/components/time/PolicyDialog.vue'
+import PresenceDot from '@/components/time/PresenceDot.vue'
+import { Checkbox } from '@/components/ui/checkbox'
 import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
 import { events } from '@/bindings'
 import { errorMessage } from '@/lib/ipc'
-import { useProjectsStore } from '@/stores/projects'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { OrgPolicy } from '@/bindings'
 import { useAccountStore } from '@/stores/account'
@@ -41,7 +42,6 @@ const isOwner = computed(() => !!org.role && CAN.delete(org.role))
 /** Roles this person may hand out in an invitation. */
 const inviteRoles = computed<Invitation['role'][]>(() => (canAssign.value ? ['member', 'manager', 'admin'] : ['member']))
 
-const projects = useProjectsStore()
 const workspaces = useWorkspaceStore()
 
 // ----------------------------------------------------------------- policies
@@ -79,7 +79,6 @@ onUnmounted(() => {
   unlisten?.()
   clearInterval(refresh)
 })
-const STATE_COLOR: Record<string, string> = { online: '#22c55e', tracking: '#3b82f6', in_meeting: '#f59e0b', away: '#9ca3af' }
 async function load() {
   if (!account.status.signedIn) return
   try {
@@ -116,12 +115,16 @@ async function create() {
 const inviteOpen = ref(false)
 const inviteEmail = ref('')
 const inviteRole = ref<Invitation['role']>('member')
+const inviteGroups = ref<string[]>([])
+const inviteJob = ref('__none')
 async function sendInvite() {
   await run(async () => {
-    await org.invite(inviteEmail.value.trim(), inviteRole.value)
+    await org.invite(inviteEmail.value.trim(), inviteRole.value, inviteGroups.value, inviteJob.value === '__none' ? null : inviteJob.value)
     inviteOpen.value = false
     inviteEmail.value = ''
     inviteRole.value = 'member'
+    inviteGroups.value = []
+    inviteJob.value = '__none'
   }, t('org.invited'))
 }
 
@@ -157,23 +160,19 @@ function askDeleteDept(g: Department) {
   deleteDeptOpen.value = true
 }
 const memberName = (id: string) => org.nameOf(id) || id
-const addable = (g: Department) => org.members.filter((m) => !g.memberIds.includes(m.id))
 
 // ---------------------------------------------------------------- job descriptions
 const jobOpen = ref(false)
-const editingJob = ref<Job | null>(null)
 const jobName = ref('')
 const jobText = ref('')
-function openJob(j: Job | null) {
-  editingJob.value = j
-  jobName.value = j?.name ?? ''
-  jobText.value = j?.description ?? ''
+function openJob() {
+  jobName.value = ''
+  jobText.value = ''
   jobOpen.value = true
 }
 async function saveJob() {
   await run(async () => {
-    if (editingJob.value) await org.updateJob(editingJob.value.id, jobName.value.trim(), jobText.value.trim())
-    else await org.createJob(jobName.value.trim(), jobText.value.trim())
+    await org.createJob(jobName.value.trim(), jobText.value.trim())
     jobOpen.value = false
   })
 }
@@ -195,21 +194,85 @@ const actor = (id: string | null) => (id ? memberName(id) : '')
 const deleteOrgOpen = ref(false)
 
 // Sortable tables. The activity log is loaded page by page, newest first; its sort covers what is loaded.
-const { sort: memberSort, sorted: sortedMembers } = useSort(() => org.members, {
-  member: (m) => label(m),
-  role: (m) => m.role,
-  status: (m) => (m.active ? 0 : 1),
+// ----------------------------------------- members and invitations, one table
+interface PersonRow {
+  key: string
+  member: Member | null
+  invitation: Invitation | null
+  name: string
+  email: string | null
+  role: string
+  departments: string[]
+  job: string | null
+  status: 'active' | 'deactivated' | 'pending'
+}
+const departmentPaths = (ids: string[]) => org.departments.filter((g) => ids.includes(g.id)).map((g) => g.path).sort()
+const people = computed<PersonRow[]>(() => [
+  ...org.members.map((m) => ({
+    key: `m/${m.id}`,
+    member: m,
+    invitation: null,
+    name: label(m),
+    email: m.name ? m.email : null,
+    role: m.role,
+    departments: org.departments.filter((g) => g.memberIds.includes(m.id)).map((g) => g.path).sort(),
+    job: org.directory.find((e) => e.id === m.id)?.jobTitle ?? null,
+    status: m.active ? ('active' as const) : ('deactivated' as const),
+  })),
+  ...org.invitations.map((i) => ({
+    key: `i/${i.id}`,
+    member: null,
+    invitation: i,
+    name: i.email,
+    email: null,
+    role: i.role,
+    departments: departmentPaths(i.groupIds),
+    job: org.jobs.find((j) => j.id === i.jobId)?.name ?? null,
+    status: 'pending' as const,
+  })),
+])
+const STATUS_ORDER = { active: 0, deactivated: 1, pending: 2 }
+const { sort: memberSort, sorted: sortedPeople } = useSort(people, {
+  member: (r) => r.name,
+  role: (r) => r.role,
+  department: (r) => r.departments.join(', '),
+  job: (r) => r.job,
+  status: (r) => STATUS_ORDER[r.status],
 })
-const { sort: presenceSort, sorted: sortedPresence } = useSort(() => org.presence, {
-  member: (p) => memberName(p.userId),
-  project: (p) => (p.projectId ? projects.byId.get(p.projectId)?.name : '') ?? '',
-  status: (p) => t(`org.presenceStates.${p.state}`),
-})
-const { sort: inviteSort, sorted: sortedInvitations } = useSort(() => org.invitations, {
-  email: (i) => i.email,
-  invited: (i) => i.createdAt,
-  role: (i) => i.role,
-})
+
+// Click a row to set the departments and the job description (of a member, or of
+// what an invitation gives when it is accepted).
+const personOpen = ref(false)
+const editingPerson = ref<PersonRow | null>(null)
+const personGroups = ref<string[]>([])
+const NO_JOB = '__none'
+const personJob = ref(NO_JOB)
+function openPerson(r: PersonRow) {
+  editingPerson.value = r
+  personGroups.value = r.member ? org.departments.filter((g) => g.memberIds.includes(r.member!.id)).map((g) => g.id) : [...(r.invitation?.groupIds ?? [])]
+  personJob.value = (r.member ? org.directory.find((e) => e.id === r.member!.id)?.jobId : r.invitation?.jobId) ?? NO_JOB
+  personOpen.value = true
+}
+function toggleGroup(list: string[], id: string, on: boolean) {
+  return on ? [...new Set([...list, id])] : list.filter((x) => x !== id)
+}
+async function savePerson() {
+  const r = editingPerson.value
+  if (!r) return
+  const jobId = personJob.value === NO_JOB ? null : personJob.value
+  await run(async () => {
+    if (r.invitation) {
+      await org.updateInvitation(r.invitation.id, { groupIds: personGroups.value, jobId })
+    } else if (r.member) {
+      const had = org.departments.filter((g) => g.memberIds.includes(r.member!.id)).map((g) => g.id)
+      for (const id of personGroups.value.filter((g) => !had.includes(g))) await org.setDepartmentMember(id, r.member.id, true)
+      for (const id of had.filter((g) => !personGroups.value.includes(g))) await org.setDepartmentMember(id, r.member.id, false)
+      await org.setJob(r.member.id, jobId)
+    }
+    personOpen.value = false
+  })
+}
+
 const { sort: policySort, sorted: sortedScopes } = useSort(policyScopes, {
   scope: (s) => s.label,
   rules: (s) => policySummary(policyOf(s.path)),
@@ -255,10 +318,6 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
     <Tabs default-value="members">
       <TabsList>
         <TabsTrigger value="members">{{ $t('org.tabs.members') }}</TabsTrigger>
-        <TabsTrigger value="online">{{ $t('org.tabs.online') }}<span v-if="org.presence.length" class="ml-1 text-muted-foreground">({{ org.presence.length }})</span></TabsTrigger>
-        <TabsTrigger v-if="canInvite" value="invitations">
-          {{ $t('org.tabs.invitations') }}<span v-if="org.invitations.length" class="ml-1 text-muted-foreground">({{ org.invitations.length }})</span>
-        </TabsTrigger>
         <TabsTrigger value="departments">{{ $t('org.tabs.departments') }}</TabsTrigger>
         <TabsTrigger v-if="canManage" value="jobs">{{ $t('org.tabs.jobs') }}</TabsTrigger>
         <TabsTrigger v-if="canManage" value="policies">{{ $t('org.tabs.policies') }}</TabsTrigger>
@@ -272,97 +331,72 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
               <tr class="border-b">
                 <SortHead :sort="memberSort" column="member" class="px-3 py-2 font-medium">{{ $t('org.col.member') }}</SortHead>
                 <SortHead :sort="memberSort" column="role" class="px-3 py-2 font-medium">{{ $t('org.col.role') }}</SortHead>
+                <SortHead :sort="memberSort" column="department" class="px-3 py-2 font-medium">{{ $t('team.department') }}</SortHead>
+                <SortHead :sort="memberSort" column="job" class="px-3 py-2 font-medium">{{ $t('directory.jobTitle') }}</SortHead>
                 <SortHead :sort="memberSort" column="status" class="px-3 py-2 font-medium">{{ $t('org.col.status') }}</SortHead>
                 <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="m in sortedMembers" :key="m.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+              <tr
+                v-for="r in sortedPeople"
+                :key="r.key"
+                class="group border-b last:border-b-0 hover:bg-muted/30"
+                :class="canManage ? 'cursor-pointer' : ''"
+                @click="canManage && openPerson(r)"
+              >
                 <td class="px-3 py-1.5">
-                  <p class="truncate font-medium">{{ label(m) }}</p>
-                  <p v-if="m.name && m.email" class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
+                  <div class="flex items-center gap-2">
+                    <PresenceDot v-if="r.member" :user-id="r.member.id" />
+                    <span v-else class="size-2.5 shrink-0" />
+                    <div class="min-w-0">
+                      <p class="truncate font-medium">{{ r.name }}</p>
+                      <p v-if="r.name !== r.email && r.email" class="truncate text-xs text-muted-foreground">{{ r.email }}</p>
+                    </div>
+                  </div>
                 </td>
-                <td class="px-3 py-1.5">
-                  <Select v-if="canEditRole(m)" :model-value="m.role" @update:model-value="(r) => run(() => org.updateMember(m.id, { role: r as OrgRole }))">
+                <td class="px-3 py-1.5" @click.stop>
+                  <Select v-if="r.member && canEditRole(r.member)" :model-value="r.member.role" @update:model-value="(role) => run(() => org.updateMember(r.member!.id, { role: role as OrgRole }))">
                     <SelectTrigger class="h-8 w-32"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem v-for="r in ROLES" :key="r" :value="r">{{ $t(`org.roles.${r}`) }}</SelectItem>
+                      <SelectItem v-for="role in ROLES" :key="role" :value="role">{{ $t(`org.roles.${role}`) }}</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Badge v-else variant="secondary">{{ $t(`org.roles.${m.role}`) }}</Badge>
+                  <Badge v-else variant="secondary">{{ $t(`org.roles.${r.role}`) }}</Badge>
                 </td>
-                <td class="px-3 py-1.5"><Badge v-if="!m.active" variant="outline">{{ $t('org.deactivated') }}</Badge><span v-else class="text-muted-foreground">{{ $t('org.active') }}</span></td>
-                <td class="px-1 py-0.5">
-                  <div v-if="canTouch(m)" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <td class="px-3 py-1.5">
+                  <span v-if="r.departments.length" class="flex flex-wrap gap-1"><Badge v-for="d in r.departments" :key="d" variant="secondary">{{ d }}</Badge></span>
+                  <span v-else class="text-muted-foreground">–</span>
+                </td>
+                <td class="px-3 py-1.5" :class="r.job ? '' : 'text-muted-foreground'">{{ r.job || '–' }}</td>
+                <td class="whitespace-nowrap px-3 py-1.5">
+                  <Badge v-if="r.status === 'pending'" variant="outline">{{ $t('org.invitePending') }}</Badge>
+                  <Badge v-else-if="r.status === 'deactivated'" variant="outline">{{ $t('org.deactivated') }}</Badge>
+                  <span v-else class="text-muted-foreground">{{ $t('org.active') }}</span>
+                </td>
+                <td class="px-1 py-0.5" @click.stop>
+                  <div v-if="r.member && canTouch(r.member)" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                     <Button
                       size="icon" variant="ghost" class="size-7"
-                      :title="m.active ? $t('org.deactivate') : $t('org.reactivate')"
-                      @click="run(() => org.updateMember(m.id, { active: !m.active }))"
+                      :title="r.member.active ? $t('org.deactivate') : $t('org.reactivate')"
+                      @click="run(() => org.updateMember(r.member!.id, { active: !r.member!.active }))"
                     >
-                      <UserX v-if="m.active" /><UserCheck v-else />
+                      <UserX v-if="r.member.active" /><UserCheck v-else />
                     </Button>
-                    <Button size="icon" variant="ghost" class="size-7" :title="$t('org.remove')" @click="askRemove(m)"><UserMinus /></Button>
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('org.remove')" @click="askRemove(r.member)"><UserMinus /></Button>
+                  </div>
+                  <div v-else-if="r.invitation && canInvite" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('org.withdraw')" @click="run(() => org.withdraw(r.invitation!.id))"><X /></Button>
                   </div>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
+        <p v-if="org.invitations.length" class="mt-3 text-xs text-muted-foreground">{{ $t('org.invitationHint') }}</p>
         <div v-if="isOwner" class="mt-6">
           <Button variant="outline" class="text-destructive" @click="deleteOrgOpen = true"><Trash2 /> {{ $t('org.deleteOrg') }}</Button>
         </div>
-      </TabsContent>
-
-      <TabsContent value="online">
-        <p v-if="org.presence.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('org.nobodyOnline') }}</p>
-        <div v-else class="overflow-x-auto rounded-lg border">
-          <table class="w-full text-sm">
-            <thead class="text-left text-xs text-muted-foreground">
-              <tr class="border-b">
-                <SortHead :sort="presenceSort" column="member" class="px-3 py-2 font-medium">{{ $t('org.col.member') }}</SortHead>
-                <SortHead :sort="presenceSort" column="project" class="px-3 py-2 font-medium">{{ $t('org.col.project') }}</SortHead>
-                <SortHead :sort="presenceSort" column="status" class="px-3 py-2 font-medium">{{ $t('org.col.status') }}</SortHead>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="p in sortedPresence" :key="p.userId" class="border-b last:border-b-0 hover:bg-muted/30">
-                <td class="px-3 py-1.5 font-medium"><span class="flex items-center gap-2"><span class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: STATE_COLOR[p.state] }" />{{ memberName(p.userId) }}</span></td>
-                <td class="px-3 py-1.5 text-muted-foreground">{{ p.projectId ? projects.byId.get(p.projectId)?.name : '–' }}</td>
-                <td class="px-3 py-1.5 text-muted-foreground">{{ $t(`org.presenceStates.${p.state}`) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.presenceHint') }}</p>
-      </TabsContent>
-
-      <TabsContent v-if="canInvite" value="invitations">
-        <p v-if="org.invitations.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('org.noInvitations') }}</p>
-        <div v-else class="overflow-x-auto rounded-lg border">
-          <table class="w-full text-sm">
-            <thead class="text-left text-xs text-muted-foreground">
-              <tr class="border-b">
-                <SortHead :sort="inviteSort" column="email" class="px-3 py-2 font-medium">{{ $t('org.email') }}</SortHead>
-                <SortHead :sort="inviteSort" column="invited" class="px-3 py-2 font-medium">{{ $t('org.col.invited') }}</SortHead>
-                <SortHead :sort="inviteSort" column="role" class="px-3 py-2 font-medium">{{ $t('org.col.role') }}</SortHead>
-                <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="i in sortedInvitations" :key="i.id" class="group border-b last:border-b-0 hover:bg-muted/30">
-                <td class="px-3 py-1.5">{{ i.email }}</td>
-                <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ format.shortDate(i.createdAt) }}</td>
-                <td class="px-3 py-1.5"><Badge variant="secondary">{{ $t(`org.roles.${i.role}`) }}</Badge></td>
-                <td class="px-1 py-0.5">
-                  <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                    <Button size="icon" variant="ghost" class="size-7" :title="$t('org.withdraw')" @click="run(() => org.withdraw(i.id))"><X /></Button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.invitationHint') }}</p>
       </TabsContent>
 
       <TabsContent value="departments">
@@ -375,18 +409,6 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
               <span class="text-xs text-muted-foreground">{{ $t('org.peopleCount', g.memberIds.length) }}</span>
               <Button v-if="canManage" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteDept(g)"><Trash2 /></Button>
             </div>
-            <div class="mt-2 flex flex-wrap items-center gap-1.5">
-              <Badge v-for="id in g.memberIds" :key="id" variant="secondary" class="gap-1">
-                {{ memberName(id) }}
-                <button v-if="canManage" type="button" class="opacity-60 hover:opacity-100" :aria-label="$t('org.remove')" @click="run(() => org.setDepartmentMember(g.id, id, false))"><X class="size-3" /></button>
-              </Badge>
-              <Select v-if="canManage && addable(g).length" model-value="" @update:model-value="(id) => run(() => org.setDepartmentMember(g.id, String(id), true))">
-                <SelectTrigger class="h-7 w-40 text-xs"><SelectValue :placeholder="$t('org.addPerson')" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="m in addable(g)" :key="m.id" :value="m.id">{{ label(m) }}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </li>
         </ul>
       </TabsContent>
@@ -394,7 +416,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
       <TabsContent v-if="canManage" value="jobs">
         <div class="mb-3 flex items-center justify-between gap-3">
           <p class="text-sm text-muted-foreground">{{ $t('org.jobs.hint') }}</p>
-          <Button size="sm" @click="openJob(null)"><Plus /> {{ $t('org.jobs.new') }}</Button>
+          <Button size="sm" @click="openJob()"><Plus /> {{ $t('org.jobs.new') }}</Button>
         </div>
         <p v-if="org.jobs.length === 0" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.jobs.none') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
@@ -408,13 +430,12 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="j in sortedJobs" :key="j.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="openJob(j)">
+              <tr v-for="j in sortedJobs" :key="j.id" class="group border-b last:border-b-0 hover:bg-muted/30">
                 <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ j.name }}</td>
                 <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="j.description">{{ j.description || '–' }}</td>
                 <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ j.people }}</td>
                 <td class="px-1 py-0.5" @click.stop>
                   <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openJob(j)"><Pencil /></Button>
                     <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteJob(j)"><Trash2 /></Button>
                   </div>
                 </td>
@@ -495,6 +516,25 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
             </SelectContent>
           </Select>
         </div>
+        <div v-if="org.departments.length" class="grid gap-2">
+          <Label>{{ $t('org.tabs.departments') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
+          <div class="grid max-h-36 gap-1.5 overflow-y-auto rounded-md border p-2">
+            <label v-for="g in org.departments" :key="g.id" class="flex items-center gap-2 text-sm" :style="{ paddingLeft: `${(g.path.split('/').length - 1) * 1}rem` }">
+              <Checkbox :model-value="inviteGroups.includes(g.id)" @update:model-value="(on) => (inviteGroups = toggleGroup(inviteGroups, g.id, on === true))" />
+              {{ g.name }}
+            </label>
+          </div>
+        </div>
+        <div class="grid gap-2">
+          <Label>{{ $t('directory.jobTitle') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
+          <Select v-model="inviteJob">
+            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none">{{ $t('common.none') }}</SelectItem>
+              <SelectItem v-for="j in org.jobs" :key="j.id" :value="j.id">{{ j.name }}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <DialogFooter>
           <Button type="button" variant="outline" @click="inviteOpen = false">{{ $t('common.cancel') }}</Button>
           <Button type="submit">{{ $t('org.sendInvite') }}</Button>
@@ -505,7 +545,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
 
   <Dialog v-model:open="jobOpen">
     <DialogContent :aria-describedby="undefined" class="sm:max-w-md">
-      <DialogHeader><DialogTitle>{{ editingJob ? $t('org.jobs.edit') : $t('org.jobs.new') }}</DialogTitle></DialogHeader>
+      <DialogHeader><DialogTitle>{{ $t('org.jobs.new') }}</DialogTitle></DialogHeader>
       <form class="grid gap-4" @submit.prevent="saveJob">
         <div class="grid gap-2">
           <Label for="job-name">{{ $t('org.jobs.name') }}</Label>
@@ -528,6 +568,40 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
     :title="$t('org.jobs.deleteConfirm', { name: deletingJob?.name ?? '' })"
     @confirm="deletingJob && run(() => org.deleteJob(deletingJob!.id))"
   />
+
+  <Dialog v-model:open="personOpen">
+    <DialogContent :aria-describedby="undefined" class="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>{{ editingPerson?.name }}</DialogTitle>
+        <p v-if="editingPerson?.invitation" class="text-sm text-muted-foreground">{{ $t('org.invitePendingHint') }}</p>
+      </DialogHeader>
+      <form class="grid gap-4" @submit.prevent="savePerson">
+        <div v-if="org.departments.length" class="grid gap-2">
+          <Label>{{ $t('org.tabs.departments') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
+          <div class="grid max-h-36 gap-1.5 overflow-y-auto rounded-md border p-2">
+            <label v-for="g in org.departments" :key="g.id" class="flex items-center gap-2 text-sm" :style="{ paddingLeft: `${(g.path.split('/').length - 1) * 1}rem` }">
+              <Checkbox :model-value="personGroups.includes(g.id)" @update:model-value="(on) => (personGroups = toggleGroup(personGroups, g.id, on === true))" />
+              {{ g.name }}
+            </label>
+          </div>
+        </div>
+        <div class="grid gap-2">
+          <Label>{{ $t('directory.jobTitle') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
+          <Select v-model="personJob">
+            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none">{{ $t('common.none') }}</SelectItem>
+              <SelectItem v-for="j in org.jobs" :key="j.id" :value="j.id">{{ j.name }}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" @click="personOpen = false">{{ $t('common.cancel') }}</Button>
+          <Button type="submit">{{ $t('common.save') }}</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
 
   <Dialog v-model:open="deptOpen">
     <DialogContent :aria-describedby="undefined" class="sm:max-w-md">

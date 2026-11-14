@@ -734,7 +734,7 @@ export default {
     noDepartment: 'No department',
     jobTitle: 'Job description',
     noJobs: 'No job descriptions are defined yet. An admin adds them under Organization → Job descriptions.',
-    hint: 'Everyone in the organization sees this list. Admins give out the job descriptions.',
+    hint: 'Everyone in the organization sees this list. Departments and job descriptions are set under Organization.',
   },
   meetings: {
     rooms: 'Rooms',
@@ -823,10 +823,13 @@ export default {
     filterDepartments: 'Filter by department',
     nobodyOnline: 'Nobody is online right now.',
     presenceHint: 'Everyone in the organization sees this list. Which project someone works on shows only if they chose to share it (Settings).',
+    invitePending: 'Invite pending',
+    invitePendingHint: 'Invited, not joined yet. They get these when they join.',
+    offline: 'Offline',
     presenceStates: { online: 'Online', tracking: 'Tracking', in_meeting: 'In a meeting', away: 'Away' },
     tabs: { members: 'Members', online: 'Online', jobs: 'Job descriptions', policies: 'Rules', invitations: 'Invitations', departments: 'Departments', activity: 'Activity' },
     jobs: {
-      hint: 'The job descriptions people can have. Admins give them out; the directory shows them.',
+      hint: 'The job descriptions people can have. Give them out in the member list (click a person); the directory shows them.',
       new: 'New job description',
       edit: 'Edit job description',
       name: 'Name',

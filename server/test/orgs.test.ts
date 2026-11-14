@@ -307,6 +307,39 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     })
   })
 
+  describe('invitations with a department and a job description', () => {
+    it('put the person there when they join, and can be changed before', async () => {
+      await reset()
+      const dev = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'dev' })).json()
+      const ops = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'ops' })).json()
+      const job = (await call('POST', `/v1/orgs/${ORG}/jobs`, ADMIN, 'admin', { name: 'Developer' })).json()
+      const post = (body: object) => call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'dora@example.com', ...body })
+      // Only the organization's own departments and job descriptions.
+      expect((await post({ groupIds: [id(990)] })).statusCode).toBe(404)
+      expect((await post({ jobId: id(991) })).statusCode).toBe(404)
+      const sent = await post({ groupIds: [dev.id], jobId: job.id })
+      expect(sent.statusCode).toBe(201)
+      expect(sent.json()).toMatchObject({ groupIds: [dev.id], jobId: job.id })
+      expect((await call('GET', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin')).json()[0]).toMatchObject({ groupIds: [dev.id], jobId: job.id })
+
+      // Changed while pending: another department, no job description.
+      const patch = (uid: string, role: string, body: object) => call('PATCH', `/v1/orgs/${ORG}/invitations/${sent.json().id}`, uid, role, body)
+      expect((await patch(MEMBER, 'member', { jobId: null })).statusCode).toBe(403)
+      expect((await patch(ADMIN, 'admin', { groupIds: [ops.id], jobId: null })).json()).toMatchObject({ groupIds: [ops.id], jobId: null })
+      expect((await patch(ADMIN, 'admin', { jobId: id(992) })).statusCode).toBe(404)
+      expect((await patch(ADMIN, 'admin', { jobId: job.id })).json()).toMatchObject({ groupIds: [ops.id], jobId: job.id })
+
+      kc.calls = []
+      const NEW = id(62)
+      expect((await app.inject({ url: '/v1/me', headers: await as(NEW, null, { email: 'dora@example.com' }) })).statusCode).toBe(200)
+      expect([...kc.calls].sort()).toEqual([`addMember ${ORG} ${NEW}`, `addToGroup ${NEW} ${ops.id}`, `setRole ${ORG} ${NEW} member`])
+      expect(await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.userId, NEW))).toMatchObject([{ role: 'member', jobId: job.id }])
+      expect(await db.db.select().from(schema.kcGroupMember).where(eq(schema.kcGroupMember.userId, NEW))).toMatchObject([{ groupId: ops.id }])
+      // Once they have joined it is no longer an invitation to change.
+      expect((await patch(ADMIN, 'admin', { jobId: null })).statusCode).toBe(404)
+    })
+  })
+
   describe('changing members', () => {
     it('lets only owners change roles, and keeps one owner', async () => {
       await reset()

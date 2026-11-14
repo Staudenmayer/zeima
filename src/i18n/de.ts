@@ -736,7 +736,7 @@ const de: typeof en = {
     noDepartment: 'Keine Abteilung',
     jobTitle: 'Tätigkeit',
     noJobs: 'Es sind noch keine Tätigkeiten angelegt. Administratoren legen sie unter Organisation → Tätigkeiten an.',
-    hint: 'Alle in der Organisation sehen diese Liste. Administratoren vergeben die Tätigkeiten.',
+    hint: 'Alle in der Organisation sehen diese Liste. Abteilungen und Tätigkeiten werden unter Organisation festgelegt.',
   },
   meetings: {
     rooms: 'Räume',
@@ -825,10 +825,13 @@ const de: typeof en = {
     filterDepartments: 'Nach Abteilung filtern',
     nobodyOnline: 'Gerade ist niemand online.',
     presenceHint: 'Alle in der Organisation sehen diese Liste. Das Projekt erscheint nur, wenn die Person es freigegeben hat (Einstellungen).',
+    invitePending: 'Einladung offen',
+    invitePendingHint: 'Eingeladen, noch nicht beigetreten. Sie bekommen das beim Beitritt.',
+    offline: 'Offline',
     presenceStates: { online: 'Online', tracking: 'Erfasst', in_meeting: 'Im Termin', away: 'Abwesend' },
     tabs: { members: 'Mitglieder', online: 'Online', jobs: 'Tätigkeiten', policies: 'Regeln', invitations: 'Einladungen', departments: 'Abteilungen', activity: 'Aktivität' },
     jobs: {
-      hint: 'Die Tätigkeiten, die Personen haben können. Administratoren vergeben sie; das Verzeichnis zeigt sie an.',
+      hint: 'Die Tätigkeiten, die Personen haben können. Vergib sie in der Mitgliederliste (Person anklicken); das Verzeichnis zeigt sie an.',
       new: 'Neue Tätigkeit',
       edit: 'Tätigkeit bearbeiten',
       name: 'Name',
