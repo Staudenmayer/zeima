@@ -498,8 +498,9 @@ function hourLabel(h: number) {
             <li
               v-for="item in col.allDay"
               :key="`${item.addonId}/${item.id}`"
-              class="truncate rounded-sm border border-dashed px-1 text-[10px] leading-4"
-              :style="{ borderColor: item.color ?? 'var(--border)' }"
+              class="truncate rounded-sm px-1 text-[10px] leading-4"
+              :class="item.addonId === 'zeima.absences' ? 'absent-hatch' : 'border border-dashed'"
+              :style="item.addonId === 'zeima.absences' ? undefined : { borderColor: item.color ?? 'var(--border)' }"
               :title="eventTooltip(item)"
             >{{ item.title }}</li>
           </ul>
@@ -536,7 +537,8 @@ function hourLabel(h: number) {
           <div
             v-for="b in col.busy"
             :key="b.key"
-            class="absolute overflow-hidden rounded-md border border-dashed border-muted-foreground/50 bg-muted/60 px-1.5 py-0.5 text-[11px] italic leading-tight text-muted-foreground"
+            class="absolute overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] italic leading-tight"
+            :class="b.kind === 'absence' ? 'absent-hatch' : 'border border-dashed border-muted-foreground/50 bg-muted/60 text-muted-foreground'"
             :style="busyStyle(col.day, b)"
             :title="`${b.who} · ${b.kind === 'absence' ? $t('timesheet.absent') : $t('timesheet.busy')}`"
           >{{ b.kind === 'absence' ? $t('timesheet.absent') : $t('timesheet.busy') }}</div>

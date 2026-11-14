@@ -613,6 +613,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
           v-for="item in sortRows(group.events)"
           :key="`${item.addonId}/${item.id}`"
           class="group cursor-pointer border-b border-dashed text-muted-foreground last:border-b-0 hover:bg-muted/30"
+          :class="isAbsence(item) ? 'bg-[oklch(0.95_0.045_350)] dark:bg-[oklch(0.3_0.07_350)]' : ''"
           :title="isAbsence(item) ? undefined : $t('timesheet.trackEvent')"
           @click="isAbsence(item) ? router.push('/absences') : track(item)"
         >
@@ -698,7 +699,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
           <td class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums">{{ settings.formatDuration(durationMs(o.entry)) }}</td>
           <td class="px-1 py-0.5" />
         </tr>
-        <tr v-for="b in group.busy" :key="`${b.name}/${b.kind}/${b.from}`" class="border-b border-dashed text-muted-foreground last:border-b-0">
+        <tr v-for="b in group.busy" :key="`${b.name}/${b.kind}/${b.from}`" class="border-b border-dashed text-muted-foreground last:border-b-0" :class="b.kind === 'absence' ? 'bg-[oklch(0.95_0.045_350)] dark:bg-[oklch(0.3_0.07_350)]' : ''">
           <td class="w-8 py-1.5 pr-0 pl-3" />
           <td class="whitespace-nowrap px-3 py-1.5 font-medium text-foreground">{{ b.name }}</td>
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ b.kind === 'absence' ? $t('timesheet.allDay') : `${format.time(Math.max(b.from, group.day.from))}–${format.time(Math.min(b.to, group.day.to))}` }}</td>

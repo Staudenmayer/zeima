@@ -148,6 +148,7 @@ const rows = computed(() => {
       const left = x(b.start)
       return {
         key: `${b.kind}/${b.from}`,
+        kind: b.kind,
         label: b.kind === 'absence' ? t('timesheet.absent') : t('timesheet.busy'),
         title: `${format.time(b.start)}–${format.time(b.end)} · ${b.kind === 'absence' ? t('timesheet.absent') : t('timesheet.busy')}`,
         style: { left: `${left}%`, width: `calc(${Math.max(x(b.end) - left, 0.4)}% - 2px)`, top: '2px', bottom: '2px' },
@@ -214,8 +215,9 @@ function onTrackDblClick(event: MouseEvent) {
         <li
           v-for="item in allDay"
           :key="`${item.addonId}/${item.id}`"
-          class="truncate rounded-sm border border-dashed px-1 text-[10px] leading-4"
-          :style="{ borderColor: item.color ?? 'var(--border)' }"
+          class="truncate rounded-sm px-1 text-[10px] leading-4"
+          :class="item.addonId === 'zeima.absences' ? 'absent-hatch' : 'border border-dashed'"
+          :style="item.addonId === 'zeima.absences' ? undefined : { borderColor: item.color ?? 'var(--border)' }"
           :title="eventTooltip(item)"
         >{{ item.title }}</li>
       </ul>
@@ -263,7 +265,8 @@ function onTrackDblClick(event: MouseEvent) {
             <div
               v-for="b in row.busy"
               :key="b.key"
-              class="absolute overflow-hidden rounded-md border border-dashed border-muted-foreground/50 bg-muted/60 px-1.5 py-1 text-[11px] italic leading-tight text-muted-foreground"
+              class="absolute overflow-hidden rounded-md px-1.5 py-1 text-[11px] italic leading-tight"
+              :class="b.kind === 'absence' ? 'absent-hatch' : 'border border-dashed border-muted-foreground/50 bg-muted/60 text-muted-foreground'"
               :style="b.style"
               :title="b.title"
             >{{ b.label }}</div>
