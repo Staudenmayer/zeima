@@ -391,7 +391,18 @@ impl Core {
         }
         let mut tx = self.begin().await?;
         let ws = tx.ctx().workspace_id.clone();
-        let id = response_id(&ws, meeting_id, &me);
+        // An answer that already exists (made on another device, or by older data with
+        // another id) is changed in place: there is one live answer per person and meeting.
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM meeting_response
+             WHERE workspace_id = ? AND meeting_id = ? AND user_id = ? AND deleted_at IS NULL",
+        )
+        .bind(&ws)
+        .bind(meeting_id)
+        .bind(&me)
+        .fetch_optional(tx.conn())
+        .await?;
+        let id = existing.unwrap_or_else(|| response_id(&ws, meeting_id, &me));
         let s = tx.stamp();
         sqlx::query(
             "INSERT INTO meeting_response (id, workspace_id, user_id, meeting_id, status, created_at, updated_at, hlc, origin_device)

@@ -710,6 +710,18 @@ async fn meetings_are_called_answered_and_repeat() {
     ben.respond_to_meeting(&meeting.id, RsvpStatus::Accepted)
         .await
         .unwrap();
+    // An answer that came with another id (seeded or synced) is changed, not duplicated.
+    sqlx::query("UPDATE meeting_response SET id = 'foreign-id' WHERE meeting_id = ?")
+        .bind(&meeting.id)
+        .execute(ben.pool())
+        .await
+        .unwrap();
+    ben.respond_to_meeting(&meeting.id, RsvpStatus::Declined)
+        .await
+        .unwrap();
+    ben.respond_to_meeting(&meeting.id, RsvpStatus::Accepted)
+        .await
+        .unwrap();
     let seen = ada.list_meetings(from, from).await.unwrap_or_default();
     assert!(seen.is_empty());
     let first = &ada.list_meetings(from, to).await.unwrap()[0];
