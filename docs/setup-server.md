@@ -69,8 +69,18 @@ account in both and use Sync now. Things to know:
   logs "shortcuts not registered". Choose other shortcuts in its Settings.
 - Delete the folder to start over with a fresh device.
 
-An automated check of the same flow, without the app, is
-`deploy/e2e/smoke.mjs` (see the comment at the top of the file).
+Automated checks of the same flows, without the app:
+`deploy/e2e/smoke.mjs` (sign-in and sync) and `deploy/e2e/org-smoke.mjs`
+(organizations: create, invite, roles, departments, the shared workspace and its
+rules, a timesheet that gets approved and locks the entries; needs the API to
+have `KEYCLOAK_ADMIN_CLIENT_SECRET` and Keycloak to have working SMTP, as in the
+dev stack). Run it with the API on port 3000:
+
+```sh
+DEFAULT_PLAN=pro KEYCLOAK_ADMIN_CLIENT_SECRET=dev-admin-secret bun run --cwd server dev
+PUBLIC_URL=http://localhost:3000 ID_URL=http://localhost:8080 \
+KEYCLOAK_ADMIN_PASSWORD=admin node deploy/e2e/org-smoke.mjs
+```
 
 ## Updater key
 

@@ -25,7 +25,7 @@ struct Report {
 }
 
 /// What an organization hears, given the timer that runs in its workspace (if any).
-fn report_for(timer: Option<&TimerState>, share_project: bool, idle: bool) -> Report {
+fn report_for(timer: Option<&TimerState>, share_project: bool, idle: bool, in_meeting: bool) -> Report {
     // Away from the machine: whatever the timer does, the person is not there.
     if idle {
         return Report {
@@ -40,6 +40,11 @@ fn report_for(timer: Option<&TimerState>, share_project: bool, idle: bool) -> Re
         },
         Some(TimerState::Paused { .. }) => Report {
             state: "away",
+            project_id: None,
+        },
+        // In a meeting and not tracking something else: colleagues see the meeting.
+        _ if in_meeting => Report {
+            state: "in_meeting",
             project_id: None,
         },
         _ => Report {
@@ -87,8 +92,22 @@ async fn check(app: &AppHandle, last: &mut HashMap<String, (Report, Instant)>) {
         .is_some_and(|a| a.is_idle());
     for w in workspaces.into_iter().filter(|w| w.kind == "org") {
         let Some(org_id) = w.org_id.clone() else { continue };
-        let timer = state.core.scoped(&w.id, &user).timer_state().await.ok();
-        let report = report_for(timer.as_ref(), share, idle);
+        let scope = state.core.scoped(&w.id, &user);
+        let timer = scope.timer_state().await.ok();
+        let now = scope.now_ms();
+        // A meeting the person organizes or accepted, going on right now.
+        let in_meeting = scope
+            .meetings_between(now, now + 1)
+            .await
+            .map(|list| {
+                list.iter().any(|o| {
+                    !o.meeting.cancelled
+                        && (o.meeting.user_id == user
+                            || o.my_status == Some(zeima_core::RsvpStatus::Accepted))
+                })
+            })
+            .unwrap_or(false);
+        let report = report_for(timer.as_ref(), share, idle, in_meeting);
         let due = last
             .get(&org_id)
             .is_none_or(|(sent, at)| *sent != report || at.elapsed() >= REPEAT_AFTER);
@@ -141,18 +160,30 @@ mod tests {
             entry: entry(Some("p1")),
         };
         assert_eq!(
-            report_for(Some(&running), false, false),
+            report_for(Some(&running), false, false, false),
             Report {
                 state: "tracking",
                 project_id: None
             }
         );
         assert_eq!(
-            report_for(Some(&running), true, false),
+            report_for(Some(&running), true, false, false),
             Report {
                 state: "tracking",
                 project_id: Some("p1".into())
             }
+        );
+    }
+
+    #[test]
+    fn a_meeting_shows_unless_something_is_being_tracked() {
+        assert_eq!(report_for(None, false, false, true).state, "in_meeting");
+        let running = TimerState::Running { entry: entry(None) };
+        assert_eq!(report_for(Some(&running), false, false, true).state, "tracking");
+        assert_eq!(
+            report_for(None, false, true, true).state,
+            "away",
+            "away wins over a meeting"
         );
     }
 
@@ -162,25 +193,28 @@ mod tests {
             entry: entry(Some("p1")),
         };
         assert_eq!(
-            report_for(Some(&running), true, true),
+            report_for(Some(&running), true, true, false),
             Report {
                 state: "away",
                 project_id: None
             }
         );
-        assert_eq!(report_for(None, true, true).state, "away");
+        assert_eq!(report_for(None, true, true, false).state, "away");
     }
 
     #[test]
     fn idle_or_elsewhere_is_just_online_and_a_pause_is_away() {
         assert_eq!(
-            report_for(None, true, false),
+            report_for(None, true, false, false),
             Report {
                 state: "online",
                 project_id: None
             }
         );
-        assert_eq!(report_for(Some(&TimerState::Idle), true, false).state, "online");
+        assert_eq!(
+            report_for(Some(&TimerState::Idle), true, false, false).state,
+            "online"
+        );
         let pause: Pause = serde_json::from_value(serde_json::json!({
             "id": "p", "workspaceId": "w", "userId": "u", "startAt": 1, "endAt": null, "kind": "manual",
             "resumeEntryId": null, "followupEntryId": null, "applied": false, "accepted": null,
@@ -192,7 +226,7 @@ mod tests {
             resume_entry: None,
         };
         assert_eq!(
-            report_for(Some(&paused), true, false),
+            report_for(Some(&paused), true, false, false),
             Report {
                 state: "away",
                 project_id: None

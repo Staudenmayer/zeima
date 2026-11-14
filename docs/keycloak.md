@@ -42,3 +42,40 @@ operator of the installation can do. Steps:
 
 Self-hosted installations use Keycloak's own user federation (LDAP/AD) or
 identity providers instead (SPEC §7.2).
+
+## Organizations: roles, departments and the API's copy
+
+Each customer organization is a Keycloak **Organization**. Roles and
+departments are groups, which the access token lists in its `groups` claim:
+
+```
+/orgs/<orgId>/roles/<owner|admin|manager|member>   the person's role
+/orgs/<orgId>/groups/<department>[/<sub>]          departments
+```
+
+The API creates and changes all of this through the service account
+`zeima-api-admin` (roles `manage-users`, `view-users`, `query-groups`,
+`manage-organizations`, `view-organizations`; set by the realm file), so admins
+never need the Keycloak console. It keeps a copy of members, roles, departments
+and who is in them in its own database, and checks that copy against Keycloak:
+
+- on every sign-in (the person's own row),
+- **every `RECONCILE_INTERVAL_HOURS` hours** (default 24) and on demand with
+  `POST /v1/orgs/:id/reconcile` (owners and admins), which is the way to pick up
+  changes made in the Keycloak console,
+- when Keycloak says something changed: `POST /v1/internal/keycloak-events`,
+  switched on by setting `KEYCLOAK_WEBHOOK_SECRET` (16 or more characters).
+
+The webhook is for an event listener you add to Keycloak (a small provider
+that posts the events of interest). The body is JSON like
+`{"type":"GROUP_MEMBERSHIP","orgId":"<uuid>"}` or `{"type":"UPDATE_PROFILE","userId":"<uuid>"}`,
+signed with HMAC-SHA256 of the exact bytes sent, in the header
+`x-zeima-signature: sha256=<hex>`. The event only says where to look: the API
+re-reads that organization (or the person's organizations) from Keycloak, so a
+forged or replayed event can do no harm beyond an extra check. Without a
+listener the nightly check keeps the copy right. This repository does not ship
+the listener.
+
+Invitations are sent by Keycloak, so it needs a working SMTP server
+(`ZEIMA_SMTP_*`; the dev stack uses Mailpit). With Organizations switched on,
+Keycloak's sign-in asks for the address first and the password on a second page.

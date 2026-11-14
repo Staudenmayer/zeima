@@ -175,6 +175,17 @@ Order is by dependency:
 
 > 🎯 **Release 2.0 (Team/Org)**: launches in the cloud first. The self-hosted Docker release follows once it has run on the cloud for one stable cycle (same version, same binary).
 
+**State for 2.0 (code complete in the repository).** All seven items above have an implementation with tests: user management (API, admin page, policies, nightly/on-demand/webhook reconcile with Keycloak), the shared workspace and its rules, timesheet and absence approvals with locking and notifications, presence (online, tracking, in a meeting, away; department filter; dashboard widget), work locations (week/month, offices with capacity, usual week), meetings (organize, answer, repeat, free/busy, `.ics` export, timeline, "track it?" prompt after a meeting) and the manager views (people, projects, tags, cost centers, entries, departments, outliers against the weekly target). `deploy/e2e/org-smoke.mjs` runs the organization flow against a real Keycloak and the API (24 steps, passes).
+
+What 2.0 deliberately does not include, and why:
+- **Calendar write-through of meetings** (Graph/Google, RSVP sync back). It needs OAuth clients registered by the operator and the Microsoft 365 / Google calendar addons (Phase 4, open). Meetings export as `.ics` for any calendar program.
+- **Keycloak event listener.** The API accepts signed events (`POST /v1/internal/keycloak-events`) but the listener itself (a Keycloak provider) is not shipped; the nightly check and `POST /v1/orgs/:id/reconcile` keep the copy right meanwhile.
+- **Several API instances.** Presence is held in one process; a second instance needs a shared channel (Postgres `LISTEN/NOTIFY` or Redis).
+- **Auto-pause per department** is a suggested idle time (the shortest wins when shorter than the person's own), not a forced setting.
+- **Windows and macOS** builds of all this are untested here (only Linux); signing, billing, social login and cloud hosting need the operator's accounts (see `docs/setup-server.md`).
+
+**Before tagging 2.0.0:** run `deploy/e2e/org-smoke.mjs` and `deploy/e2e/smoke.mjs` against the real stack; try two apps (Linux plus Windows or macOS) on one organization by hand: invite, switch workspace, track, submit and approve a timesheet, create a meeting; fix the updater key password secret; then `node scripts/version.mjs set 2.0.0` (already applied in the repository), commit and tag.
+
 ---
 
 ## Phase 7 — Enterprise & Hardening (ongoing)

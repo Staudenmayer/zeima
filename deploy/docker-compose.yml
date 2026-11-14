@@ -87,6 +87,9 @@ services:
       DOCS_ENABLED: ${DOCS_ENABLED:-false}
       # Lets the API manage users and organizations in Keycloak.
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${API_ADMIN_SECRET}
+      # Keycloak's event listener may call the API; leave empty to rely on the nightly check.
+      KEYCLOAK_WEBHOOK_SECRET: ${KEYCLOAK_WEBHOOK_SECRET:-}
+      RECONCILE_INTERVAL_HOURS: ${RECONCILE_INTERVAL_HOURS:-24}
       # Vendor keys whose license tokens are accepted (see server/README.md).
       ENTITLEMENT_PUBLIC_KEYS: ${ENTITLEMENT_PUBLIC_KEYS:-}
     depends_on:
