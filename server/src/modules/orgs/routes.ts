@@ -2,6 +2,7 @@
 // role in the organization may call these (permissions.yaml); changes go to
 // Keycloak first (src/keycloak/admin.ts), then to the mirror tables.
 
+import { randomUUID } from 'node:crypto'
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { Type } from 'typebox'
@@ -544,12 +545,132 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
   )
 
+  // ------------------------------------------------------ job descriptions
+  const Job = Type.Object({
+    id: Type.String(),
+    name: Type.String(),
+    description: Type.String(),
+    people: Type.Integer({ description: 'How many members have it' }),
+  })
+  const JobParams = Type.Object({ orgId: Type.String({ format: 'uuid' }), jobId: Type.String({ format: 'uuid' }) })
+  const JobBody = Type.Object({ name: Type.String({ minLength: 1, maxLength: 100 }), description: Type.Optional(Type.String({ maxLength: 500 })) })
+
+  async function jobsOf(db: ReturnType<typeof database>, orgId: string) {
+    const rows = await db
+      .select({ id: schema.orgJob.id, name: schema.orgJob.name, description: schema.orgJob.description, people: sql<number>`count(${schema.kcOrgMember.userId})::int` })
+      .from(schema.orgJob)
+      .leftJoin(schema.kcOrgMember, eq(schema.kcOrgMember.jobId, schema.orgJob.id))
+      .where(eq(schema.orgJob.orgId, orgId))
+      .groupBy(schema.orgJob.id)
+      .orderBy(asc(sql`lower(${schema.orgJob.name})`))
+    return rows
+  }
+  const nameTaken = (err: unknown) => (err as { cause?: { code?: string } }).cause?.code === '23505'
+
+  app.get(
+    '/orgs/:orgId/jobs',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'The job descriptions of the organization',
+        description: 'Every member may ask.',
+        security: SECURITY,
+        params: OrgParams,
+        response: { 200: Type.Array(Job), ...problems(401, 403, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId } = request.params
+      actorIn({ user: request.user! }, orgId)
+      return jobsOf(database(), orgId)
+    },
+  )
+
+  app.post(
+    '/orgs/:orgId/jobs',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Defines a job description (those who manage members)',
+        security: SECURITY,
+        params: OrgParams,
+        body: JobBody,
+        response: { 201: Job, ...problems(400, 401, 403, 409, 503) },
+      },
+    },
+    async (request, reply) => {
+      const { orgId } = request.params
+      authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
+      const id = randomUUID()
+      try {
+        await database().insert(schema.orgJob).values({ id, orgId, name: request.body.name.trim(), description: request.body.description?.trim() ?? '' })
+      } catch (err) {
+        if (nameTaken(err)) throw new HttpProblem(409, 'conflict', 'a job description with this name exists')
+        throw err
+      }
+      const job = (await jobsOf(database(), orgId)).find((j) => j.id === id)!
+      return reply.code(201).send(job)
+    },
+  )
+
+  app.patch(
+    '/orgs/:orgId/jobs/:jobId',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Changes a job description (those who manage members)',
+        security: SECURITY,
+        params: JobParams,
+        body: Type.Partial(JobBody, { minProperties: 1 }),
+        response: { 200: Job, ...problems(400, 401, 403, 404, 409, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId, jobId } = request.params
+      authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
+      const db = database()
+      const set: { name?: string; description?: string } = {}
+      if (request.body.name !== undefined) set.name = request.body.name.trim()
+      if (request.body.description !== undefined) set.description = request.body.description.trim()
+      try {
+        const updated = await db.update(schema.orgJob).set(set).where(and(eq(schema.orgJob.id, jobId), eq(schema.orgJob.orgId, orgId))).returning({ id: schema.orgJob.id })
+        if (updated.length === 0) throw new HttpProblem(404, 'not_found', 'no such job description')
+      } catch (err) {
+        if (nameTaken(err)) throw new HttpProblem(409, 'conflict', 'a job description with this name exists')
+        throw err
+      }
+      return (await jobsOf(db, orgId)).find((j) => j.id === jobId)!
+    },
+  )
+
+  app.delete(
+    '/orgs/:orgId/jobs/:jobId',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Removes a job description; the people who had it have none then',
+        security: SECURITY,
+        params: JobParams,
+        response: { 204: Type.Null(), ...problems(401, 403, 404, 503) },
+      },
+    },
+    async (request, reply) => {
+      const { orgId, jobId } = request.params
+      authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
+      const removed = await database().delete(schema.orgJob).where(and(eq(schema.orgJob.id, jobId), eq(schema.orgJob.orgId, orgId))).returning({ id: schema.orgJob.id })
+      if (removed.length === 0) throw new HttpProblem(404, 'not_found', 'no such job description')
+      return reply.code(204).send(null)
+    },
+  )
+
   const DirectoryEntry = Type.Object({
     id: Type.String(),
     name: Nullable(Type.String()),
     email: Nullable(Type.String()),
     departments: Type.Array(Type.String(), { description: 'Department paths without the prefix, e.g. `dev/backend`' }),
-    jobTitle: Nullable(Type.String()),
+    jobId: Nullable(Type.String()),
+    jobTitle: Nullable(Type.String({ description: 'Name of the job description' })),
+    jobDescription: Nullable(Type.String()),
   })
 
   app.get(
@@ -557,7 +678,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     {
       schema: {
         tags: ['organizations'],
-        summary: 'The coworkers: name, email, departments and what they do',
+        summary: 'The coworkers: name, email, departments and job description',
         description: 'Every member may ask. Accounts that were deactivated are left out.',
         security: SECURITY,
         params: OrgParams,
@@ -569,11 +690,12 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       actorIn({ user: request.user! }, orgId)
       const db = database()
       const members = (await listMembers(db, orgId)).filter((m) => m.active)
-      const titles = await db
-        .select({ userId: schema.kcOrgMember.userId, jobTitle: schema.kcOrgMember.jobTitle })
+      const jobs = new Map((await jobsOf(db, orgId)).map((j) => [j.id, j]))
+      const held = await db
+        .select({ userId: schema.kcOrgMember.userId, jobId: schema.kcOrgMember.jobId })
         .from(schema.kcOrgMember)
         .where(eq(schema.kcOrgMember.orgId, orgId))
-      const title = new Map(titles.map((t) => [t.userId, t.jobTitle]))
+      const jobOf = new Map(held.map((h) => [h.userId, h.jobId]))
       const groups = await db
         .select({ userId: schema.kcGroupMember.userId, path: schema.kcGroup.path })
         .from(schema.kcGroupMember)
@@ -585,30 +707,36 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         if (!g.path.startsWith(head)) continue
         departments.set(g.userId, [...(departments.get(g.userId) ?? []), g.path.slice(head.length)].sort())
       }
-      return members.map((m) => ({ id: m.id, name: m.name, email: m.email, departments: departments.get(m.id) ?? [], jobTitle: title.get(m.id) ?? null }))
+      return members.map((m) => {
+        const job = jobs.get(jobOf.get(m.id) ?? '')
+        return { id: m.id, name: m.name, email: m.email, departments: departments.get(m.id) ?? [], jobId: job?.id ?? null, jobTitle: job?.name ?? null, jobDescription: job?.description || null }
+      })
     },
   )
 
   app.put(
-    '/orgs/:orgId/members/:userId/job-title',
+    '/orgs/:orgId/members/:userId/job',
     {
       schema: {
         tags: ['organizations'],
-        summary: 'Sets what a member does (their own, or anyone\'s for those who manage members)',
+        summary: 'Gives a member a job description from the list (those who manage members; people do not choose their own)',
         security: SECURITY,
         params: MemberParams,
-        body: Type.Object({ jobTitle: Nullable(Type.String({ maxLength: 200 })) }),
+        body: Type.Object({ jobId: Nullable(Type.String({ format: 'uuid' })) }),
         response: { 204: Type.Null(), ...problems(401, 403, 404, 503) },
       },
     },
     async (request, reply) => {
       const { orgId, userId } = request.params
-      const actor = actorIn({ user: request.user! }, orgId)
+      authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
       const db = database()
-      if (userId !== actor.user.id) authorize(actor, 'member.manage', { orgId })
       if (!(await memberOf(db, orgId, userId))) throw new HttpProblem(404, 'not_found', 'not a member of this organization')
-      const jobTitle = request.body.jobTitle?.trim() || null
-      await db.update(schema.kcOrgMember).set({ jobTitle }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
+      const { jobId } = request.body
+      if (jobId) {
+        const [job] = await db.select({ id: schema.orgJob.id }).from(schema.orgJob).where(and(eq(schema.orgJob.id, jobId), eq(schema.orgJob.orgId, orgId)))
+        if (!job) throw new HttpProblem(404, 'not_found', 'no such job description')
+      }
+      await db.update(schema.kcOrgMember).set({ jobId }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
       return reply.code(204).send(null)
     },
   )

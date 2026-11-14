@@ -9,13 +9,13 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import EmptyState from '@/components/time/EmptyState.vue'
 import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
 import { errorMessage } from '@/lib/ipc'
-import { useAccountStore } from '@/stores/account'
 import { CAN, type DirectoryEntry, useOrgStore } from '@/stores/org'
 import { useWorkspaceStore } from '@/stores/workspace'
 
@@ -26,7 +26,6 @@ definePage({ meta: { titleKey: 'nav.directory' } })
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-const account = useAccountStore()
 const org = useOrgStore()
 const workspaces = useWorkspaceStore()
 
@@ -35,7 +34,7 @@ async function load() {
   if (!orgId) return
   try {
     org.activeId = orgId
-    await org.loadDirectory()
+    await Promise.all([org.loadDirectory(), org.loadJobs()])
   } catch (err) {
     toast.error(errorMessage(err))
   }
@@ -88,20 +87,21 @@ const { sort, sorted } = useSort(filtered, {
 
 // ------------------------------------------------------------ job title
 const canEditAll = computed(() => org.role !== null && CAN.manage(org.role))
-const canEdit = (e: DirectoryEntry) => e.id === account.status.user?.id || canEditAll.value
+const canEdit = (_e: DirectoryEntry) => canEditAll.value
 const editing = ref<DirectoryEntry | null>(null)
-const draft = ref('')
+const NO_JOB = '__none'
+const draft = ref(NO_JOB)
 const open = ref(false)
 function edit(e: DirectoryEntry) {
   editing.value = e
-  draft.value = e.jobTitle ?? ''
+  draft.value = e.jobId ?? NO_JOB
   open.value = true
 }
 async function save() {
   const e = editing.value
   if (!e) return
   try {
-    await org.setJobTitle(e.id, draft.value.trim() || null)
+    await org.setJob(e.id, draft.value === NO_JOB ? null : draft.value)
     open.value = false
   } catch (err) {
     toast.error(errorMessage(err))
@@ -121,7 +121,7 @@ async function save() {
       </div>
       <MultiFilter v-model="departments" :label="$t('team.department')" :options="departmentOptions" />
       <Badge v-if="person" variant="secondary" class="gap-1 py-1">
-        {{ nameOf(org.directory.find((e) => e.id === person) ?? { id: person, name: null, email: null, departments: [], jobTitle: null }) }}
+        {{ nameOf(org.directory.find((e) => e.id === person) ?? { id: person, name: null, email: null, departments: [], jobId: null, jobTitle: null, jobDescription: null }) }}
         <button type="button" class="rounded-sm hover:bg-background/60" :title="$t('reports.clearFilter')" @click="clearPerson"><X class="size-3" /></button>
       </Badge>
       <Button v-if="hasFilter" size="sm" variant="ghost" @click="clearFilters"><X /> {{ $t('reports.clearFilter') }}</Button>
@@ -151,7 +151,7 @@ async function save() {
               <span v-if="e.departments.length" class="flex flex-wrap gap-1"><Badge v-for="d in e.departments" :key="d" variant="secondary">{{ d }}</Badge></span>
               <span v-else class="text-muted-foreground">–</span>
             </td>
-            <td class="max-w-0 w-full truncate px-3 py-1.5" :title="e.jobTitle ?? undefined">{{ e.jobTitle || '–' }}</td>
+            <td class="max-w-0 w-full truncate px-3 py-1.5" :title="e.jobDescription ?? undefined">{{ e.jobTitle || '–' }}</td>
             <td class="px-1 py-0.5" @click.stop>
               <div v-if="canEdit(e)" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                 <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="edit(e)"><Pencil /></Button>
@@ -169,8 +169,16 @@ async function save() {
       <DialogHeader><DialogTitle>{{ editing ? nameOf(editing) : '' }}</DialogTitle></DialogHeader>
       <form class="grid gap-4" @submit.prevent="save">
         <div class="grid gap-2">
-          <Label for="job-title">{{ $t('directory.jobTitle') }}</Label>
-          <Input id="job-title" v-model="draft" maxlength="200" autofocus :placeholder="$t('directory.jobTitlePlaceholder')" />
+          <Label>{{ $t('directory.jobTitle') }}</Label>
+          <Select v-model="draft">
+            <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="NO_JOB">{{ $t('common.none') }}</SelectItem>
+              <SelectItem v-for="j in org.jobs" :key="j.id" :value="j.id">{{ j.name }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <p v-if="org.jobs.length === 0" class="text-xs text-muted-foreground">{{ $t('directory.noJobs') }}</p>
+          <p v-else-if="org.jobs.find((j) => j.id === draft)?.description" class="text-xs text-muted-foreground">{{ org.jobs.find((j) => j.id === draft)?.description }}</p>
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" @click="open = false">{{ $t('common.cancel') }}</Button>

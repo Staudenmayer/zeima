@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import PolicyDialog from '@/components/time/PolicyDialog.vue'
@@ -21,7 +22,7 @@ import { useProjectsStore } from '@/stores/projects'
 import { useWorkspaceStore } from '@/stores/workspace'
 import type { OrgPolicy } from '@/bindings'
 import { useAccountStore } from '@/stores/account'
-import { CAN, type Department, type Invitation, type Member, type OrgRole, useOrgStore } from '@/stores/org'
+import { CAN, type Department, type Invitation, type Job, type Member, type OrgRole, useOrgStore } from '@/stores/org'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
 
@@ -84,6 +85,7 @@ async function load() {
   try {
     await org.load()
     await org.loadPresence().catch(() => {})
+    await org.loadJobs().catch(() => {})
     if (workspaces.inOrg) await org.loadPolicies().catch(() => {})
   } catch (err) {
     toast.error(errorMessage(err))
@@ -156,6 +158,32 @@ function askDeleteDept(g: Department) {
 }
 const memberName = (id: string) => org.nameOf(id) || id
 const addable = (g: Department) => org.members.filter((m) => !g.memberIds.includes(m.id))
+
+// ---------------------------------------------------------------- job descriptions
+const jobOpen = ref(false)
+const editingJob = ref<Job | null>(null)
+const jobName = ref('')
+const jobText = ref('')
+function openJob(j: Job | null) {
+  editingJob.value = j
+  jobName.value = j?.name ?? ''
+  jobText.value = j?.description ?? ''
+  jobOpen.value = true
+}
+async function saveJob() {
+  await run(async () => {
+    if (editingJob.value) await org.updateJob(editingJob.value.id, jobName.value.trim(), jobText.value.trim())
+    else await org.createJob(jobName.value.trim(), jobText.value.trim())
+    jobOpen.value = false
+  })
+}
+const deletingJob = ref<Job | null>(null)
+const deleteJobOpen = ref(false)
+function askDeleteJob(j: Job) {
+  deletingJob.value = j
+  deleteJobOpen.value = true
+}
+const { sort: jobSort, sorted: sortedJobs } = useSort(() => org.jobs, { name: (j) => j.name, description: (j) => j.description, people: (j) => j.people })
 
 // ---------------------------------------------------------------- activity
 const actionLabel = (a: string) => {
@@ -232,6 +260,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
           {{ $t('org.tabs.invitations') }}<span v-if="org.invitations.length" class="ml-1 text-muted-foreground">({{ org.invitations.length }})</span>
         </TabsTrigger>
         <TabsTrigger value="departments">{{ $t('org.tabs.departments') }}</TabsTrigger>
+        <TabsTrigger v-if="canManage" value="jobs">{{ $t('org.tabs.jobs') }}</TabsTrigger>
         <TabsTrigger v-if="canManage" value="policies">{{ $t('org.tabs.policies') }}</TabsTrigger>
         <TabsTrigger v-if="org.role && CAN.audit(org.role)" value="activity">{{ $t('org.tabs.activity') }}</TabsTrigger>
       </TabsList>
@@ -362,6 +391,39 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
         </ul>
       </TabsContent>
 
+      <TabsContent v-if="canManage" value="jobs">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <p class="text-sm text-muted-foreground">{{ $t('org.jobs.hint') }}</p>
+          <Button size="sm" @click="openJob(null)"><Plus /> {{ $t('org.jobs.new') }}</Button>
+        </div>
+        <p v-if="org.jobs.length === 0" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.jobs.none') }}</p>
+        <div v-else class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <SortHead :sort="jobSort" column="name" class="px-3 py-2 font-medium">{{ $t('org.jobs.name') }}</SortHead>
+                <SortHead :sort="jobSort" column="description" class="px-3 py-2 font-medium">{{ $t('org.jobs.description') }}</SortHead>
+                <SortHead :sort="jobSort" column="people" class="px-3 py-2 text-right font-medium">{{ $t('org.jobs.people') }}</SortHead>
+                <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="j in sortedJobs" :key="j.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="openJob(j)">
+                <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ j.name }}</td>
+                <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="j.description">{{ j.description || '–' }}</td>
+                <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ j.people }}</td>
+                <td class="px-1 py-0.5" @click.stop>
+                  <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openJob(j)"><Pencil /></Button>
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDeleteJob(j)"><Trash2 /></Button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </TabsContent>
+
       <TabsContent v-if="canManage" value="policies">
         <p v-if="!workspaces.inOrg" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.policy.switch') }}</p>
         <div v-else class="overflow-x-auto rounded-lg border">
@@ -440,6 +502,32 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
       </form>
     </DialogContent>
   </Dialog>
+
+  <Dialog v-model:open="jobOpen">
+    <DialogContent :aria-describedby="undefined" class="sm:max-w-md">
+      <DialogHeader><DialogTitle>{{ editingJob ? $t('org.jobs.edit') : $t('org.jobs.new') }}</DialogTitle></DialogHeader>
+      <form class="grid gap-4" @submit.prevent="saveJob">
+        <div class="grid gap-2">
+          <Label for="job-name">{{ $t('org.jobs.name') }}</Label>
+          <Input id="job-name" v-model="jobName" required maxlength="100" autofocus />
+        </div>
+        <div class="grid gap-2">
+          <Label for="job-desc">{{ $t('org.jobs.description') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
+          <Textarea id="job-desc" v-model="jobText" maxlength="500" rows="3" />
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" @click="jobOpen = false">{{ $t('common.cancel') }}</Button>
+          <Button type="submit">{{ $t('common.save') }}</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>
+
+  <ConfirmDialog
+    v-model:open="deleteJobOpen"
+    :title="$t('org.jobs.deleteConfirm', { name: deletingJob?.name ?? '' })"
+    @confirm="deletingJob && run(() => org.deleteJob(deletingJob!.id))"
+  />
 
   <Dialog v-model:open="deptOpen">
     <DialogContent :aria-describedby="undefined" class="sm:max-w-md">

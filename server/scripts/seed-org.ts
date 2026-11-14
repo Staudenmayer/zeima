@@ -156,30 +156,48 @@ async function push(who: string, table: string, rows: { id: string; fields: Reco
   }
 }
 
-// ---- what each person does (their own words), for the directory
-const JOBS: Record<string, string> = {
+// ---- job descriptions the organization defines (by the admin), and who has which
+const JOBS: [string, string][] = [
+  ['Head of engineering', 'Leads the engineering teams and their roadmap.'],
+  ['Engineering manager', 'Looks after a team: planning, people and delivery.'],
+  ['Backend developer', 'Builds and runs the services behind the product.'],
+  ['Frontend developer', 'Builds the user interface.'],
+  ['Operations lead', 'Keeps the company running day to day.'],
+  ['Site reliability engineer', 'Keeps systems available and fast.'],
+  ['Account executive', 'Looks after customers and sales.'],
+]
+const HAS: Record<string, string> = {
   ada: 'Head of engineering',
   max: 'Engineering manager',
-  grace: 'Senior backend developer',
+  grace: 'Backend developer',
   linus: 'Frontend developer',
   margaret: 'Operations lead',
   alan: 'Site reliability engineer',
   katherine: 'Account executive',
 }
-for (const p of PEOPLE) {
-  const s = sessions.get(p.key)!
-  const send = () =>
-    fetch(`${discovery.apiUrl}/v1/orgs/${ORG_ID}/members/${ids.get(p.key)}/job-title`, {
-      method: 'PUT',
-      headers: { authorization: `Bearer ${s.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ jobTitle: JOBS[p.key] }),
-    })
-  let res = await send()
-  while (res.status === 429) {
-    await sleep(10_000)
-    res = await send()
+{
+  const api = async (who: string, method: string, path: string, body?: unknown) => {
+    const s = sessions.get(who)!
+    for (;;) {
+      const res = await fetch(`${discovery.apiUrl}/v1/orgs/${ORG_ID}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${s.token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+      if (res.status !== 429) return res
+      await sleep(10_000)
+    }
   }
-  if (res.status !== 204) console.warn(`job title of ${p.key}: ${res.status} (is the API up to date?)`)
+  const have = (await (await api('ada', 'GET', '/jobs')).json()) as { id: string; name: string }[]
+  for (const [name, description] of JOBS) {
+    if (!have.some((j) => j.name === name)) await api('ada', 'POST', '/jobs', { name, description })
+  }
+  const all = (await (await api('ada', 'GET', '/jobs')).json()) as { id: string; name: string }[]
+  for (const p of PEOPLE) {
+    const job = all.find((j) => j.name === HAS[p.key])
+    const res = await api('ada', 'PUT', `/members/${ids.get(p.key)}/job`, { jobId: job?.id ?? null })
+    if (res.status !== 204) console.warn(`job of ${p.key}: ${res.status} (is the API up to date?)`)
+  }
 }
 
 // ---- the organization's data, by the admin

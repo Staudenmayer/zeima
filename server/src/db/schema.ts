@@ -87,6 +87,21 @@ export const kcGroupMember = pgTable(
   (t) => [primaryKey({ columns: [t.groupId, t.userId] })],
 )
 
+/** A job description the organization defines; people are given one (shown in the directory). */
+export const orgJob = pgTable(
+  'org_job',
+  {
+    id: uuid('id').primaryKey(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** What the job is, in a sentence or two. */
+    description: text('description').notNull().default(''),
+  },
+  (t) => [uniqueIndex('org_job_name').on(t.orgId, sql`lower(${t.name})`)],
+)
+
 export const kcOrgMember = pgTable(
   'kc_org_member',
   {
@@ -97,8 +112,8 @@ export const kcOrgMember = pgTable(
       .notNull()
       .references(() => kcUser.id, { onDelete: 'cascade' }),
     role: text('role').notNull(),
-    /** What the person does in the organization, shown in the directory (their own words). */
-    jobTitle: text('job_title'),
+    /** The job description the person has (the organization defines them). */
+    jobId: uuid('job_id').references(() => orgJob.id, { onDelete: 'set null' }),
   },
   (t) => [
     primaryKey({ columns: [t.orgId, t.userId] }),

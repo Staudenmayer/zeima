@@ -66,7 +66,18 @@ export interface DirectoryEntry {
   email: string | null
   /** Department paths, e.g. `dev/backend`. */
   departments: string[]
+  jobId: string | null
+  /** Name of the person's job description. */
   jobTitle: string | null
+  jobDescription: string | null
+}
+
+/** A job description the organization defines (Organization → Job descriptions). */
+export interface Job {
+  id: string
+  name: string
+  description: string
+  people: number
 }
 
 /** The organization the signed-in person administers: members, invitations, departments. */
@@ -85,6 +96,8 @@ export const useOrgStore = defineStore('org', () => {
   const people = ref<{ id: string; name: string | null }[]>([])
   /** The coworkers: name, email, departments, job title (every member may read them). */
   const directory = ref<DirectoryEntry[]>([])
+  /** The job descriptions the organization defines (every member may read them). */
+  const jobs = ref<Job[]>([])
   const loading = ref(false)
 
   const role = computed<OrgRole | null>(() => orgs.value.find((o) => o.id === activeId.value)?.role ?? null)
@@ -158,10 +171,25 @@ export const useOrgStore = defineStore('org', () => {
     if (activeId.value) directory.value = await api<DirectoryEntry[]>('GET', `${base()}/directory`)
   }
 
-  /** Sets what a person does; people word their own, those who manage members anyone's. */
-  async function setJobTitle(userId: string, jobTitle: string | null) {
-    await api('PUT', `${base()}/members/${userId}/job-title`, { jobTitle })
-    await loadDirectory()
+  async function loadJobs() {
+    if (activeId.value) jobs.value = await api<Job[]>('GET', `${base()}/jobs`)
+  }
+  async function createJob(name: string, description: string) {
+    await api('POST', `${base()}/jobs`, { name, description })
+    await loadJobs()
+  }
+  async function updateJob(id: string, name: string, description: string) {
+    await api('PATCH', `${base()}/jobs/${id}`, { name, description })
+    await Promise.all([loadJobs(), loadDirectory()])
+  }
+  async function deleteJob(id: string) {
+    await api('DELETE', `${base()}/jobs/${id}`)
+    await Promise.all([loadJobs(), loadDirectory()])
+  }
+  /** Gives a person a job description from the list (owners and admins only). */
+  async function setJob(userId: string, jobId: string | null) {
+    await api('PUT', `${base()}/members/${userId}/job`, { jobId })
+    await Promise.all([loadJobs(), loadDirectory()])
   }
 
   async function loadPresence() {
@@ -225,7 +253,7 @@ export const useOrgStore = defineStore('org', () => {
 
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
-    directory, loadDirectory, setJobTitle, loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
+    directory, loadDirectory, jobs, loadJobs, createJob, updateJob, deleteJob, setJob, loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

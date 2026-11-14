@@ -64,6 +64,20 @@
       "when": 1794669697120,
       "tag": "0008_member_job_title",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794669956572,
+      "tag": "0009_org_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794669961494,
+      "tag": "0010_drop_job_title",
+      "breakpoints": true
     }
   ]
 }

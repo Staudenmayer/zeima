@@ -341,7 +341,7 @@ Delivered as first-party **addons** (§5.12), not built into the app. The addon 
 - Recurrence via RRULE.
 
 ### 5.9 User Management (Org)
-- **Coworkers directory.** Every member sees everyone in the organization: name, email, departments and job description (`GET /v1/orgs/:id/directory`; deactivated accounts are left out). People word their own job description, admins change anyone's (`PUT /v1/orgs/:id/members/:userId/job-title`). The dashboard's online list is ordered by department and each name opens the directory for that person.
+- **Coworkers directory.** Every member sees everyone in the organization: name, email, departments and job description (`GET /v1/orgs/:id/directory`; deactivated accounts are left out). The job descriptions are defined by owners and admins (Organization → Job descriptions; `GET/POST /v1/orgs/:id/jobs`, `PATCH/DELETE …/jobs/:jobId`); owners and admins give them out (`PUT /v1/orgs/:id/members/:userId/job`); people do not choose their own. Deleting one leaves its people without. The dashboard's online list is ordered by department and each name opens the directory for that person.
 - Org with **groups** (hierarchical departments/teams).
 - Roles:
   - **Owner**: billing and everything else

@@ -1,0 +1,1 @@
+ALTER TABLE "kc_org_member" DROP COLUMN "job_title";

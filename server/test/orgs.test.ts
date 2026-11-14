@@ -415,36 +415,61 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     })
   })
 
-  describe('the directory of coworkers', () => {
-    it('shows everyone to everyone, with department and job title, and lets people word their own', async () => {
+  describe('job descriptions and the directory of coworkers', () => {
+    const jobs = (uid: string, role: string | null, method: 'GET' | 'POST', payload?: object) => call(method, `/v1/orgs/${ORG}/jobs`, uid, role, payload)
+
+    it('are defined and given out by those who manage members', async () => {
       await reset()
+      expect((await jobs(MEMBER, 'member', 'POST', { name: 'Developer' })).statusCode).toBe(403)
+      expect((await jobs(MANAGER, 'manager', 'POST', { name: 'Developer' })).statusCode).toBe(403)
+      const dev = await jobs(ADMIN, 'admin', 'POST', { name: ' Developer ', description: 'Builds things' })
+      expect(dev.statusCode).toBe(201)
+      expect(dev.json()).toMatchObject({ name: 'Developer', description: 'Builds things', people: 0 })
+      expect((await jobs(ADMIN, 'admin', 'POST', { name: 'developer' })).statusCode).toBe(409)
+      expect((await jobs(ADMIN, 'admin', 'POST', { name: '' })).statusCode).toBe(400)
+      const lead = (await jobs(OWNER, 'owner', 'POST', { name: 'Team lead' })).json()
+      // Everyone reads the list.
+      expect((await jobs(MEMBER, 'member', 'GET')).json().map((j: { name: string }) => j.name)).toEqual(['Developer', 'Team lead'])
+      expect((await jobs(OTHER, null, 'GET')).statusCode).toBe(403)
+
+      const set = (uid: string, role: string, target: string, jobId: string | null) => call('PUT', `/v1/orgs/${ORG}/members/${target}/job`, uid, role, { jobId })
+      // Only those who manage members give them out: not people to themselves either.
+      expect((await set(MEMBER, 'member', MEMBER, dev.json().id)).statusCode).toBe(403)
+      expect((await set(ADMIN, 'admin', MEMBER, dev.json().id)).statusCode).toBe(204)
+      expect((await set(MEMBER, 'member', MANAGER, lead.id)).statusCode).toBe(403)
+      expect((await set(MANAGER, 'manager', MEMBER, lead.id)).statusCode).toBe(403)
+      expect((await set(ADMIN, 'admin', MANAGER, lead.id)).statusCode).toBe(204)
+      expect((await set(ADMIN, 'admin', id(77), lead.id)).statusCode).toBe(404)
+      expect((await set(ADMIN, 'admin', MEMBER, id(78))).statusCode).toBe(404)
+      expect((await jobs(MEMBER, 'member', 'GET')).json().map((j: { people: number }) => j.people)).toEqual([1, 1])
+
+      // Changing and removing one.
+      const patch = (uid: string, role: string, jobId: string, body: object) => call('PATCH', `/v1/orgs/${ORG}/jobs/${jobId}`, uid, role, body)
+      expect((await patch(MEMBER, 'member', dev.json().id, { name: 'Engineer' })).statusCode).toBe(403)
+      expect((await patch(ADMIN, 'admin', dev.json().id, { name: 'team LEAD' })).statusCode).toBe(409)
+      expect((await patch(ADMIN, 'admin', dev.json().id, { name: 'Engineer' })).json()).toMatchObject({ name: 'Engineer', people: 1 })
+      expect((await patch(ADMIN, 'admin', id(79), { name: 'x' })).statusCode).toBe(404)
+
+      const dir = async (uid: string, role: string) => (await call('GET', `/v1/orgs/${ORG}/directory`, uid, role)).json() as { id: string; name: string; email: string; departments: string[]; jobTitle: string | null; jobDescription: string | null }[]
       const g = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'dev' })).json()
       await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MEMBER}`, ADMIN, 'admin')
-      const title = (uid: string, role: string, target: string, jobTitle: string | null) => call('PUT', `/v1/orgs/${ORG}/members/${target}/job-title`, uid, role, { jobTitle })
-
-      // Everyone may change their own; others need the right to manage members.
-      expect((await title(MEMBER, 'member', MEMBER, '  Backend developer ')).statusCode).toBe(204)
-      expect((await title(MEMBER, 'member', MANAGER, 'Boss')).statusCode).toBe(403)
-      expect((await title(MANAGER, 'manager', MEMBER, 'Boss')).statusCode).toBe(403)
-      expect((await title(ADMIN, 'admin', MANAGER, 'Team lead')).statusCode).toBe(204)
-      expect((await title(ADMIN, 'admin', id(77), 'Ghost')).statusCode).toBe(404)
-      expect((await title(MEMBER, 'member', MEMBER, 'x'.repeat(201))).statusCode).toBe(400)
-
-      // A plain member sees the whole company, not only themselves.
-      const res = await call('GET', `/v1/orgs/${ORG}/directory`, MEMBER, 'member')
-      expect(res.statusCode).toBe(200)
-      const rows = res.json() as { id: string; name: string; email: string; departments: string[]; jobTitle: string | null }[]
+      // A plain member sees the whole company with department and job description.
+      const rows = await dir(MEMBER, 'member')
       expect(rows.length).toBeGreaterThanOrEqual(4)
-      expect(rows.find((r) => r.id === MEMBER)).toMatchObject({ name: 'Max', departments: ['dev'], jobTitle: 'Backend developer' })
-      expect(rows.find((r) => r.id === MANAGER)).toMatchObject({ departments: [], jobTitle: 'Team lead' })
+      expect(rows.find((r) => r.id === MEMBER)).toMatchObject({ name: 'Max', departments: ['dev'], jobTitle: 'Engineer', jobDescription: 'Builds things' })
+      expect(rows.find((r) => r.id === MANAGER)).toMatchObject({ departments: [], jobTitle: 'Team lead', jobDescription: null })
       expect(rows.every((r) => typeof r.email === 'string')).toBe(true)
 
-      // Clearing it, and people from outside, and deactivated accounts.
-      expect((await title(MEMBER, 'member', MEMBER, '')).statusCode).toBe(204)
-      expect(((await call('GET', `/v1/orgs/${ORG}/directory`, OWNER, 'owner')).json() as { id: string; jobTitle: string | null }[]).find((r) => r.id === MEMBER)?.jobTitle).toBeNull()
+      // Taking a description away leaves its people without one.
+      expect((await call('DELETE', `/v1/orgs/${ORG}/jobs/${dev.json().id}`, MEMBER, 'member')).statusCode).toBe(403)
+      expect((await call('DELETE', `/v1/orgs/${ORG}/jobs/${dev.json().id}`, ADMIN, 'admin')).statusCode).toBe(204)
+      expect((await call('DELETE', `/v1/orgs/${ORG}/jobs/${dev.json().id}`, ADMIN, 'admin')).statusCode).toBe(404)
+      expect((await dir(OWNER, 'owner')).find((r) => r.id === MEMBER)?.jobTitle).toBeNull()
+      expect((await set(ADMIN, 'admin', MEMBER, null)).statusCode).toBe(204)
+      // Not for outsiders, and deactivated accounts are left out.
       expect((await call('GET', `/v1/orgs/${ORG}/directory`, OTHER, null)).statusCode).toBe(403)
       await db.db.update(schema.kcUser).set({ active: false }).where(eq(schema.kcUser.id, MEMBER))
-      expect(((await call('GET', `/v1/orgs/${ORG}/directory`, OWNER, 'owner')).json() as { id: string }[]).some((r) => r.id === MEMBER)).toBe(false)
+      expect((await dir(OWNER, 'owner')).some((r) => r.id === MEMBER)).toBe(false)
     })
   })
 
