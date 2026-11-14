@@ -15,6 +15,7 @@ import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vu
 import PageHeader from '@/components/time/PageHeader.vue'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { errorMessage } from '@/lib/ipc'
 import { CAN, type DirectoryEntry, useOrgStore } from '@/stores/org'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -85,6 +86,15 @@ const { sort, sorted } = useSort(filtered, {
   jobTitle: (e) => e.jobTitle,
 })
 
+/** Opens the person's mail program (the webview does not follow `mailto:` links itself). */
+async function mail(address: string) {
+  try {
+    await openUrl(`mailto:${address}`)
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
+}
+
 // ------------------------------------------------------------ job title
 const canEditAll = computed(() => org.role !== null && CAN.manage(org.role))
 const canEdit = (_e: DirectoryEntry) => canEditAll.value
@@ -144,7 +154,7 @@ async function save() {
           <tr v-for="e in sorted" :key="e.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="canEdit(e) ? 'cursor-pointer' : ''" @click="canEdit(e) && edit(e)">
             <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ nameOf(e) }}</td>
             <td class="px-3 py-1.5">
-              <a v-if="e.email" :href="`mailto:${e.email}`" class="text-muted-foreground hover:text-foreground hover:underline" @click.stop>{{ e.email }}</a>
+              <a v-if="e.email" :href="`mailto:${e.email}`" class="text-muted-foreground hover:text-foreground hover:underline" @click.stop.prevent="mail(e.email)">{{ e.email }}</a>
               <span v-else class="text-muted-foreground">–</span>
             </td>
             <td class="px-3 py-1.5">
