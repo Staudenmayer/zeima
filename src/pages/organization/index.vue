@@ -11,12 +11,15 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
+import PolicyDialog from '@/components/time/PolicyDialog.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
 import { events } from '@/bindings'
 import { errorMessage } from '@/lib/ipc'
 import { useProjectsStore } from '@/stores/projects'
+import { useWorkspaceStore } from '@/stores/workspace'
+import type { OrgPolicy } from '@/bindings'
 import { useAccountStore } from '@/stores/account'
 import { CAN, type Department, type Invitation, type Member, type OrgRole, useOrgStore } from '@/stores/org'
 
@@ -36,6 +39,29 @@ const isOwner = computed(() => !!org.role && CAN.delete(org.role))
 const inviteRoles = computed<Invitation['role'][]>(() => (canAssign.value ? ['member', 'manager', 'admin'] : ['member']))
 
 const projects = useProjectsStore()
+const workspaces = useWorkspaceStore()
+
+// ----------------------------------------------------------------- policies
+/** The scopes a policy can be set for: the organization, then each department. */
+const policyScopes = computed(() => [{ path: null as string | null, label: t('org.policy.wholeOrg') }, ...org.departments.map((g) => ({ path: g.path as string | null, label: g.path }))])
+const policyOf = (path: string | null): OrgPolicy | null => org.policies.find((p) => p.groupPath === path) ?? null
+const editingScope = ref<{ path: string | null; label: string } | null>(null)
+const policyOpen = ref(false)
+function editPolicy(scope: { path: string | null; label: string }) {
+  editingScope.value = scope
+  policyOpen.value = true
+}
+/** What a policy asks for, in a few words. */
+function policySummary(p: OrgPolicy | null): string {
+  if (!p) return t('org.policy.none')
+  const parts: string[] = []
+  if (p.requireProject) parts.push(t('org.policy.requireProject'))
+  if (p.requireTags) parts.push(t('org.policy.requireTags'))
+  if (p.managerVisibility && p.managerVisibility !== 'full') parts.push(t(`org.policy.manager.${p.managerVisibility}`))
+  if (p.presenceVisibility === 'off') parts.push(t('org.policy.presence.off'))
+  if (p.weeklyTargetMinutes) parts.push(t('org.policy.targetShort', { h: p.weeklyTargetMinutes / 60 }))
+  return parts.join(' · ') || t('org.policy.none')
+}
 let unlisten: (() => void) | undefined
 let refresh: ReturnType<typeof setInterval> | undefined
 onMounted(async () => {
@@ -56,6 +82,7 @@ async function load() {
   try {
     await org.load()
     await org.loadPresence().catch(() => {})
+    if (workspaces.inOrg) await org.loadPolicies().catch(() => {})
   } catch (err) {
     toast.error(errorMessage(err))
   }
@@ -177,6 +204,7 @@ const deleteOrgOpen = ref(false)
           {{ $t('org.tabs.invitations') }}<span v-if="org.invitations.length" class="ml-1 text-muted-foreground">({{ org.invitations.length }})</span>
         </TabsTrigger>
         <TabsTrigger value="departments">{{ $t('org.tabs.departments') }}</TabsTrigger>
+        <TabsTrigger v-if="canManage" value="policies">{{ $t('org.tabs.policies') }}</TabsTrigger>
         <TabsTrigger v-if="org.role && CAN.audit(org.role)" value="activity">{{ $t('org.tabs.activity') }}</TabsTrigger>
       </TabsList>
 
@@ -264,6 +292,21 @@ const deleteOrgOpen = ref(false)
         </ul>
       </TabsContent>
 
+      <TabsContent v-if="canManage" value="policies">
+        <p v-if="!workspaces.inOrg" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.policy.switch') }}</p>
+        <ul v-else class="divide-y rounded-lg border">
+          <li v-for="s in policyScopes" :key="s.path ?? 'org'" class="flex items-center gap-3 px-3 py-2 text-sm">
+            <div class="min-w-0 flex-1">
+              <p class="font-medium">{{ s.label }}</p>
+              <p class="truncate text-xs text-muted-foreground">{{ policySummary(policyOf(s.path)) }}</p>
+            </div>
+            <Button size="sm" variant="outline" @click="editPolicy(s)">{{ $t('common.edit') }}</Button>
+            <Button v-if="policyOf(s.path)" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="run(() => org.deletePolicy(policyOf(s.path)!.id))"><Trash2 /></Button>
+          </li>
+        </ul>
+        <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.policy.hint') }}</p>
+      </TabsContent>
+
       <TabsContent v-if="org.role && CAN.audit(org.role)" value="activity">
         <ul class="divide-y rounded-lg border">
           <li v-for="a in org.audit" :key="a.id" class="flex items-baseline gap-3 px-3 py-2 text-sm">
@@ -330,6 +373,12 @@ const deleteOrgOpen = ref(false)
     </DialogContent>
   </Dialog>
 
+  <PolicyDialog
+    v-model:open="policyOpen"
+    :title="$t('org.policy.editTitle', { scope: editingScope?.label ?? '' })"
+    :policy="editingScope ? policyOf(editingScope.path) : null"
+    :save="(settings) => org.savePolicy(editingScope?.path ?? null, settings)"
+  />
   <ConfirmDialog
     v-model:open="removeOpen"
     :title="$t('org.removeConfirm', { name: removing ? label(removing) : '' })"

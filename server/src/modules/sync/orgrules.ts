@@ -13,6 +13,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { type Db, schema } from '../../db/index.ts'
 import { type Actor, can, scopeOf } from '../../plugins/authz.ts'
 import type { Change, Outcome, RowState } from '../../sync/merge.ts'
+import { departmentsOf, effective, loadPolicies, orgWorkspaceId, type PolicyRow } from './policy.ts'
 
 type Kind = 'shared' | 'own' | 'never'
 
@@ -24,6 +25,7 @@ const SHARED: Record<string, string> = {
   cost_center_assignment: 'cost_center.write',
   activity: 'policy.write',
   absence_type: 'policy.write',
+  org_policy: 'policy.write',
   custom_holiday: 'policy.write',
 }
 
@@ -74,6 +76,18 @@ export async function sharesGroup(db: Db, orgId: string, actorGroups: readonly s
     .where(and(eq(schema.kcGroup.orgId, orgId), eq(schema.kcGroupMember.userId, ownerId), inArray(schema.kcGroup.path, [...actorGroups])))
     .limit(1)
   return rows.length > 0
+}
+
+/** A finished entry must meet the policy of its owner (a project, tags). */
+async function checkEntryPolicy(db: Db, actor: Actor, orgId: string, change: Change, merged: Record<string, unknown>): Promise<Outcome | null> {
+  if (change.op === 'delete' || plain(merged.endAt) == null) return null
+  const workspace = await orgWorkspaceId(db, orgId)
+  if (!workspace) return null
+  const policy = effective(await loadPolicies(db, workspace), actor.user.orgs[orgId]?.groups.map((g) => g.slice(`/orgs/${orgId}/groups/`.length)) ?? [])
+  if (policy.requireProject && !plain(merged.projectId)) return { status: 'rejected', reason: 'policy_project' }
+  const tags = plain(merged.tagIds)
+  if (policy.requireTags && !(Array.isArray(tags) && tags.length > 0)) return { status: 'rejected', reason: 'policy_tags' }
+  return null
 }
 
 const DECISION_FIELDS = ['decidedBy', 'decidedAt', 'decisionNote']
@@ -189,7 +203,7 @@ export async function checkOrgWrite(
   if (change.table === 'absence') return checkAbsence(db, actor, orgId, change, current, owner)
   const moved = change.fields?.userId
   if (current && typeof moved === 'string' && moved !== owner) return { status: 'rejected', reason: 'forbidden_field' }
-  if (owner === actor.user.id) return null
+  if (owner === actor.user.id) return change.table === 'time_entry' ? checkEntryPolicy(db, actor, orgId, change, merged) : null
   // Someone else's row: only managers editing time entries (locking, corrections).
   if (change.table !== 'time_entry') return { status: 'rejected', reason: 'forbidden' }
   const scope = scopeOf(actor, 'entry.write_locked')
@@ -210,13 +224,58 @@ function canSeeProject(user: Actor['user'], orgId: string, fields: Record<string
  * The rows of org workspaces the caller may see: shared rows for everyone,
  * own-table rows for their owner and for roles whose read right reaches them.
  */
-export async function visibleToCaller<T extends { workspaceId: string; table: string; fields: Record<string, { v: unknown }> }>(
+/** The entry fields a manager does not get, by what the owner's policy shows. */
+const HIDDEN_BY_TOTALS = ['note', 'projectId', 'tagIds', 'activityId', 'costCenterId']
+
+/**
+ * What a manager sees of someone's time entry: all of it, or, if the owner's
+ * policy says so, without the note or with only the times.
+ */
+async function limited<T extends { workspaceId: string; table: string; fields: Record<string, { v: unknown; h: string }> }>(
+  db: Db,
+  row: T,
+  orgId: string,
+  owner: string,
+  cache: Map<string, PolicyRow[]>,
+): Promise<T> {
+  if (row.table !== 'time_entry') return row
+  let rows = cache.get(row.workspaceId)
+  if (!rows) {
+    rows = await loadPolicies(db, row.workspaceId)
+    cache.set(row.workspaceId, rows)
+  }
+  if (rows.length === 0) return row
+  const { managerVisibility } = effective(rows, await departmentsOf(db, orgId, owner))
+  if (managerVisibility === 'full') return row
+  const hide = managerVisibility === 'hide_notes' ? ['note'] : HIDDEN_BY_TOTALS
+  const fields = { ...row.fields }
+  for (const f of hide) if (f in fields) fields[f] = { v: f === 'tagIds' ? [] : f === 'note' ? '' : null, h: fields[f]!.h }
+  return { ...row, fields }
+}
+
+/** Ids of the members-only projects of a workspace that the person may not see. */
+async function hiddenProjects(db: Db, user: Actor['user'], orgId: string, workspaceId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ rowId: schema.syncRow.rowId, fields: schema.syncRow.fields })
+    .from(schema.syncRow)
+    .where(and(eq(schema.syncRow.workspaceId, workspaceId), eq(schema.syncRow.tableName, 'project')))
+  const hidden = new Set<string>()
+  for (const r of rows) {
+    const fields = r.fields as Record<string, unknown>
+    if (plain(fields.visibility) === 'members' && !canSeeProject(user, orgId, fields)) hidden.add(r.rowId)
+  }
+  return hidden
+}
+
+export async function visibleToCaller<T extends { workspaceId: string; table: string; fields: Record<string, { v: unknown; h: string }> }>(
   db: Db,
   actor: Actor['user'],
   workspaces: Map<string, string>,
   rows: T[],
 ): Promise<T[]> {
   const sharing = new Map<string, Set<string>>()
+  const hidden = new Map<string, Set<string>>()
+  const policies = new Map<string, PolicyRow[]>()
   const out: T[] = []
   for (const row of rows) {
     const orgId = workspaces.get(row.workspaceId)
@@ -228,6 +287,16 @@ export async function visibleToCaller<T extends { workspaceId: string; table: st
     if (kind === 'never') continue
     if (kind === 'shared') {
       if (row.table === 'project' && plain(row.fields.visibility) === 'members' && !canSeeProject(actor, orgId, row.fields)) continue
+      // A tag of a project the person cannot see is not theirs to see either.
+      const projectId = row.table === 'tag' ? plain(row.fields.projectId) : null
+      if (typeof projectId === 'string') {
+        let set = hidden.get(row.workspaceId)
+        if (!set) {
+          set = await hiddenProjects(db, actor, orgId, row.workspaceId)
+          hidden.set(row.workspaceId, set)
+        }
+        if (set.has(projectId)) continue
+      }
       out.push(row)
       continue
     }
@@ -242,7 +311,7 @@ export async function visibleToCaller<T extends { workspaceId: string; table: st
     }
     if (!owner) continue
     const scope = scopeOf({ user: actor, orgId }, READ[row.table] ?? 'member.read')
-    if (scope === 'org') out.push(row)
+    if (scope === 'org') out.push(await limited(db, row, orgId, owner, policies))
     else if (scope === 'group') {
       let set = sharing.get(orgId)
       if (!set) {
@@ -258,7 +327,7 @@ export async function visibleToCaller<T extends { workspaceId: string; table: st
         }
         sharing.set(orgId, set)
       }
-      if (set.has(owner)) out.push(row)
+      if (set.has(owner)) out.push(await limited(db, row, orgId, owner, policies))
     }
   }
   return out

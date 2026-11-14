@@ -172,6 +172,19 @@ struct Claims {
     email: Option<String>,
     name: Option<String>,
     preferred_username: Option<String>,
+    #[serde(default)]
+    groups: Vec<String>,
+}
+
+/// The groups a token lists (`/orgs/<org>/roles/…`, `/orgs/<org>/groups/…`).
+pub fn groups_from_token(token: &str) -> Vec<String> {
+    let claims = token.split('.').nth(1).and_then(|payload| {
+        let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload.trim_end_matches('='))
+            .ok()?;
+        serde_json::from_slice::<Claims>(&bytes).ok()
+    });
+    claims.map(|c| c.groups).unwrap_or_default()
 }
 
 /// Reads who a token is for. The signature is not checked: the token came

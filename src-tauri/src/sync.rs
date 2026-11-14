@@ -378,6 +378,11 @@ async fn adopt_shared_workspaces(
     core.set_meta(crate::workspaces::ACCOUNT_USER_KEY, &user.id)
         .await
         .map_err(|e| e.to_string())?;
+    // The departments, for the policies that apply to this person.
+    let groups = serde_json::to_string(&account::groups_from_token(token)).map_err(|e| e.to_string())?;
+    core.set_meta(zeima_core::ACCOUNT_GROUPS_KEY, &groups)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut shared = Vec::new();
     for w in serde_json::from_value::<Vec<ServerWorkspace>>(list)
         .map_err(|e| format!("the server's answer: {e}"))?

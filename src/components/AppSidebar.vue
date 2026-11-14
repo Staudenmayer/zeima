@@ -4,6 +4,7 @@ import type { SidebarProps } from '@/components/ui/sidebar'
 import { computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAccountStore } from '@/stores/account'
+import { useSubmissionsStore } from '@/stores/submissions'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
   BarChart3,
@@ -43,6 +44,7 @@ const props = withDefaults(defineProps<SidebarProps>(), {
 const { t } = useI18n()
 const account = useAccountStore()
 const workspaces = useWorkspaceStore()
+const submissions = useSubmissionsStore()
 onMounted(async () => {
   await account.load()
   await account.loadSync()
@@ -50,6 +52,14 @@ onMounted(async () => {
 })
 // A sync may have brought in an organization's workspace.
 watch(() => account.sync?.lastSyncedAt, () => void workspaces.load().catch(() => {}))
+// What waits for the person's decision shows next to the Approvals entry.
+watch(
+  () => [workspaces.active?.id, account.sync?.lastSyncedAt],
+  () => {
+    if (workspaces.inOrg) void submissions.load().catch(() => {})
+  },
+  { immediate: true },
+)
 
 const tracking = computed(() => [
   { title: t('nav.dashboard'), url: '/', icon: LayoutDashboard },
@@ -60,7 +70,7 @@ const tracking = computed(() => [
   { title: t('nav.costCenters'), url: '/cost-centers', icon: Landmark },
   { title: t('nav.reports'), url: '/reports', icon: BarChart3 },
   { title: t('nav.absences'), url: '/absences', icon: Palmtree },
-  ...(workspaces.inOrg ? [{ title: t('nav.approvals'), url: '/approvals', icon: ClipboardCheck }] : []),
+  ...(workspaces.inOrg ? [{ title: submissions.waiting ? `${t('nav.approvals')} (${submissions.waiting})` : t('nav.approvals'), url: '/approvals', icon: ClipboardCheck }] : []),
   ...(workspaces.inOrg ? [{ title: t('nav.locations'), url: '/locations', icon: MapPinned }] : []),
   // Owners and managers see other people's time; for the rest the page would show only themselves.
   ...(workspaces.inOrg && (workspaces.role === 'owner' || workspaces.role === 'manager')

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { commands } from '@/bindings'
+import { commands, type OrgPolicy, type PolicySettings } from '@/bindings'
 import { call } from '@/lib/ipc'
 
 export type OrgRole = 'owner' | 'admin' | 'manager' | 'member'
@@ -72,6 +72,7 @@ export const useOrgStore = defineStore('org', () => {
   const auditDone = ref(false)
   const presence = ref<PresenceItem[]>([])
   /** Names of everyone in the organization (every member may read them). */
+  const policies = ref<OrgPolicy[]>([])
   const people = ref<{ id: string; name: string | null }[]>([])
   const loading = ref(false)
 
@@ -119,6 +120,19 @@ export const useOrgStore = defineStore('org', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  /** Policies live in the organization's workspace: the active workspace must be that one. */
+  async function loadPolicies() {
+    policies.value = await call(commands.policiesList())
+  }
+  async function savePolicy(groupPath: string | null, settings: PolicySettings) {
+    await call(commands.policySave(groupPath, settings))
+    await loadPolicies()
+  }
+  async function deletePolicy(id: string) {
+    await call(commands.policyDelete(id))
+    await loadPolicies()
   }
 
   async function loadPresence() {
@@ -182,7 +196,7 @@ export const useOrgStore = defineStore('org', () => {
 
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
-    people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
+    policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

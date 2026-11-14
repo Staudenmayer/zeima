@@ -17,6 +17,7 @@ pub mod import;
 pub mod jurisdiction;
 pub mod locale;
 pub mod model;
+pub mod policy;
 pub mod report;
 pub mod summary;
 pub mod sync;
@@ -37,12 +38,13 @@ pub use away::{AwayItem, AwayResolution};
 pub use error::{Error, Result};
 
 #[cfg(feature = "db")]
+pub use repo::ACCOUNT_GROUPS_KEY;
+#[cfg(feature = "db")]
 pub use repo::{
     default_schedule, AddonRecord, Balance, BudgetStatus, HolidayView, ProfileSummary, VacationSummary,
     WorkScheduleInput,
 };
 pub use repo::{ApplyReport, FieldView, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
-#[cfg(feature = "db")]
 pub use repo::{ImportPreview, ImportReport, LocationKind, WorkLocation};
 pub use repo::{SubmissionStatus, TeamMember, TimesheetSubmission};
 

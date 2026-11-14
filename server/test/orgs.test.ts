@@ -136,6 +136,24 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     expect(await names(MANAGER, 'manager')).toEqual(['Mia'])
   })
 
+  it('needs a plan with organizations on the cloud', async () => {
+    await reset()
+    const cloud = await buildApp(loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'silent', METRICS_ENABLED: 'false', DEPLOYMENT_MODE: 'cloud' }), {
+      logger: false,
+      keys,
+      readiness: {},
+      db: db.db,
+      keycloakAdmin: kc,
+    })
+    const get = async () => cloud.inject({ url: `/v1/orgs/${ORG}`, headers: await as(OWNER, 'owner') })
+    const free = await get()
+    expect(free.statusCode).toBe(403)
+    expect(free.json().code).toBe('feature_not_available')
+    await db.db.insert(schema.entitlement).values({ id: id(700), orgId: ORG, plan: 'team', seats: 10, updatedAt: 1 })
+    expect((await get()).statusCode).toBe(200)
+    await cloud.close()
+  })
+
   it('lists the names of everyone, without addresses, to every member', async () => {
     await reset()
     const res = await call('GET', `/v1/orgs/${ORG}/people`, MEMBER, 'member')

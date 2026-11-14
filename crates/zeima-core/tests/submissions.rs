@@ -424,3 +424,115 @@ async fn work_locations_are_one_row_per_person_and_day() {
         .await
         .is_err());
 }
+
+#[tokio::test]
+async fn policies_apply_to_entries_in_a_shared_workspace_only() {
+    use zeima_core::model::{ActivityInput, EntryInput};
+    use zeima_core::policy::{ManagerVisibility, PolicySettings};
+    const HOUR: i64 = 3_600_000;
+    let (personal, ada, _) = setup().await;
+    let activity = ada
+        .create_activity(ActivityInput {
+            name: "Work".into(),
+            color: "#111111".into(),
+            archived: false,
+        })
+        .await
+        .unwrap();
+    let entry = |project: Option<&str>, tags: Vec<String>| EntryInput {
+        activity_id: Some(activity.id.clone()),
+        project_id: project.map(Into::into),
+        start_at: T0,
+        end_at: Some(T0 + HOUR),
+        tz: Some("UTC".into()),
+        note: String::new(),
+        billable: None,
+        tag_ids: tags,
+        cost_center_id: None,
+    };
+    // Nothing is required until a policy says so.
+    ada.create_entry(entry(None, vec![])).await.unwrap();
+
+    // The organization asks for a project; the "dev" department also for a tag.
+    ada.save_policy(
+        None,
+        PolicySettings {
+            require_project: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    ada.save_policy(
+        Some("dev".into()),
+        PolicySettings {
+            require_tags: true,
+            manager_visibility: ManagerVisibility::HideNotes,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(ada.list_policies().await.unwrap().len(), 2);
+    let refused = ada.create_entry(entry(None, vec![])).await.unwrap_err();
+    assert!(
+        matches!(refused, Error::Validation { ref field, .. } if field == "projectId"),
+        "{refused}"
+    );
+
+    // Ada is not in "dev" yet: the tag is not required of her.
+    let project = ada
+        .create_project(zeima_core::model::ProjectInput {
+            name: "Site".into(),
+            alias: None,
+            color: "#3b82f6".into(),
+            parent_id: None,
+            client: None,
+            budget_minutes: None,
+            budget_period: zeima_core::model::BudgetPeriod::Total,
+            budget_warn_pct: 80,
+            billable_default: false,
+            status: zeima_core::model::ProjectStatus::Active,
+            cost_center_id: None,
+            visibility: Default::default(),
+            manager_id: None,
+            member_ids: vec![],
+        })
+        .await
+        .unwrap();
+    ada.create_entry(entry(Some(&project.id), vec![])).await.unwrap();
+    ada.set_meta(
+        zeima_core::ACCOUNT_GROUPS_KEY,
+        &format!("[\"/orgs/{ORG}/groups/dev\"]"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        ada.effective_policy().await.unwrap().manager_visibility,
+        ManagerVisibility::HideNotes
+    );
+    let refused = ada
+        .create_entry(entry(Some(&project.id), vec![]))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(refused, Error::Validation { ref field, .. } if field == "tagIds"),
+        "{refused}"
+    );
+
+    // Saving the same scope again replaces it; deleting removes it.
+    let again = ada.save_policy(None, PolicySettings::default()).await.unwrap();
+    assert_eq!(ada.list_policies().await.unwrap().len(), 2);
+    ada.delete_policy(&again.id).await.unwrap();
+    assert_eq!(ada.list_policies().await.unwrap().len(), 1);
+
+    // The personal workspace has no policies.
+    assert!(personal
+        .save_policy(None, PolicySettings::default())
+        .await
+        .is_err());
+    assert_eq!(
+        personal.effective_policy().await.unwrap(),
+        PolicySettings::default()
+    );
+}

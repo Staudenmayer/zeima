@@ -150,6 +150,8 @@ impl Core {
                 "is required; use the timer for running entries",
             ));
         }
+        self.check_entry_policy(input.project_id.as_deref(), input.tag_ids.len())
+            .await?;
         let mut tx = self.begin().await?;
         let mut entry = new_entry(&mut tx, input, source).await?;
         entry.source_ref = source_ref;
@@ -160,6 +162,10 @@ impl Core {
 
     pub async fn update_entry(&self, id: &str, input: EntryInput) -> Result<TimeEntry> {
         let input = input.normalized()?;
+        if input.end_at.is_some() {
+            self.check_entry_policy(input.project_id.as_deref(), input.tag_ids.len())
+                .await?;
+        }
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let existing = fetch_entry(tx.conn(), &user, id).await?;

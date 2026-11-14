@@ -167,6 +167,11 @@ impl Core {
     }
 
     pub async fn stop_timer(&self) -> Result<TimerState> {
+        // A policy may ask for a project or tags before the entry is finished.
+        if let TimerState::Running { entry } = self.timer_state().await? {
+            self.check_entry_policy(entry.project_id.as_deref(), entry.tag_ids.len())
+                .await?;
+        }
         let mut tx = self.begin().await?;
         stop_running(&mut tx).await?;
         close_pause(&mut tx).await?;

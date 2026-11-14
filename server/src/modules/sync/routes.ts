@@ -41,6 +41,7 @@ export const SYNCED_TABLES = [
   'display_settings',
   'timesheet_submission',
   'work_location',
+  'org_policy',
 ] as const
 
 const Uuid = Type.String({ format: 'uuid' })
@@ -293,21 +294,15 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
         const orgWorkspaces = new Map(
           (await tx.select({ id: schema.workspace.id, orgId: schema.workspace.orgId }).from(schema.workspace).where(eq(schema.workspace.kind, 'org'))).map((w) => [w.id, w.orgId!]),
         )
-        const visible = orgWorkspaces.size
-          ? await visibleToCaller(
-              tx,
-              request.user!,
-              orgWorkspaces,
-              page.map((r) => ({ ...r, workspaceId: r.workspaceId, table: r.tableName, fields: r.fields as RowState['fields'] })),
-            )
-          : null
-        const shown = visible ? new Set(visible.map((r) => r.seq)) : null
+        const candidates = page.map((r) => ({ ...r, table: r.tableName, fields: r.fields as RowState['fields'] }))
+        // What this person may see of the rows, some of them trimmed (see orgrules.ts).
+        const visible = orgWorkspaces.size ? await visibleToCaller(tx, request.user!, orgWorkspaces, candidates) : candidates
         return {
-          rows: page.filter((r) => !shown || shown.has(r.seq)).map((r) => ({
+          rows: visible.map((r) => ({
             workspaceId: r.workspaceId,
             table: r.tableName,
             rowId: r.rowId,
-            fields: r.fields as RowState['fields'],
+            fields: r.fields,
             deleted: r.deleted,
           })),
           cursor: page.length ? page[page.length - 1]!.seq : cursor,

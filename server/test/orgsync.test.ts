@@ -93,6 +93,11 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     expect(await projects(ADMIN)).toEqual([SECRET, OPEN])
     expect(await projects(OWNER)).toEqual([SECRET, OPEN])
     expect(await projects(BEN)).toEqual([OPEN])
+    // A tag of the hidden project stays hidden with it.
+    const TAG = id(33)
+    expect(await results(ADMIN, [upsert('tag', TAG, 61, { name: 'internal', projectId: SECRET })])).toEqual([{ status: 'applied' }])
+    expect(await pulledIds(BEN)).not.toContain(TAG)
+    expect(await pulledIds(ANNA)).toContain(TAG)
   })
 
   it('lets a project\'s manager run it, but not hand it over', async () => {
@@ -129,7 +134,7 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     })
 
     it('are seen as far as the role reaches', async () => {
-      const shared = [id(10), id(11), id(12), id(30), id(31)]
+      const shared = [id(10), id(11), id(12), id(30), id(31), id(33)]
       const rows = async (who: string) => (await pulledIds(who)).filter((r) => !shared.includes(r))
       expect(await rows(ANNA)).toEqual([E_ANNA])
       expect(await rows(BEN)).toEqual([E_BEN])
@@ -255,6 +260,60 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     // Benn and the admin, who see none of Anna's entries, see where she works.
     for (const who of [BEN, ADMIN, MANAGER]) expect(await pulledIds(who)).toContain(L)
     expect(await results(ANNA, [upsert('work_location', L, 520, { kind: 'home' })])).toEqual([{ status: 'applied' }])
+  })
+
+  describe('policies', () => {
+    const POL = id(70), POL_DEV = id(71)
+    const E1 = id(72), E2 = id(73)
+    const entry = (userId: string, extra: Record<string, unknown> = {}) => ({ userId, startAt: 1_000, endAt: 2_000, note: 'secret', projectId: id(10), tagIds: [id(11)], activityId: id(12), locked: false, ...extra })
+
+    it('are set by people with the right and read by everyone', async () => {
+      expect(await results(ANNA, [upsert('org_policy', POL, 600, { groupPath: null, requireProject: true })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await results(ADMIN, [upsert('org_policy', POL, 600, { groupPath: null, requireProject: true, managerVisibility: 'full' })])).toEqual([{ status: 'applied' }])
+      expect(await pulledIds(BEN)).toContain(POL)
+    })
+
+    it('refuse a finished entry without what the person must give', async () => {
+      // Required project (organization) and tag (the department Anna and the manager are in).
+      expect(await results(ADMIN, [upsert('org_policy', POL_DEV, 610, { groupPath: 'dev', requireTags: true })])).toEqual([{ status: 'applied' }])
+      expect(await results(BEN, [upsert('time_entry', id(74), 620, entry(BEN, { projectId: null }))])).toEqual([{ status: 'rejected', reason: 'policy_project' }])
+      expect(await results(BEN, [upsert('time_entry', id(74), 620, entry(BEN, { tagIds: [] }))])).toEqual([{ status: 'applied' }]) // Ben is in no department
+      expect(await results(ANNA, [upsert('time_entry', E1, 620, entry(ANNA, { tagIds: [] }))])).toEqual([{ status: 'rejected', reason: 'policy_tags' }])
+      expect(await results(ANNA, [upsert('time_entry', E1, 621, entry(ANNA))])).toEqual([{ status: 'applied' }])
+      // A running entry (no end) is not finished yet.
+      expect(await results(ANNA, [upsert('time_entry', E2, 622, entry(ANNA, { endAt: null, projectId: null, tagIds: [] }))])).toEqual([{ status: 'applied' }])
+    })
+
+    it('limit what managers see of their people', async () => {
+      const seen = async (who: string) => {
+        const rows = (await app.inject({ url: '/v1/sync/pull', headers: await headers(who) })).json().rows as { rowId: string; fields: Record<string, { v: unknown }> }[]
+        return rows.find((r) => r.rowId === E1)?.fields
+      }
+      expect((await seen(ANNA))!.note!.v).toBe('secret')
+      expect((await seen(MANAGER))!.note!.v).toBe('secret')
+      await results(ADMIN, [upsert('org_policy', POL_DEV, 630, { managerVisibility: 'hide_notes' })])
+      expect((await seen(MANAGER))!.note!.v).toBe('')
+      expect((await seen(MANAGER))!.projectId!.v).toBe(id(10))
+      expect((await seen(ANNA))!.note!.v, 'the person still sees their own').toBe('secret')
+      await results(ADMIN, [upsert('org_policy', POL_DEV, 640, { managerVisibility: 'totals_only' })])
+      const totals = (await seen(MANAGER))!
+      expect([totals.note!.v, totals.projectId!.v, totals.tagIds!.v]).toEqual(['', null, []])
+      expect(totals.startAt!.v).toBe(1_000)
+    })
+
+    it('can hide who is online', async () => {
+      // Presence is in memory; report as Anna with a connected device.
+      const socket = { readyState: 1, OPEN: 1, send: () => {} }
+      const remove = app.hub.add(ANNA, { socket: socket as never, deviceId: null })
+      const put = async (sub: string) => app.inject({ method: 'PUT', url: `/v1/orgs/${ORG}/presence`, headers: await headers(sub), payload: { state: 'online' } })
+      const list = async (sub: string) => ((await app.inject({ url: `/v1/orgs/${ORG}/presence`, headers: await headers(sub) })).json() as { userId: string }[]).map((p) => p.userId)
+      await put(ANNA)
+      expect(await list(BEN)).toEqual([ANNA])
+      await results(ADMIN, [upsert('org_policy', POL_DEV, 650, { presenceVisibility: 'off' })])
+      expect(await list(BEN)).toEqual([])
+      expect(await list(ANNA)).toEqual([ANNA])
+      remove()
+    })
   })
 
   it('does not change personal workspaces', async () => {

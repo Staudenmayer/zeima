@@ -442,3 +442,41 @@ pub async fn location_set(
     work_changed(&app).await;
     Ok(())
 }
+
+// --------------------------------------------------------------------------
+// Organization policies (shared workspaces)
+// --------------------------------------------------------------------------
+
+#[tauri::command]
+#[specta::specta]
+pub async fn policies_list(state: State<'_, AppState>) -> CmdResult<Vec<zeima_core::policy::OrgPolicy>> {
+    Ok(state.data().list_policies().await?)
+}
+
+/// What applies to the person: the organization's policy and their departments'.
+#[tauri::command]
+#[specta::specta]
+pub async fn policy_effective(state: State<'_, AppState>) -> CmdResult<zeima_core::policy::PolicySettings> {
+    Ok(state.data().effective_policy().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn policy_save(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group_path: Option<String>,
+    settings: zeima_core::policy::PolicySettings,
+) -> CmdResult<zeima_core::policy::OrgPolicy> {
+    let policy = state.data().save_policy(group_path, settings).await?;
+    work_changed(&app).await;
+    Ok(policy)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn policy_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state.data().delete_policy(&id).await?;
+    work_changed(&app).await;
+    Ok(())
+}

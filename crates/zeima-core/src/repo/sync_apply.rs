@@ -630,7 +630,7 @@ impl Core {
         }
 
         let mut values: Vec<(String, Bind)> = Vec::new();
-        if matches!(table, "work_settings" | "display_settings") {
+        if matches!(table, "work_settings" | "display_settings" | "org_policy") {
             // One JSON column holds all the settings. Start from the local
             // ones and lay the incoming fields over them, so a field a local
             // edit protects keeps its value.
@@ -647,6 +647,13 @@ impl Core {
                 Default::default()
             };
             for (name, field) in &write {
+                // A policy's scope is a column of its own.
+                if table == "org_policy" && name == "groupPath" {
+                    if let Some(bind) = bind_of(&field.v) {
+                        values.push(("group_path".into(), bind));
+                    }
+                    continue;
+                }
                 settings.insert(name.clone(), field.v.clone());
             }
             values.push((

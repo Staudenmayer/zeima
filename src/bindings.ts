@@ -188,6 +188,11 @@ export const commands = {
 	 *  details become the error, with its `code`.
 	 */
 	orgRequest: (method: string, path: string, body: string | null) => typedError<string | null, CmdError>(__TAURI_INVOKE("org_request", { method, path, body })),
+	policiesList: () => typedError<OrgPolicy[], CmdError>(__TAURI_INVOKE("policies_list")),
+	/**  What applies to the person: the organization's policy and their departments'. */
+	policyEffective: () => typedError<PolicySettings, CmdError>(__TAURI_INVOKE("policy_effective")),
+	policySave: (groupPath: string | null, settings: PolicySettings) => typedError<OrgPolicy, CmdError>(__TAURI_INVOKE("policy_save", { groupPath, settings })),
+	policyDelete: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("policy_delete", { id })),
 	/**  Lets the person choose an export file and reads it. */
 	importPick: () => typedError<{
 	name: string,
@@ -809,6 +814,9 @@ export type JurisdictionSelection = {
 
 export type LocationKind = "office" | "home" | "travel" | "other";
 
+/**  What managers see of the entries of the people they manage. */
+export type ManagerVisibility = "full" | "hide_notes" | "totals_only";
+
 /**  Ask the main window to open a route (e.g. from the tray). */
 export type Navigate = {
 	path: string,
@@ -856,6 +864,12 @@ export type OAuthProvider = {
 	 */
 	redirect_host?: string | null,
 };
+
+export type OrgPolicy = {
+	id: string,
+	/**  `None`: the whole organization; otherwise a department like `dev/backend`. */
+	groupPath: string | null,
+} & PolicySettings;
 
 export type Pause = {
 	id: string,
@@ -914,10 +928,26 @@ export type PlanStatus = "valid" | "grace" |
 /**  No token, or it lapsed. */
 "free";
 
+export type PolicySettings = {
+	/**  Finished entries must name a project. */
+	requireProject?: boolean,
+	/**  Finished entries must have at least one tag. */
+	requireTags?: boolean,
+	managerVisibility?: ManagerVisibility,
+	presenceVisibility?: PresenceVisibility,
+	/**  Target per week, for comparing with the tracked time (overtime). */
+	weeklyTargetMinutes?: number | null,
+	/**  Suggested idle time before auto-pause; people may choose less. */
+	autoPauseIdleMinutes?: number | null,
+};
+
 /**  Somebody's presence in an organization changed. */
 export type PresenceChanged = {
 	orgId: string,
 };
+
+/**  Whether colleagues see who is online. */
+export type PresenceVisibility = "org" | "off";
 
 /**  Summary of a bundled profile for pickers. */
 export type ProfileInfo = {

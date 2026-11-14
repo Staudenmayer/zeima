@@ -11,6 +11,7 @@ import { ORG_ROLES, type OrgRole, SECURITY } from '../../plugins/auth.ts'
 import { type Actor, authorize, scopeOf } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
 import { PRESENCE_STATES } from '../../plugins/presence.ts'
+import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { audit, auditEntries, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
 
 const Role = Type.Union(ORG_ROLES.map((r) => Type.Literal(r)))
@@ -57,6 +58,11 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     if (!app.db) throw new HttpProblem(503, 'unavailable', 'the database is not configured')
     return app.db
   }
+
+  // On the cloud every organization route needs a plan with organizations.
+  app.addHook('preHandler', async (request) => {
+    if (request.user && app.licensing.enforced) await app.licensing.require(database(), request.user, 'org')
+  })
 
   /** The caller as a member of `orgId`; 403 for anyone else. */
   const actorIn = (request: { user: NonNullable<import('fastify').FastifyRequest['user']> }, orgId: string): Actor => {
@@ -587,8 +593,18 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
     async (request) => {
       const { orgId } = request.params
-      actorIn({ user: request.user! }, orgId)
-      return app.presence.list(orgId, Date.now(), (userId) => app.hub.has(userId))
+      const actor = actorIn({ user: request.user! }, orgId)
+      const present = app.presence.list(orgId, Date.now(), (userId) => app.hub.has(userId))
+      // A person whose policy hides presence is seen only by themselves.
+      const workspace = await orgWorkspaceId(database(), orgId)
+      const policies = workspace ? await loadPolicies(database(), workspace) : []
+      if (policies.length === 0) return present
+      const shown = []
+      for (const p of present) {
+        if (p.userId === actor.user.id) shown.push(p)
+        else if (effective(policies, await departmentsOf(database(), orgId, p.userId)).presenceVisibility === 'org') shown.push(p)
+      }
+      return shown
     },
   )
 

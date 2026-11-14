@@ -29,7 +29,7 @@ const submissions = useSubmissionsStore()
 const work = useWorkStore()
 
 /** Absence requests of other people waiting for a decision. */
-const absenceRequests = ref<Absence[]>([])
+const absenceRequests = computed(() => submissions.absenceRequests)
 const absenceRange = (a: Absence) => (a.startDate === a.endDate ? day(a.startDate) : `${day(a.startDate)} – ${day(a.endDate)}`)
 const typeName = (a: Absence) => {
   const type = work.absenceTypesById.get(a.typeId)
@@ -38,7 +38,7 @@ const typeName = (a: Absence) => {
 async function decideAbsence(a: Absence, approve: boolean, why = '') {
   await run(async () => {
     await call(commands.absenceDecide(a.id, approve, why))
-    absenceRequests.value = await call(commands.absenceRequests())
+    await submissions.load()
   })
 }
 
@@ -55,7 +55,6 @@ async function load() {
   if (!workspaces.inOrg) return
   try {
     await submissions.load()
-    absenceRequests.value = await call(commands.absenceRequests())
     if (org.members.length === 0) await org.load().catch(() => {})
   } catch (err) {
     toast.error(errorMessage(err))
