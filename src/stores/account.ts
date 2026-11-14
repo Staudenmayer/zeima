@@ -21,10 +21,13 @@ export const useAccountStore = defineStore('account', () => {
   /** What can be bought here; empty on servers without billing. */
   const offers = ref<PlanOffer[]>([])
   const subscription = ref<Subscription | null>(null)
+  /** The server address as typed in the sign-in form (shared by Settings and the setup). */
+  const serverDraft = ref('')
 
   async function load() {
     try {
       status.value = await call(commands.accountStatus())
+      serverDraft.value = status.value.serverUrl ?? ''
     } catch {
       // Keychain or server trouble must not break the app.
       status.value = SIGNED_OUT
@@ -81,6 +84,15 @@ export const useAccountStore = defineStore('account', () => {
 
   async function setServer(url: string | null) {
     status.value = await call(commands.accountSetServer(url))
+    serverDraft.value = status.value.serverUrl ?? ''
+  }
+
+  /** Saves the typed server if it changed and signs in; throws on failure or cancel. */
+  async function signInToDraft() {
+    const url = serverDraft.value.trim()
+    if (!url) return
+    if (url !== (status.value.serverUrl ?? '')) await setServer(url)
+    await signIn()
   }
 
   /** Resolves when the browser sign-in is done; throws on failure or cancel. */
@@ -119,5 +131,5 @@ export const useAccountStore = defineStore('account', () => {
   // The backend says when a sync starts or ends; keep the status current.
   void events.syncChanged.listen(() => void loadSync())
 
-  return { status, busy, syncSummary, sync, conflicts, plan, offers, subscription, join, retryConflict, dismissConflict, loadSync, syncNow, load, setServer, signIn, cancel, signOut }
+  return { status, busy, syncSummary, sync, conflicts, plan, offers, subscription, join, retryConflict, dismissConflict, loadSync, syncNow, load, setServer, signIn, signInToDraft, serverDraft, cancel, signOut }
 })

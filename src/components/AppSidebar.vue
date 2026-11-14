@@ -2,6 +2,7 @@
 import type { SidebarProps } from '@/components/ui/sidebar'
 
 import { computed, onMounted, watch } from 'vue'
+import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useAccountStore } from '@/stores/account'
 import { useSubmissionsStore } from '@/stores/submissions'
@@ -11,6 +12,9 @@ import {
   Clock,
   FolderKanban,
   Building2,
+  Check,
+  ChevronsUpDown,
+  User,
   ClipboardCheck,
   Users,
   CalendarDays,
@@ -24,7 +28,8 @@ import {
   Tags,
 } from '@lucide/vue'
 import LogoMark from '@/components/LogoMark.vue'
-import WorkspaceSwitcher from '@/components/WorkspaceSwitcher.vue'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { errorMessage } from '@/lib/ipc'
 import NavMain from '@/components/NavMain.vue'
 import {
   Sidebar,
@@ -36,7 +41,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from '@/components/ui/sidebar'
-//import NavUser from '@/components/NavUser.vue'
+import NavUser from '@/components/NavUser.vue'
 
 const props = withDefaults(defineProps<SidebarProps>(), {
   collapsible: 'icon',
@@ -86,13 +91,13 @@ const system = computed(() => [
   { title: t('nav.settings'), url: '/settings', icon: Settings },
 ])
 
-/*
-const user = computed(() => ({
-  name: 'shadcn',
-  email: 'me@example.com',
-  avatar: '/avatars/shadcn.jpg'
-}))
-*/
+async function pickWorkspace(id: string) {
+  try {
+    await workspaces.switchTo(id)
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
+}
 </script>
 
 <template>
@@ -100,40 +105,48 @@ const user = computed(() => ({
     <SidebarHeader>
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton size="lg" as-child>
+          <!-- With more than one workspace the brand is the workspace switcher. -->
+          <DropdownMenu v-if="workspaces.switchable">
+            <DropdownMenuTrigger as-child>
+              <SidebarMenuButton size="lg" :aria-label="$t('app.switchWorkspace')" class="data-[state=open]:bg-sidebar-accent">
+                <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-blue-600">
+                  <LogoMark on-blue class="size-5" />
+                </div>
+                <div class="grid flex-1 text-left text-sm leading-tight">
+                  <span class="truncate font-semibold">{{ $t('app.name') }}</span>
+                  <span class="truncate text-xs text-muted-foreground">{{ workspaces.inOrg ? workspaces.active?.name : $t('app.personal') }}</span>
+                </div>
+                <ChevronsUpDown class="ml-auto size-4 opacity-60" />
+              </SidebarMenuButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" class="w-(--reka-dropdown-menu-trigger-width) min-w-56">
+              <DropdownMenuItem v-for="w in workspaces.all" :key="w.id" class="gap-2" @click="pickWorkspace(w.id)">
+                <User v-if="w.kind === 'personal'" class="size-4" />
+                <Building2 v-else class="size-4" />
+                <span class="flex-1 truncate">{{ w.kind === 'personal' ? $t('app.personal') : w.name }}</span>
+                <Check v-if="w.active" class="size-4" />
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <SidebarMenuButton v-else size="lg" as-child>
             <RouterLink to="/">
               <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-blue-600">
                 <LogoMark on-blue class="size-5" />
               </div>
               <div class="grid flex-1 text-left text-sm leading-tight">
                 <span class="truncate font-semibold">{{ $t('app.name') }}</span>
-                <span class="truncate text-xs text-muted-foreground">{{ workspaces.inOrg ? workspaces.active?.name : $t('app.personal') }}</span>
+                <span class="truncate text-xs text-muted-foreground">{{ $t('app.personal') }}</span>
               </div>
             </RouterLink>
           </SidebarMenuButton>
         </SidebarMenuItem>
-        <WorkspaceSwitcher />
       </SidebarMenu>
     </SidebarHeader>
     <SidebarContent>
       <NavMain :items="tracking" />
     </SidebarContent>
     <SidebarFooter>
-      <!--<NavUser :user="user"></NavUser>-->
-      <NavMain :items="system" />
-      <div class="px-2 pb-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-        <p class="truncate">
-          {{ account.status.signedIn ? $t('account.signedInAs', { name: account.status.user?.email ?? account.status.user?.name ?? '' }) : $t('app.local') }}
-        </p>
-        <RouterLink
-          v-if="account.syncSummary"
-          to="/settings"
-          class="block truncate hover:underline"
-          :class="account.syncSummary.problem ? 'text-amber-600 dark:text-amber-400' : ''"
-        >
-          {{ $t(account.syncSummary.key, account.syncSummary.params ?? {}) }}
-        </RouterLink>
-      </div>
+      <NavUser :items="system" />
     </SidebarFooter>
     <SidebarRail />
   </Sidebar>

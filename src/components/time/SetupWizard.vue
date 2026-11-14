@@ -20,6 +20,8 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useSetupStore } from '@/stores/setup'
 import { useWorkStore } from '@/stores/work'
+import { useAccountStore } from '@/stores/account'
+import AccountSignIn from './AccountSignIn.vue'
 import CountryPicker from './CountryPicker.vue'
 
 // Setup of the whole workspace. Opens on the first start (until the country
@@ -33,16 +35,22 @@ const activities = useActivitiesStore()
 const projects = useProjectsStore()
 const costCenters = useCostCentersStore()
 const setup = useSetupStore()
+const account = useAccountStore()
 
-const STEPS = ['you', 'workWeek', 'activities', 'projects', 'costCenters', 'absences', 'autoPause', 'review'] as const
+const STEPS = ['account', 'you', 'workWeek', 'activities', 'projects', 'costCenters', 'absences', 'autoPause', 'review'] as const
 const LAST = STEPS.length - 1
 
 const open = ref(false)
 const step = ref(0)
 const saving = ref(false)
 const key = computed(() => STEPS[step.value])
+/** On the account step with nothing configured: offer to go on without signing in. */
+const noServerYet = computed(
+  () => key.value === 'account' && !account.status.signedIn && !account.busy && !account.serverDraft.trim(),
+)
 
-// 1. You
+// 1. Account (optional, nothing to apply: signing in happens right there)
+// 2. You
 const profileId = ref('AT')
 const region = ref<string | null>(null)
 const prefs = reactive({
@@ -99,6 +107,7 @@ watch(
     reset()
     profileId.value = work.jurisdiction?.profileId ?? (await commands.profileSuggest()) ?? 'AT'
     region.value = work.jurisdiction?.region ?? null
+    await account.load()
     step.value = 0
     open.value = true
   },
@@ -194,6 +203,12 @@ const summary = computed(() => {
   const none = t('setup.review.none')
   const days = week.days.map((on, i) => (on ? weekdayLabel(i) : '')).filter(Boolean).join(', ') || none
   return [
+    {
+      label: t('setup.review.account'),
+      value: account.status.signedIn
+        ? t('account.signedInAs', { name: account.status.user?.email ?? account.status.user?.name ?? '' })
+        : t('setup.account.skipped'),
+    },
     { label: t('setup.review.region'), value: `${profileId.value}${region.value ? ` · ${region.value}` : ''}` },
     { label: t('setup.review.workWeek'), value: t('setup.review.workWeekValue', { hours: week.hours, days, vacation: week.vacation }) },
     { label: t('setup.review.activities'), value: picked.value.join(', ') || none },
@@ -374,8 +389,11 @@ async function skip() {
           <p class="text-sm text-muted-foreground">{{ $t(`setup.${key}.description`) }}</p>
         </div>
 
-        <!-- 1. You -->
-        <div v-if="key === 'you'" class="grid gap-4">
+        <!-- 1. Account -->
+        <AccountSignIn v-if="key === 'account'" input-id="setup-server" :hint="$t('setup.account.hint')" />
+
+        <!-- 2. You -->
+        <div v-else-if="key === 'you'" class="grid gap-4">
           <CountryPicker v-model:profile-id="profileId" v-model:region="region" />
           <div class="grid gap-2 sm:grid-cols-2 sm:items-center">
             <Label>{{ $t('settings.theme') }}</Label>
@@ -613,7 +631,10 @@ async function skip() {
           <Button variant="outline" :disabled="step === 0 || saving" @click="step--">{{ $t('setup.back') }}</Button>
           <Button variant="ghost" :disabled="saving" @click="skip">{{ $t('setup.skip') }}</Button>
         </div>
-        <Button v-if="step < LAST" @click="step++">{{ $t('setup.next') }}</Button>
+        <div v-if="step < LAST" class="flex gap-2">
+          <Button v-if="noServerYet" variant="outline" @click="step++">{{ $t('account.continueLocal') }}</Button>
+          <Button @click="step++">{{ $t('setup.next') }}</Button>
+        </div>
         <Button v-else :disabled="saving" @click="finish">{{ saving ? $t('setup.saving') : $t('setup.finish') }}</Button>
       </div>
     </DialogContent>

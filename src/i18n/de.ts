@@ -2,7 +2,7 @@ import type en from './en'
 
 // `{'@'}` escapes "@", which vue-i18n otherwise treats as a linked message.
 const de: typeof en = {
-  app: { name: 'Zeima', personal: 'Persönlicher Bereich', local: 'Nur lokal' },
+  app: { name: 'Zeima', personal: 'Persönlicher Bereich', local: 'Nur lokal', localUser: 'Lokaler Benutzer', switchWorkspace: 'Arbeitsbereich wechseln' },
   nav: {
     dashboard: 'Übersicht',
     timesheet: 'Zeiterfassung',
@@ -61,6 +61,10 @@ const de: typeof en = {
     noCostCenters: 'Keine Kostenstellen angelegt.',
   },
   timesheet: {
+    addPeople: 'Personen hinzufügen',
+    mePlus: 'Ich + {n}',
+    me: 'Ich',
+    peopleHint: 'Weitere Personen in dieser Ansicht zeigen',
     day: 'Tag',
     week: 'Woche',
     today: 'Heute',
@@ -420,12 +424,17 @@ const de: typeof en = {
   },
   account: {
     title: 'Konto',
-    description: 'Melde dich an einem Zeima-Server an, um deine Daten zu synchronisieren und deine Organisation zu nutzen. Ohne Server arbeitet Zeima vollständig auf diesem Gerät.',
-    server: 'Server',
+    description: 'Melde dich an, um deine Daten zwischen Geräten zu synchronisieren und deine Organisation zu nutzen. Ohne Server arbeitet Zeima vollständig auf diesem Gerät.',
+    signInHint: 'Gib die Serveradresse ein und melde dich an, um geräteübergreifend zu synchronisieren. Kein Server? Zeima arbeitet vollständig auf diesem Gerät.',
+    signedInBox: 'Angemeldet',
+    continueLocal: 'Ohne Anmeldung fortfahren',
+    menu: 'Kontomenü',
+    localSub: 'Nicht angemeldet. Melde dich an, um zu synchronisieren.',
+    logIn: 'Anmelden',
+    logInToSync: 'Zum Synchronisieren anmelden',
+    accountAndSync: 'Konto & Sync',
+    server: 'Zeima-Server',
     serverPlaceholder: 'zeima.beispiel.de',
-    serverHint: 'Leer lassen, um lokal zu bleiben. Ein anderer Server meldet dich ab.',
-    save: 'Speichern',
-    serverSaved: 'Server gespeichert',
     signIn: 'Anmelden',
     signOut: 'Abmelden',
     signedInAs: 'Angemeldet als {name}',
@@ -466,6 +475,13 @@ const de: typeof en = {
     failed: 'Die Einrichtung konnte nicht abgeschlossen werden: {error}',
     add: 'Hinzufügen',
     allExist: 'Alle Vorschläge sind bereits in deiner Liste.',
+    account: {
+      label: 'Konto',
+      title: 'Konto',
+      description: 'Melde dich an, um deine Daten zwischen Geräten zu synchronisieren. Du kannst das überspringen und lokal weiterarbeiten; angemeldet wird später im Kontomenü.',
+      hint: 'Kein Server? Zeima arbeitet vollständig auf diesem Gerät, und du kannst dich jederzeit im Kontomenü anmelden.',
+      skipped: 'Übersprungen: nur lokal',
+    },
     you: {
       label: 'Du',
       title: 'Deine Einstellungen',
@@ -516,6 +532,7 @@ const de: typeof en = {
       label: 'Übersicht',
       title: 'Übersicht',
       description: 'Das wird eingerichtet.',
+      account: 'Konto',
       region: 'Region',
       workWeek: 'Arbeitswoche',
       workWeekValue: '{hours} h an {days}, {vacation} Urlaubstage',
@@ -770,6 +787,8 @@ const de: typeof en = {
     },
     onlineCount: 'niemand online | 1 Person online | {n} Personen online',
     allDepartments: 'Alle',
+    nDepartments: '{n} Abteilungen',
+    filterDepartments: 'Nach Abteilung filtern',
     nobodyOnline: 'Gerade ist niemand online.',
     presenceHint: 'Alle in der Organisation sehen diese Liste. Das Projekt erscheint nur, wenn die Person es freigegeben hat (Einstellungen).',
     presenceStates: { online: 'Online', tracking: 'Erfasst', in_meeting: 'Im Termin', away: 'Abwesend' },

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ChevronDown, UserPlus } from '@lucide/vue'
 import type { AddonTimelineItem, TimeEntry } from '@/bindings'
+import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useFormat } from '@/composables/useFormat'
 import { type Anchor, pointAnchor } from '@/lib/anchor'
 import { textOn } from '@/lib/colors'
@@ -14,7 +17,8 @@ import { useSettingsStore } from '@/stores/settings'
 // One day as a horizontal timeline: hours run left to right across the whole
 // width, entries are bars sized by duration. Entries that do not overlap use
 // the full height; overlapping ones share it. The hours shown are 07:00 to
-// 20:00, widened to fit entries and the current time.
+// 20:00, widened to fit entries and the current time. Managers can add other
+// people: each gets a row of their own under the person's own (read only).
 
 const props = defineProps<{
   day: DayRange
@@ -24,6 +28,12 @@ const props = defineProps<{
   now: number
   /** Addon timeline items, e.g. calendar events. */
   events?: AddonTimelineItem[]
+  /** Other people's rows, in the order shown. */
+  others?: { id: string; name: string; entries: TimeEntry[] }[]
+  /** People that can be added (empty: no picker). */
+  candidates?: { id: string; name: string }[]
+  /** The ids of the people added. */
+  selected?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -33,6 +43,8 @@ const emit = defineEmits<{
   create: [at: number]
   /** Click on a timed timeline item: create an entry from it. */
   track: [item: AddonTimelineItem]
+  /** The people added changed. */
+  'update:selected': [ids: string[]]
 }>()
 
 const { t } = useI18n()
@@ -44,13 +56,15 @@ const format = useFormat()
 const DEFAULT_FIRST = 7
 const DEFAULT_LAST = 20
 
-const segments = computed(() =>
-  props.entries.map((entry) => ({
+const segmentsOf = (entries: TimeEntry[]) =>
+  entries.map((entry) => ({
     entry,
     start: Math.max(entry.startAt, props.day.from),
     end: Math.min(entry.endAt ?? props.now, props.day.to),
-  })),
-)
+  }))
+const segments = computed(() => segmentsOf(props.entries))
+const otherSegments = computed(() => (props.others ?? []).map((o) => ({ ...o, segments: segmentsOf(o.entries) })))
+const withOthers = computed(() => otherSegments.value.length > 0)
 const eventSegments = computed(() =>
   (props.events ?? [])
     .filter((i) => !i.allDay && i.startAt < props.day.to && i.endAt > props.day.from)
@@ -62,7 +76,7 @@ const isToday = computed(() => props.now >= props.day.from && props.now < props.
 
 /** First and last (exclusive) hour shown. */
 const shown = computed(() => {
-  const spans = [...segments.value, ...eventSegments.value].map((s) => [s.start, s.end] as const)
+  const spans = [...segments.value, ...otherSegments.value.flatMap((o) => o.segments), ...eventSegments.value].map((s) => [s.start, s.end] as const)
   if (isToday.value) spans.push([props.now, props.now])
   let first = DEFAULT_FIRST
   let last = DEFAULT_LAST
@@ -98,8 +112,8 @@ function place<T extends { start: number; end: number; lane: number; lanes: numb
   }
 }
 
-const blocks = computed(() =>
-  layoutLanes(segments.value).map((b) => {
+function blocksOf(segs: ReturnType<typeof segmentsOf>) {
+  return layoutLanes(segs).map((b) => {
     const activity = b.entry.activityId ? activities.byId.get(b.entry.activityId) : undefined
     const project = b.entry.projectId ? projects.byId.get(b.entry.projectId) : undefined
     const color = activity?.color ?? project?.color
@@ -115,8 +129,26 @@ const blocks = computed(() =>
       // Fewer rows where the bar is crowded.
       roomy: b.lanes <= 2,
     }
-  }),
-)
+  })
+}
+
+/** The person's own row first, then the others'. */
+const LANE_HEIGHT = 56
+const rows = computed(() => {
+  const own = { id: 'me', name: t('timesheet.me'), mine: true, total: props.total, blocks: blocksOf(segments.value) }
+  const others = otherSegments.value.map((o) => ({
+    id: o.id,
+    name: o.name,
+    mine: false,
+    total: o.segments.reduce((n, sg) => n + Math.max(0, sg.end - sg.start), 0),
+    blocks: blocksOf(o.segments),
+  }))
+  return [own, ...others].map((r) => ({
+    ...r,
+    // Alone, the row fills the page; with others each row is as tall as its lanes need.
+    minHeight: withOthers.value ? `${Math.max(2, ...r.blocks.map((b) => b.lanes)) * LANE_HEIGHT + 8}px` : undefined,
+  }))
+})
 
 const eventBlocks = computed(() =>
   layoutLanes(eventSegments.value).map((b) => {
@@ -148,6 +180,11 @@ function onBlockClick(entry: TimeEntry, event: MouseEvent) {
   emit('edit', entry, pointAnchor(el, pointer ? event.clientY : el.getBoundingClientRect().top, pointer ? event.clientX : undefined))
 }
 
+const picked = computed(() => props.selected ?? [])
+function togglePerson(id: string) {
+  emit('update:selected', picked.value.includes(id) ? picked.value.filter((x) => x !== id) : [...picked.value, id])
+}
+
 function onTrackDblClick(event: MouseEvent) {
   const el = event.currentTarget as HTMLElement
   if (event.target !== el) return
@@ -163,9 +200,28 @@ function onTrackDblClick(event: MouseEvent) {
 <template>
   <div data-day-timeline class="flex min-h-80 flex-col overflow-auto rounded-lg border">
     <div class="flex min-w-[720px] flex-1 flex-col">
-      <div class="flex items-baseline justify-between gap-3 border-b px-3 py-1.5 text-xs">
+      <div class="flex items-center justify-between gap-3 border-b px-3 py-1.5 text-xs">
         <span class="font-medium">{{ format.day(day.from) }}</span>
-        <span class="tabular-nums text-muted-foreground">{{ settings.formatDuration(total) }}</span>
+        <div class="flex items-center gap-3">
+          <span class="tabular-nums text-muted-foreground">{{ settings.formatDuration(total) }}</span>
+          <DropdownMenu v-if="candidates?.length">
+            <DropdownMenuTrigger as-child>
+              <Button variant="outline" size="sm" class="h-7 gap-1.5 text-xs" :title="$t('timesheet.peopleHint')">
+                <UserPlus class="size-3.5" />
+                {{ picked.length ? $t('timesheet.mePlus', { n: picked.length }) : $t('timesheet.addPeople') }}
+                <ChevronDown class="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="max-h-64 min-w-56 overflow-y-auto">
+              <DropdownMenuCheckboxItem
+                v-for="c in candidates"
+                :key="c.id"
+                :model-value="picked.includes(c.id)"
+                @select.prevent="togglePerson(c.id)"
+              >{{ c.name }}</DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
       <ul v-if="allDay.length" class="flex flex-wrap gap-1 border-b px-3 py-1.5">
         <li
@@ -178,7 +234,7 @@ function onTrackDblClick(event: MouseEvent) {
       </ul>
 
       <!-- Hours -->
-      <div class="relative mx-3 h-5 border-b">
+      <div class="relative mr-3 h-5 border-b" :class="withOthers ? 'ml-[calc(0.75rem+128px)]' : 'ml-3'">
         <span
           v-for="(label, i) in hourLabels"
           :key="label.h"
@@ -188,60 +244,74 @@ function onTrackDblClick(event: MouseEvent) {
         >{{ label.label }}</span>
       </div>
 
-      <!-- Track -->
-      <div class="relative mx-3 mb-3 min-h-40 flex-1" @dblclick="onTrackDblClick">
-        <div
-          v-for="label in hourLabels"
-          :key="label.h"
-          class="pointer-events-none absolute inset-y-0 border-l border-dashed border-border/70"
-          :style="{ left: `${label.left}%` }"
-        />
-        <button
-          v-for="ev in eventBlocks"
-          :key="`${ev.item.addonId}/${ev.item.id}`"
-          type="button"
-          class="absolute flex flex-col justify-center overflow-hidden rounded-md border border-dashed px-1.5 text-left text-[11px] leading-tight text-foreground transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:brightness-125"
-          :style="ev.style"
-          :title="eventTooltip(ev.item)"
-          :aria-label="`${$t('timesheet.trackEvent')}: ${ev.item.title}`"
-          @click="emit('track', ev.item)"
-        >
-          <span class="truncate font-medium">{{ ev.item.title }}</span>
-          <span v-if="ev.item.detail" class="truncate text-muted-foreground">{{ ev.item.detail }}</span>
-        </button>
-        <button
-          v-for="b in blocks"
-          :key="b.entry.id"
-          type="button"
-          class="absolute flex flex-col justify-center gap-0.5 overflow-hidden rounded-md px-2 text-left text-[11px] leading-tight shadow-xs transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:brightness-125"
-          :class="b.entry.endAt === null ? 'ring-1 ring-green-500/60' : ''"
-          :style="b.style"
-          :title="tooltip(b.entry, b.activity?.name, b.project?.name)"
-          @click="onBlockClick(b.entry, $event)"
-        >
-          <span class="flex min-w-0 items-center gap-1">
-            <span class="truncate font-medium">{{ b.activity?.name ?? $t('activities.none') }}</span>
-            <span
-              v-if="b.entry.billable"
-              class="ml-auto shrink-0 rounded-sm bg-background/90 px-1 text-[10px] font-semibold text-foreground"
-              :title="$t('entry.billable')"
-            >€</span>
-          </span>
-          <span
-            v-if="b.project"
-            class="flex w-fit max-w-full min-w-0 items-center gap-1 rounded-sm bg-background/90 px-1.5 py-0.5 font-medium text-foreground"
-          >
-            <span class="truncate">{{ b.project.name }}</span>
-            <span v-if="b.project.alias" class="shrink-0 font-mono text-[10px] text-muted-foreground">{{ b.project.alias }}</span>
-          </span>
-          <span v-if="b.roomy" class="truncate tabular-nums opacity-75">{{ timeRange(b.entry) }}</span>
-          <span v-if="b.roomy && b.entry.note" class="truncate opacity-75">{{ b.entry.note }}</span>
-        </button>
-        <div
-          v-if="isToday"
-          class="pointer-events-none absolute inset-y-0 z-[1] border-l-2 border-red-500"
-          :style="{ left: `${nowLeft}%` }"
-        />
+      <!-- Tracks: the person's own, then one per added person -->
+      <div class="mx-3 mb-3 flex min-h-40 flex-1 flex-col gap-2">
+        <div v-for="row in rows" :key="row.id" class="flex min-h-0 flex-1 gap-2" :style="{ minHeight: row.minHeight }">
+          <div v-if="withOthers" class="w-30 shrink-0 pt-1.5 text-sm leading-4">
+            <p class="truncate font-medium">{{ row.name }}</p>
+            <p class="text-xs tabular-nums text-muted-foreground">{{ settings.formatDuration(row.total) }}</p>
+          </div>
+          <div class="relative min-w-0 flex-1" @dblclick="row.mine && onTrackDblClick($event)">
+            <div
+              v-for="label in hourLabels"
+              :key="label.h"
+              class="pointer-events-none absolute inset-y-0 border-l border-dashed border-border/70"
+              :style="{ left: `${label.left}%` }"
+            />
+            <template v-if="row.mine">
+              <button
+                v-for="ev in eventBlocks"
+                :key="`${ev.item.addonId}/${ev.item.id}`"
+                type="button"
+                class="absolute flex flex-col justify-center overflow-hidden rounded-md border border-dashed px-1.5 text-left text-[11px] leading-tight text-foreground transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:brightness-125"
+                :style="ev.style"
+                :title="eventTooltip(ev.item)"
+                :aria-label="`${$t('timesheet.trackEvent')}: ${ev.item.title}`"
+                @click="emit('track', ev.item)"
+              >
+                <span class="truncate font-medium">{{ ev.item.title }}</span>
+                <span v-if="ev.item.detail" class="truncate text-muted-foreground">{{ ev.item.detail }}</span>
+              </button>
+            </template>
+            <component
+              :is="row.mine ? 'button' : 'div'"
+              v-for="b in row.blocks"
+              :key="b.entry.id"
+              :type="row.mine ? 'button' : undefined"
+              class="absolute flex flex-col justify-center gap-0.5 overflow-hidden rounded-md px-2 text-left text-[11px] leading-tight shadow-xs"
+              :class="[
+                b.entry.endAt === null ? 'ring-1 ring-green-500/60' : '',
+                row.mine ? 'transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:brightness-125' : '',
+              ]"
+              :style="b.style"
+              :title="tooltip(b.entry, b.activity?.name, b.project?.name)"
+              @click="row.mine && onBlockClick(b.entry, $event)"
+            >
+              <span class="flex min-w-0 items-center gap-1">
+                <span class="truncate font-medium">{{ b.activity?.name ?? $t('activities.none') }}</span>
+                <span
+                  v-if="b.entry.billable"
+                  class="ml-auto shrink-0 rounded-sm bg-background/90 px-1 text-[10px] font-semibold text-foreground"
+                  :title="$t('entry.billable')"
+                >€</span>
+              </span>
+              <span
+                v-if="b.project"
+                class="flex w-fit max-w-full min-w-0 items-center gap-1 rounded-sm bg-background/90 px-1.5 py-0.5 font-medium text-foreground"
+              >
+                <span class="truncate">{{ b.project.name }}</span>
+                <span v-if="b.project.alias" class="shrink-0 font-mono text-[10px] text-muted-foreground">{{ b.project.alias }}</span>
+              </span>
+              <span v-if="b.roomy" class="truncate tabular-nums opacity-75">{{ timeRange(b.entry) }}</span>
+              <span v-if="b.roomy && b.entry.note" class="truncate opacity-75">{{ b.entry.note }}</span>
+            </component>
+            <div
+              v-if="isToday"
+              class="pointer-events-none absolute inset-y-0 z-[1] border-l-2 border-red-500"
+              :style="{ left: `${nowLeft}%` }"
+            />
+          </div>
+        </div>
       </div>
     </div>
   </div>

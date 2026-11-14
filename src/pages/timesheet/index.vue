@@ -45,6 +45,9 @@ import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useTagsStore } from '@/stores/tags'
 import { useTimerStore } from '@/stores/timer'
+import { useAccountStore } from '@/stores/account'
+import { useOrgStore } from '@/stores/org'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 definePage({ meta: { titleKey: 'nav.timesheet', fill: true } })
 
@@ -55,6 +58,9 @@ const settings = useSettingsStore()
 const tags = useTagsStore()
 const timer = useTimerStore()
 const format = useFormat()
+const account = useAccountStore()
+const org = useOrgStore()
+const workspaces = useWorkspaceStore()
 
 // Remembered: day/week and calendar/table across restarts; the shown date
 // only while the app runs (a restart starts on today again).
@@ -67,6 +73,41 @@ const range = computed(() => ({ from: days.value[0].from, to: days.value[days.va
 const { entries, summaries } = useEntries(range, days)
 const { byDate, holidayName } = useWorkDays(range)
 const { items: timeline } = useTimeline(range)
+
+// Owners and managers can lay other people's days next to their own (day view).
+const canPickPeople = computed(() => workspaces.inOrg && (workspaces.role === 'owner' || workspaces.role === 'manager'))
+watch(
+  () => (canPickPeople.value ? workspaces.active?.orgId : null),
+  (orgId) => {
+    if (orgId && org.people.length === 0) void org.loadGlance(orgId).catch(() => {})
+  },
+  { immediate: true },
+)
+const candidates = computed(() =>
+  canPickPeople.value
+    ? org.people
+        .filter((p) => p.id !== account.status.user?.id)
+        .map((p) => ({ id: p.id, name: p.name || org.nameOf(p.id) || t('team.someone') }))
+    : [],
+)
+/** Added people, kept while the page is open; unknown ones (another workspace) drop out. */
+const peopleIds = ref<string[]>([])
+const shownIds = computed(() => (canPickPeople.value ? peopleIds.value.filter((id) => candidates.value.some((c) => c.id === id)) : []))
+const otherDays = ref<{ id: string; name: string; entries: TimeEntry[] }[]>([])
+let loadToken = 0
+async function loadOthers() {
+  const token = ++loadToken
+  const ids = mode.value === 'day' && view.value === 'calendar' ? shownIds.value : []
+  const rows = await Promise.all(
+    ids.map(async (id) => ({
+      id,
+      name: candidates.value.find((c) => c.id === id)?.name ?? '',
+      entries: await call(commands.teamEntries(id, range.value)).catch(() => [] as TimeEntry[]),
+    })),
+  )
+  if (token === loadToken) otherDays.value = rows
+}
+watch([shownIds, range, mode, view], () => void loadOthers(), { immediate: true })
 
 const title = computed(() =>
   mode.value === 'day'
@@ -304,6 +345,10 @@ async function confirmSplit() {
     :total="summaries[0]?.totalMs ?? 0"
     :now="timer.now"
     :events="timeline"
+    :others="otherDays"
+    :candidates="candidates"
+    :selected="shownIds"
+    @update:selected="peopleIds = $event"
     @edit="openPopover"
     @create="createAt"
     @track="track"
