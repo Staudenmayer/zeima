@@ -191,6 +191,14 @@ What 2.0 deliberately does not include, and why:
 - [x] **Meetings visible to colleagues as "busy" only.** Every member can add people in the timesheet; the server's free/busy gives meetings and approved absences as Busy / Absent blocks, never the title, note or activity. (The server already answered this; the app now shows it in the day, week and table views.)
 - [x] **Meeting rooms with booking conflicts.** Admins keep a list of rooms (Meetings → Rooms); a meeting picks one; the server refuses overlapping bookings, repeats included, and the dialog marks rooms booked at the chosen time. Open: a booking refused after the fact (two people at once) is dropped silently on the device that sent it, and the Organization page has no rooms tab yet (they are kept from the Meetings page).
 
+**Planned: answer one date of a repeating meeting.** Today a person's answer (accept, maybe, decline) belongs to the whole meeting, so declining one date declines the whole series. Wanted: a repeating meeting keeps the series answer, and a person can override a single date ("Decline this one"; open: whether "Accept only this one" should exist as well).
+
+- [ ] Core: `meeting_response` gets an optional occurrence date (migration; a series answer has none, one live answer per person, meeting and date; the id is derived from those three). A date's own answer wins over the series answer for that date.
+- [ ] Core: `respond_to_meeting` takes an optional date; `list_meetings` gives each occurrence its own answer (`my_status`, `responses`) and the organizer's counts follow it.
+- [ ] Server: sync rules accept the dated answers (only for a meeting the person is asked to); free/busy and the presence check (in a meeting right now) skip a date the person declined.
+- [ ] App: the Meetings page offers "Decline this one" next to the series answer for repeating meetings, and shows which date is overridden.
+- [ ] Tests (core, sync rules, free/busy) and the click prototype.
+
 **Roles made of permissions** (done in the repository): the four fixed roles are now defaults of a permission set (view, edit, delete per resource, with own/department/everyone reach for views); admins change them and create roles of their own, with the rule that nobody grants what they do not hold. Open: the click prototype and a per-role table of what the desktop hides for the people with only some permissions (the server already refuses everything).
 
 **Before tagging 2.0.0:** run `deploy/e2e/org-smoke.mjs` and `deploy/e2e/smoke.mjs` against the real stack; try two apps (Linux plus Windows or macOS) on one organization by hand: invite, switch workspace, track, request and approve an absence, create a meeting; fix the updater key password secret; then `node scripts/version.mjs set 2.0.0`, commit and tag (the repository is still at the old version).
