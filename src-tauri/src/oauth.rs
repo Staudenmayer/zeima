@@ -272,7 +272,14 @@ fn refresh(
 
 /// Access tokens in memory: (addon, provider) → (token, valid until ms).
 #[derive(Default)]
-pub struct TokenCache(Mutex<HashMap<(String, String), (String, i64)>>);
+pub struct TokenCache {
+    tokens: Mutex<HashMap<(String, String), (String, i64)>>,
+    /// One refresh at a time. Refresh tokens are rotated (each is good once):
+    /// when several requests find the cache empty together (at startup) and
+    /// all refresh with the same token, all but the first are refused and the
+    /// account would be disconnected.
+    refreshing: Mutex<()>,
+}
 
 impl TokenCache {
     fn key(addon_id: &str, provider_id: &str) -> (String, String) {
@@ -280,7 +287,7 @@ impl TokenCache {
     }
 
     fn get(&self, addon_id: &str, provider_id: &str, now: i64) -> Option<String> {
-        let map = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let map = self.tokens.lock().unwrap_or_else(|e| e.into_inner());
         map.get(&Self::key(addon_id, provider_id))
             .filter(|(_, until)| *until > now)
             .map(|(token, _)| token.clone())
@@ -289,14 +296,14 @@ impl TokenCache {
     fn put(&self, addon_id: &str, provider_id: &str, token: &TokenResponse, now: i64) {
         let lifetime = token.expires_in.unwrap_or(DEFAULT_EXPIRES_IN_S) * 1000;
         let until = now + (lifetime - EXPIRY_MARGIN_MS).max(0);
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).insert(
+        self.tokens.lock().unwrap_or_else(|e| e.into_inner()).insert(
             Self::key(addon_id, provider_id),
             (token.access_token.clone(), until),
         );
     }
 
     pub fn forget(&self, addon_id: &str, provider_id: Option<&str>) {
-        self.0
+        self.tokens
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .retain(|(a, p), _| !(a == addon_id && provider_id.is_none_or(|id| id == p)));
@@ -365,25 +372,42 @@ pub fn access_token(
     if let Some(token) = cache.get(addon_id, &provider.id, now) {
         return Ok(Some(token));
     }
-    let name = entry_name(addon_id, &secret_name(&provider.id));
-    let Some(refresh_token) = secrets.get(&name)? else {
-        return Ok(None);
-    };
-    match refresh(post, provider, &refresh_token) {
-        Ok(token) => {
-            // Providers may rotate the refresh token.
-            if let Some(new) = token.refresh_token.as_deref().filter(|t| *t != refresh_token) {
-                secrets.set(&name, new)?;
-            }
-            cache.put(addon_id, &provider.id, &token, now);
-            Ok(Some(token.access_token))
-        }
-        Err(TokenError::Revoked(_)) => {
-            secrets.delete(&name)?;
-            Ok(None)
-        }
-        Err(TokenError::Other(e)) => Err(format!("{}: {e}", provider.name)),
+    let _one_at_a_time = cache.refreshing.lock().unwrap_or_else(|e| e.into_inner());
+    // Whoever was ahead of us has refreshed already.
+    if let Some(token) = cache.get(addon_id, &provider.id, now) {
+        return Ok(Some(token));
     }
+    let name = entry_name(addon_id, &secret_name(&provider.id));
+    // A second round only when another instance rotated the token meanwhile.
+    for _ in 0..2 {
+        let Some(refresh_token) = secrets.get(&name)? else {
+            return Ok(None);
+        };
+        match refresh(post, provider, &refresh_token) {
+            Ok(token) => {
+                // The new access token first: if keeping the rotated refresh
+                // token fails, this session still works.
+                cache.put(addon_id, &provider.id, &token, now);
+                // Providers may rotate the refresh token; the old one is dead then.
+                if let Some(new) = token.refresh_token.as_deref().filter(|t| *t != refresh_token) {
+                    if secrets.set(&name, new).is_err() {
+                        secrets.set(&name, new)?;
+                    }
+                }
+                return Ok(Some(token.access_token));
+            }
+            Err(TokenError::Revoked(_)) => {
+                // Only the token we used is dead; a newer one (stored by
+                // another instance) is not ours to delete.
+                if secrets.get(&name)?.as_deref() == Some(refresh_token.as_str()) {
+                    secrets.delete(&name)?;
+                    return Ok(None);
+                }
+            }
+            Err(TokenError::Other(e)) => return Err(format!("{}: {e}", provider.name)),
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -630,6 +654,83 @@ mod tests {
         );
         assert_eq!(seen.lock().unwrap()[1]["refresh_token"], "rt-2");
         assert_eq!(secrets.get("addon:dev.a:oauth:ms").unwrap(), None);
+    }
+
+    /// Many requests at once with an empty cache (the app's start): the refresh
+    /// token is good once, so exactly one of them may use it.
+    #[test]
+    fn parallel_requests_refresh_once_and_stay_connected() {
+        let secrets = Arc::new(MemorySecrets::default());
+        secrets.set("addon:dev.a:oauth:ms", "rt-1").unwrap();
+        let cache = Arc::new(TokenCache::default());
+        let used = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log = used.clone();
+        let post: PostForm = Arc::new(move |_, form| {
+            let token = form.iter().find(|(k, _)| k == "refresh_token").unwrap().1.clone();
+            let mut used = log.lock().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            // Rotation: each refresh token works once.
+            if used.contains(&token) || token != "rt-1" && token != "rt-2" {
+                return Ok((400, r#"{"error":"invalid_grant"}"#.to_string()));
+            }
+            used.push(token);
+            Ok((
+                200,
+                r#"{"access_token":"at-2","refresh_token":"rt-2","expires_in":300}"#.to_string(),
+            ))
+        });
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let (secrets, cache, post) = (secrets.clone(), cache.clone(), post.clone());
+                std::thread::spawn(move || {
+                    access_token("dev.a", &provider(), secrets.as_ref(), &post, &cache, 0)
+                })
+            })
+            .collect();
+        for t in threads {
+            assert_eq!(t.join().unwrap().unwrap().as_deref(), Some("at-2"));
+        }
+        assert_eq!(used.lock().unwrap().len(), 1);
+        assert_eq!(
+            secrets.get("addon:dev.a:oauth:ms").unwrap().as_deref(),
+            Some("rt-2")
+        );
+    }
+
+    /// An instance that lost the race to rotate must not delete the winner's token.
+    #[test]
+    fn a_revoked_old_token_does_not_delete_a_newer_one() {
+        let secrets = MemorySecrets::default();
+        secrets.set("addon:dev.a:oauth:ms", "rt-1").unwrap();
+        let swapped = Arc::new(Mutex::new(false));
+        let handle = swapped.clone();
+        let store = Arc::new(secrets);
+        let inner = store.clone();
+        // The first refresh is refused, and meanwhile "another instance" stored rt-9.
+        let post: PostForm = Arc::new(move |_, form| {
+            let token = form.iter().find(|(k, _)| k == "refresh_token").unwrap().1.clone();
+            if token == "rt-1" {
+                inner.set("addon:dev.a:oauth:ms", "rt-9").unwrap();
+                *handle.lock().unwrap() = true;
+                return Ok((400, r#"{"error":"invalid_grant"}"#.to_string()));
+            }
+            Ok((200, r#"{"access_token":"at-9","expires_in":300}"#.to_string()))
+        });
+        let got = access_token(
+            "dev.a",
+            &provider(),
+            store.as_ref(),
+            &post,
+            &TokenCache::default(),
+            0,
+        )
+        .unwrap();
+        assert_eq!(got.as_deref(), Some("at-9"));
+        assert_eq!(
+            store.get("addon:dev.a:oauth:ms").unwrap().as_deref(),
+            Some("rt-9")
+        );
+        assert!(*swapped.lock().unwrap());
     }
 
     #[test]
