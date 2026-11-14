@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { AddonTimelineItem, TimeEntry } from '@/bindings'
 import { useFormat } from '@/composables/useFormat'
 import { type Anchor, pointAnchor } from '@/lib/anchor'
+import type { PersonDay } from '@/lib/busy'
 import { textOn } from '@/lib/colors'
 import { layoutLanes } from '@/lib/lanes'
 import { HOUR, fromInputs, toDateInput, type DayRange } from '@/lib/time'
@@ -27,7 +28,7 @@ const props = defineProps<{
   /** Addon timeline items, e.g. calendar events. */
   events?: AddonTimelineItem[]
   /** Other people's rows, in the order shown. */
-  others?: { id: string; name: string; entries: TimeEntry[] }[]
+  others?: PersonDay[]
 }>()
 
 const emit = defineEmits<{
@@ -55,7 +56,16 @@ const segmentsOf = (entries: TimeEntry[]) =>
     end: Math.min(entry.endAt ?? props.now, props.day.to),
   }))
 const segments = computed(() => segmentsOf(props.entries))
-const otherSegments = computed(() => (props.others ?? []).map((o) => ({ ...o, segments: segmentsOf(o.entries) })))
+const otherSegments = computed(() =>
+  (props.others ?? []).map((o) => ({
+    ...o,
+    segments: segmentsOf(o.entries),
+    // When they are busy that day (shown behind what they tracked).
+    busySegments: o.busy
+      .filter((b) => b.from < props.day.to && b.to > props.day.from)
+      .map((b) => ({ ...b, start: Math.max(b.from, props.day.from), end: Math.min(b.to, props.day.to) })),
+  })),
+)
 const withOthers = computed(() => otherSegments.value.length > 0)
 const eventSegments = computed(() =>
   (props.events ?? [])
@@ -68,7 +78,7 @@ const isToday = computed(() => props.now >= props.day.from && props.now < props.
 
 /** First and last (exclusive) hour shown. */
 const shown = computed(() => {
-  const spans = [...segments.value, ...otherSegments.value.flatMap((o) => o.segments), ...eventSegments.value].map((s) => [s.start, s.end] as const)
+  const spans = [...segments.value, ...otherSegments.value.flatMap((o) => [...o.segments, ...o.busySegments.filter((b) => b.kind === 'meeting')]), ...eventSegments.value].map((s) => [s.start, s.end] as const)
   if (isToday.value) spans.push([props.now, props.now])
   let first = DEFAULT_FIRST
   let last = DEFAULT_LAST
@@ -134,8 +144,17 @@ const rows = computed(() => {
     mine: false,
     total: o.segments.reduce((n, sg) => n + Math.max(0, sg.end - sg.start), 0),
     blocks: blocksOf(o.segments),
+    busy: o.busySegments.map((b) => {
+      const left = x(b.start)
+      return {
+        key: `${b.kind}/${b.from}`,
+        label: b.kind === 'absence' ? t('timesheet.absent') : t('timesheet.busy'),
+        title: `${format.time(b.start)}–${format.time(b.end)} · ${b.kind === 'absence' ? t('timesheet.absent') : t('timesheet.busy')}`,
+        style: { left: `${left}%`, width: `calc(${Math.max(x(b.end) - left, 0.4)}% - 2px)`, top: '2px', bottom: '2px' },
+      }
+    }),
   }))
-  return [own, ...others].map((r) => ({
+  return [{ ...own, busy: [] as (typeof others)[number]['busy'] }, ...others].map((r) => ({
     ...r,
     // Alone, the row fills the page; with others each row is as tall as its lanes need.
     minHeight: withOthers.value ? `${Math.max(2, ...r.blocks.map((b) => b.lanes)) * LANE_HEIGHT + 8}px` : undefined,
@@ -241,6 +260,13 @@ function onTrackDblClick(event: MouseEvent) {
                 <span v-if="ev.item.detail" class="truncate text-muted-foreground">{{ ev.item.detail }}</span>
               </button>
             </template>
+            <div
+              v-for="b in row.busy"
+              :key="b.key"
+              class="absolute overflow-hidden rounded-md border border-dashed border-muted-foreground/50 bg-muted/60 px-1.5 py-1 text-[11px] italic leading-tight text-muted-foreground"
+              :style="b.style"
+              :title="b.title"
+            >{{ b.label }}</div>
             <component
               :is="row.mine ? 'button' : 'div'"
               v-for="b in row.blocks"

@@ -60,9 +60,11 @@ export default {
   },
   timesheet: {
     show: 'Show',
-    kinds: { entries: 'Time entries', events: 'Meetings & events' },
+    kinds: { entries: 'Time entries', events: 'Meetings & events', absences: 'Absences' },
     noMatch: 'Nothing matches the filters.',
     addPeople: 'People',
+    busy: 'Busy',
+    absent: 'Absent',
     columns: 'Columns in each day:',
     mePlus: 'Me + {n}',
     person: 'Person',
@@ -360,6 +362,7 @@ export default {
     morningHint: 'Offer to start tracking at the first activity of the day.',
   },
   absences: {
+    month: 'Month',
     period: 'Period',
     statusColumn: 'Status',
     status: { requested: 'Requested', approved: 'Approved', rejected: 'Rejected' },

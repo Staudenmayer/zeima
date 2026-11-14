@@ -62,9 +62,11 @@ const de: typeof en = {
   },
   timesheet: {
     show: 'Anzeigen',
-    kinds: { entries: 'Zeiteinträge', events: 'Termine & Ereignisse' },
+    kinds: { entries: 'Zeiteinträge', events: 'Termine & Ereignisse', absences: 'Abwesenheiten' },
     noMatch: 'Nichts entspricht den Filtern.',
     addPeople: 'Personen',
+    busy: 'Beschäftigt',
+    absent: 'Abwesend',
     columns: 'Spalten pro Tag:',
     mePlus: 'Ich + {n}',
     person: 'Person',
@@ -362,6 +364,7 @@ const de: typeof en = {
     morningHint: 'Bei der ersten Aktivität des Tages anbieten, die Erfassung zu starten.',
   },
   absences: {
+    month: 'Monat',
     period: 'Zeitraum',
     statusColumn: 'Status',
     status: { requested: 'Beantragt', approved: 'Genehmigt', rejected: 'Abgelehnt' },

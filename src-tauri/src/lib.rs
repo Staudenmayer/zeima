@@ -95,6 +95,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands_work::absence_type_save,
             commands_work::absence_type_delete,
             commands_work::absence_list,
+            commands_work::absence_list_others,
             commands_work::absence_save,
             commands_work::absence_delete,
             commands_work::vacation_summary,

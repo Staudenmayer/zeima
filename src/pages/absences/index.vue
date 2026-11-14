@@ -2,9 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { ChevronLeft, ChevronRight, Palmtree, Pencil, Plus, Trash2 } from '@lucide/vue'
+import { ChevronLeft, ChevronRight, Palmtree, Pencil, Plus, Trash2, X } from '@lucide/vue'
 import { commands, type Absence, type AbsenceType, type HolidayView, type VacationSummary } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
+import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -18,7 +19,10 @@ import PageHeader from '@/components/time/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
 import { call, errorMessage } from '@/lib/ipc'
 import { parseDate, toDateInput } from '@/lib/time'
+import { useAccountStore } from '@/stores/account'
+import { useOrgStore } from '@/stores/org'
 import { useWorkStore } from '@/stores/work'
+import { useWorkspaceStore } from '@/stores/workspace'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
 
@@ -26,10 +30,15 @@ definePage({ meta: { titleKey: 'nav.absences' } })
 
 const { t, locale } = useI18n()
 const work = useWorkStore()
+const workspaces = useWorkspaceStore()
+const account = useAccountStore()
+const org = useOrgStore()
 const format = useFormat()
 
 const year = ref(Number(toDateInput(Date.now()).slice(0, 4)))
 const absences = ref<Absence[]>([])
+/** Approved absences of colleagues (what the person may see of them). */
+const others = ref<Absence[]>([])
 const holidays = ref<HolidayView[]>([])
 const vacation = ref<VacationSummary | null>(null)
 
@@ -44,17 +53,19 @@ async function run<T>(promise: Promise<T>): Promise<T | undefined> {
 
 async function load() {
   const y = year.value
-  const [a, h, v] = await Promise.all([
+  const [a, o, h, v] = await Promise.all([
     run(call(commands.absenceList(`${y}-01-01`, `${y}-12-31`))),
+    workspaces.inOrg ? run(call(commands.absenceListOthers(`${y}-01-01`, `${y}-12-31`))) : Promise.resolve([]),
     run(call(commands.holidayList(y, locale.value))),
     run(call(commands.vacationSummary(y))),
   ])
   absences.value = a ?? []
+  others.value = o ?? []
   holidays.value = h ?? []
   vacation.value = v ?? null
 }
 // Reload when the year, the language or any work data changes.
-watch([year, locale, () => work.schedules, () => work.absenceTypes, () => work.balance], load, { immediate: true })
+watch([year, locale, () => workspaces.active?.id, () => work.schedules, () => work.absenceTypes, () => work.balance], load, { immediate: true })
 
 const days = (n: number | null | undefined) => format.number(n ?? 0, 1)
 const usedPct = computed(() => {
@@ -97,7 +108,53 @@ async function addHoliday() {
   if (ok) holidayName.value = ''
 }
 
-const { sort, sorted: sortedAbsences } = useSort(absences, {
+// ---------------------------------------------------------------- filters
+const me = computed(() => account.status.user?.id ?? '')
+const mine = (a: Absence) => a.userId === me.value
+/** Colleagues' absences are read only; the person's own can be edited. */
+const everyone = computed(() => [...absences.value, ...others.value])
+const withPeople = computed(() => others.value.length > 0)
+const personName = (a: Absence) => (mine(a) ? t('timesheet.me') : org.nameOf(a.userId) || t('approvals.someone'))
+watch(
+  () => [others.value.length, workspaces.active?.orgId] as const,
+  ([n, orgId]) => {
+    if (n > 0 && orgId && org.people.length === 0) void org.loadGlance(orgId).catch(() => {})
+  },
+  { immediate: true },
+)
+
+const filter = ref({ people: [] as (string | null)[], types: [] as (string | null)[], statuses: [] as (string | null)[], months: [] as (string | null)[] })
+const hasFilter = computed(() => Object.values(filter.value).some((v) => v.length > 0))
+const clearFilter = () => (filter.value = { people: [], types: [], statuses: [], months: [] })
+const personOptions = computed<FilterOption[]>(() => [
+  { value: me.value, label: t('timesheet.me') },
+  ...[...new Set(others.value.map((a) => a.userId))].map((id) => ({ value: id, label: org.nameOf(id) || t('approvals.someone') })),
+])
+const typeOptions = computed<FilterOption[]>(() => work.absenceTypes.map((x) => ({ value: x.id, label: work.absenceTypeName(x), color: x.color })))
+const statusOptions = computed<FilterOption[]>(() => (['requested', 'approved', 'rejected'] as const).map((v) => ({ value: v, label: t(`absences.status.${v}`) })))
+const monthOptions = computed<FilterOption[]>(() =>
+  Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: new Intl.DateTimeFormat(locale.value, { month: 'long' }).format(new Date(2000, i, 15)) })),
+)
+/** Whether the absence touches one of the months (it may span several). */
+function inMonths(a: Absence, months: string[]) {
+  const y = String(year.value)
+  const from = a.startDate.startsWith(y) ? Number(a.startDate.slice(5, 7)) : 1
+  const to = a.endDate.startsWith(y) ? Number(a.endDate.slice(5, 7)) : 12
+  return months.some((m) => Number(m) >= from && Number(m) <= to)
+}
+const filtered = computed(() => {
+  const f = filter.value
+  return everyone.value.filter(
+    (a) =>
+      (!f.people.length || f.people.includes(a.userId)) &&
+      (!f.types.length || f.types.includes(a.typeId)) &&
+      (!f.statuses.length || f.statuses.includes(a.status)) &&
+      (!f.months.length || inMonths(a, f.months as string[])),
+  )
+})
+
+const { sort, sorted: sortedAbsences } = useSort(filtered, {
+  person: (a) => personName(a),
   period: (a) => a.startDate,
   type: (a) => {
     const t = work.absenceTypesById.get(a.typeId)
@@ -147,13 +204,23 @@ const { sort, sorted: sortedAbsences } = useSort(absences, {
         </CardContent>
       </Card>
 
-      <EmptyState v-if="absences.length === 0" :icon="Palmtree" :text="$t('absences.empty')">
+      <EmptyState v-if="everyone.length === 0" :icon="Palmtree" :text="$t('absences.empty')">
         <Button variant="outline" @click="open(null)"><Plus /> {{ $t('absences.add') }}</Button>
       </EmptyState>
+      <template v-else>
+      <div class="-mb-3 flex flex-wrap items-center gap-2">
+        <MultiFilter v-if="withPeople" v-model="filter.people" :label="$t('timesheet.person')" :options="personOptions" />
+        <MultiFilter v-model="filter.types" :label="$t('absences.type')" :options="typeOptions" />
+        <MultiFilter v-model="filter.statuses" :label="$t('absences.statusColumn')" :options="statusOptions" />
+        <MultiFilter v-model="filter.months" :label="$t('absences.month')" :options="monthOptions" />
+        <Button v-if="hasFilter" size="sm" variant="ghost" @click="clearFilter"><X /> {{ $t('reports.clearFilter') }}</Button>
+      </div>
+      <p v-if="sortedAbsences.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('timesheet.noMatch') }}</p>
       <div v-else class="overflow-x-auto rounded-lg border">
         <table class="w-full text-sm">
           <thead class="text-left text-xs text-muted-foreground">
             <tr class="border-b">
+              <SortHead v-if="withPeople" :sort="sort" column="person" class="px-3 py-2 font-medium">{{ $t('timesheet.person') }}</SortHead>
               <SortHead :sort="sort" column="period" class="px-3 py-2 font-medium">{{ $t('absences.period') }}</SortHead>
               <SortHead :sort="sort" column="type" class="px-3 py-2 font-medium">{{ $t('absences.type') }}</SortHead>
               <SortHead :sort="sort" column="status" class="px-3 py-2 font-medium">{{ $t('absences.statusColumn') }}</SortHead>
@@ -162,7 +229,8 @@ const { sort, sorted: sortedAbsences } = useSort(absences, {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="a in sortedAbsences" :key="a.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="open(a)">
+            <tr v-for="a in sortedAbsences" :key="a.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="mine(a) ? 'cursor-pointer' : ''" @click="mine(a) && open(a)">
+              <td v-if="withPeople" class="whitespace-nowrap px-3 py-1.5 font-medium">{{ personName(a) }}</td>
               <td class="whitespace-nowrap px-3 py-1.5 font-medium tabular-nums">{{ range(a) }}</td>
               <td class="whitespace-nowrap px-3 py-1.5">
                 <span class="flex items-center gap-2">
@@ -179,7 +247,7 @@ const { sort, sorted: sortedAbsences } = useSort(absences, {
                 <span v-if="a.status === 'rejected' && a.decisionNote" class="mr-2 text-xs">{{ a.decisionNote }}</span>{{ a.note }}
               </td>
               <td class="px-1 py-0.5" @click.stop>
-                <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <div v-if="mine(a)" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                   <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(a)"><Pencil /></Button>
                   <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(a)"><Trash2 /></Button>
                 </div>
@@ -188,6 +256,7 @@ const { sort, sorted: sortedAbsences } = useSort(absences, {
           </tbody>
         </table>
       </div>
+      </template>
     </div>
 
     <div class="grid content-start gap-6">

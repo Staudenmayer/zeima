@@ -110,7 +110,31 @@ async fn absences_in_a_shared_workspace_are_requests_someone_else_decides() {
         Err(Error::Validation { .. })
     ));
 
+    // Colleagues' absences are listed once approved, never the person's own.
+    let window = (date("2026-10-01"), date("2026-10-31"));
+    assert!(ben
+        .list_others_absences(window.0, window.1)
+        .await
+        .unwrap()
+        .is_empty());
     let approved = ben.decide_absence(&mine.id, true, "enjoy").await.unwrap();
+    let others = ben.list_others_absences(window.0, window.1).await.unwrap();
+    assert_eq!(others.len(), 1);
+    assert_eq!(
+        (others[0].user_id.as_str(), others[0].status),
+        (ADA, AbsenceStatus::Approved)
+    );
+    assert!(ada
+        .list_others_absences(window.0, window.1)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(ben
+        .list_others_absences(date("2026-11-01"), date("2026-11-30"))
+        .await
+        .unwrap()
+        .is_empty());
+
     assert_eq!(
         (
             approved.status,

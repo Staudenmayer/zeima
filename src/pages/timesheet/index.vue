@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useStorage } from '@vueuse/core'
 import { CalendarDays, ChevronDown, UserPlus, ChevronLeft, ChevronRight, Clock, Copy, List, Pencil, Play, Plus, Scissors, Trash2, X } from '@lucide/vue'
-import { commands, type AddonTimelineItem, type EntryPatch, type TimeEntry } from '@/bindings'
+import { commands, events, type Absence, type AddonTimelineItem, type EntryPatch, type TimeEntry } from '@/bindings'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
@@ -38,11 +39,13 @@ import { useEntries } from '@/composables/useEntries'
 import type { EntryDraft } from '@/composables/useEntryForm'
 import { useTimeline } from '@/composables/useTimeline'
 import { useWorkDays } from '@/composables/useWorkDays'
+import { useWorkStore } from '@/stores/work'
 import DayStatus from '@/components/time/DayStatus.vue'
 import { useFormat } from '@/composables/useFormat'
 import type { Anchor } from '@/lib/anchor'
+import type { Busy, PersonDay } from '@/lib/busy'
 import { call, errorMessage } from '@/lib/ipc'
-import { HOUR, addDays, dayRange, daysBetween, fromInputs, startOfDay, toDateInput, toTimeInput, weekDays } from '@/lib/time'
+import { HOUR, addDays, dayRange, daysBetween, fromInputs, getTimeZone, startOfDay, toDateInput, toTimeInput, weekDays } from '@/lib/time'
 import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
@@ -79,9 +82,61 @@ const { entries, summaries } = useEntries(range, days)
 const { byDate, holidayName } = useWorkDays(range)
 const { items: timeline } = useTimeline(range)
 
+// ---------------------------------------------------------------- absences
+// The person's absences (not the rejected ones) are shown as all-day items,
+// read only: vacation, sick leave and the like, requests marked as such.
+const ABSENCES = 'zeima.absences'
+const work = useWorkStore()
+const absences = ref<Absence[]>([])
+let absenceRequest = 0
+async function loadAbsences() {
+  const mine = ++absenceRequest
+  try {
+    const list = await call(commands.absenceList(toDateInput(range.value.from), toDateInput(range.value.to - 1)))
+    if (mine === absenceRequest) absences.value = list
+  } catch {
+    if (mine === absenceRequest) absences.value = []
+  }
+}
+watch(range, loadAbsences, { immediate: true, deep: true })
+const unlistenAbsences = events.dataChanged.listen((e) => {
+  if (e.payload.kinds.includes('work')) void loadAbsences()
+})
+onScopeDispose(() => void unlistenAbsences.then((fn) => fn()))
+const absenceItems = computed<AddonTimelineItem[]>(() =>
+  absences.value
+    .filter((a) => a.status !== 'rejected')
+    .map((a) => {
+      const type = work.absenceTypesById.get(a.typeId)
+      const detail = [
+        a.halfDay ? t(`absences.halfDays.${a.halfDay}`) : '',
+        a.status === 'requested' ? t('absences.status.requested') : '',
+        a.note,
+      ].filter(Boolean)
+      return {
+        addonId: ABSENCES,
+        id: a.id,
+        title: type ? work.absenceTypeName(type) : t('nav.absences'),
+        startAt: fromInputs(a.startDate, '00:00'),
+        endAt: addDays(fromInputs(a.endDate, '00:00'), 1),
+        allDay: true,
+        detail: detail.join(' · ') || null,
+        color: type?.color ?? null,
+        activityId: null,
+        projectId: null,
+        tagIds: [],
+        billable: false,
+        costCenterId: null,
+        note: '',
+      }
+    }),
+)
+const isAbsence = (i: AddonTimelineItem) => i.addonId === ABSENCES
+const router = useRouter()
+
 // ---------------------------------------------------------------- filters
 // Entries, meetings and addon events are filtered alike, in every view.
-const KINDS = ['entries', 'events'] as const
+const KINDS = ['entries', 'events', 'absences'] as const
 const filter = ref({
   kinds: [] as (string | null)[],
   activityIds: [] as (string | null)[],
@@ -121,10 +176,16 @@ function matches(x: Filterable): boolean {
 const showsKind = (kind: (typeof KINDS)[number]) => filter.value.kinds.length === 0 || filter.value.kinds.includes(kind)
 const filterEntries = (list: TimeEntry[]) => (showsKind('entries') ? list.filter(matches) : [])
 const shownEntries = computed(() => filterEntries(entries.value))
-const shownTimeline = computed(() => (showsKind('events') ? timeline.value.filter(matches) : []))
+const shownTimeline = computed(() => [
+  ...(showsKind('events') ? timeline.value.filter(matches) : []),
+  ...(showsKind('absences') ? absenceItems.value : []),
+])
 
-// Owners and managers can lay other people's days next to their own (day view).
-const canPickPeople = computed(() => workspaces.inOrg && ['owner', 'admin', 'manager'].includes(workspaces.role ?? ''))
+// In an organization everyone can lay other people's days next to their own:
+// owners, admins and managers see what they tracked (as far as the rules
+// allow), everyone sees when they are busy: a meeting or an absence, never
+// what it is.
+const canPickPeople = computed(() => workspaces.inOrg)
 watch(
   () => (canPickPeople.value ? workspaces.active?.orgId : null),
   (orgId) => {
@@ -142,17 +203,30 @@ const candidates = computed(() =>
 /** Added people, kept while the page is open; unknown ones (another workspace) drop out. */
 const peopleIds = ref<string[]>([])
 const shownIds = computed(() => (canPickPeople.value ? peopleIds.value.filter((id) => candidates.value.some((c) => c.id === id)) : []))
-const otherDays = ref<{ id: string; name: string; entries: TimeEntry[] }[]>([])
-const shownOthers = computed(() => otherDays.value.map((o) => ({ ...o, entries: filterEntries(o.entries) })))
+const otherDays = ref<PersonDay[]>([])
+const shownBusy = (list: Busy[]) => list.filter((b) => showsKind(b.kind === 'meeting' ? 'events' : 'absences'))
+const shownOthers = computed(() => otherDays.value.map((o) => ({ ...o, entries: filterEntries(o.entries), busy: shownBusy(o.busy) })))
 let loadToken = 0
 async function loadOthers() {
   const token = ++loadToken
   const ids = shownIds.value
+  const orgId = workspaces.active?.orgId
+  // When they are busy: one question for all of them (the server allows up to 31 days).
+  let busy: Record<string, Busy[]> = {}
+  if (ids.length && orgId) {
+    try {
+      const body = JSON.stringify({ userIds: ids, from: range.value.from, to: range.value.to, timezone: getTimeZone() })
+      busy = JSON.parse((await call(commands.orgRequest('POST', `/v1/orgs/${orgId}/freebusy`, body))) || '{}')
+    } catch {
+      busy = {}
+    }
+  }
   const rows = await Promise.all(
     ids.map(async (id) => ({
       id,
       name: candidates.value.find((c) => c.id === id)?.name ?? '',
       entries: await call(commands.teamEntries(id, range.value)).catch(() => [] as TimeEntry[]),
+      busy: busy[id] ?? [],
     })),
   )
   if (token === loadToken) otherDays.value = rows
@@ -186,13 +260,19 @@ const groups = computed(() =>
       totalMs: totalOf(i),
       entries: shownEntries.value.filter((e) => e.startAt >= day.from && e.startAt < day.to).reverse(),
       // Meetings and addon events of the day (as in the calendar), to track from here.
-      events: shownTimeline.value.filter((i) => !i.allDay && i.startAt >= day.from && i.startAt < day.to),
+      events: shownTimeline.value.filter((i) =>
+        isAbsence(i) ? i.startAt < day.to && i.endAt > day.from : !i.allDay && i.startAt >= day.from && i.startAt < day.to,
+      ),
+      // When the added people are busy that day (a meeting, an absence), not what for.
+      busy: shownOthers.value
+        .flatMap((o) => o.busy.filter((b) => b.from < day.to && b.to > day.from).map((b) => ({ ...b, name: o.name })))
+        .sort((a, b) => a.from - b.from),
       // What the added people tracked that day (read only).
       others: shownOthers.value
         .flatMap((o) => o.entries.filter((e) => e.startAt >= day.from && e.startAt < day.to).map((entry) => ({ entry, name: o.name, ...entry, person: o.name })))
         .sort((a, b) => b.entry.startAt - a.entry.startAt),
     }))
-    .filter((g) => mode.value === 'day' || g.entries.length > 0 || g.events.length > 0 || g.others.length > 0)
+    .filter((g) => mode.value === 'day' || g.entries.length > 0 || g.events.length > 0 || g.others.length > 0 || g.busy.length > 0)
     .reverse(),
 )
 
@@ -478,7 +558,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
     @track="track"
   />
 
-  <EmptyState v-else-if="groups.every((g) => g.entries.length === 0 && g.events.length === 0 && g.others.length === 0)" :icon="Clock" :text="hasFilter ? $t('timesheet.noMatch') : $t('timesheet.empty')">
+  <EmptyState v-else-if="groups.every((g) => g.entries.length === 0 && g.events.length === 0 && g.others.length === 0 && g.busy.length === 0)" :icon="Clock" :text="hasFilter ? $t('timesheet.noMatch') : $t('timesheet.empty')">
     <Button v-if="hasFilter" variant="outline" @click="clearFilter"><X /> {{ $t('reports.clearFilter') }}</Button>
     <Button v-else variant="outline" @click="openNew()"><Plus /> {{ $t('timesheet.addEntry') }}</Button>
   </EmptyState>
@@ -533,12 +613,12 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
           v-for="item in sortRows(group.events)"
           :key="`${item.addonId}/${item.id}`"
           class="group cursor-pointer border-b border-dashed text-muted-foreground last:border-b-0 hover:bg-muted/30"
-          :title="$t('timesheet.trackEvent')"
-          @click="track(item)"
+          :title="isAbsence(item) ? undefined : $t('timesheet.trackEvent')"
+          @click="isAbsence(item) ? router.push('/absences') : track(item)"
         >
           <td class="w-8 py-1.5 pr-0 pl-3" />
           <td v-if="withPeople" class="px-3 py-1.5">{{ $t('timesheet.me') }}</td>
-          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ format.time(item.startAt) }}–{{ format.time(item.endAt) }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ isAbsence(item) ? $t('timesheet.allDay') : `${format.time(item.startAt)}–${format.time(item.endAt)}` }}</td>
           <td class="max-w-44 px-3 py-1.5">
             <ActivityLabel v-if="item.activityId" :activity="activities.byId.get(item.activityId)" />
             <span v-else>–</span>
@@ -551,9 +631,9 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
           <td class="max-w-0 w-full truncate px-3 py-1.5" :title="item.detail ?? item.title">
             <span class="font-medium text-foreground">{{ item.title }}</span><span v-if="item.detail"> · {{ item.detail }}</span>
           </td>
-          <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ settings.formatDuration(item.endAt - item.startAt) }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ isAbsence(item) ? '–' : settings.formatDuration(item.endAt - item.startAt) }}</td>
           <td class="px-1 py-0.5" @click.stop>
-            <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+            <div v-if="!isAbsence(item)" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
               <Button size="icon" variant="ghost" class="size-7" :title="$t('timesheet.trackEvent')" @click="track(item)"><Play /></Button>
             </div>
           </td>
@@ -618,7 +698,14 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
           <td class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums">{{ settings.formatDuration(durationMs(o.entry)) }}</td>
           <td class="px-1 py-0.5" />
         </tr>
-        <tr v-if="group.entries.length === 0 && group.events.length === 0 && group.others.length === 0" class="border-b last:border-b-0">
+        <tr v-for="b in group.busy" :key="`${b.name}/${b.kind}/${b.from}`" class="border-b border-dashed text-muted-foreground last:border-b-0">
+          <td class="w-8 py-1.5 pr-0 pl-3" />
+          <td class="whitespace-nowrap px-3 py-1.5 font-medium text-foreground">{{ b.name }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ b.kind === 'absence' ? $t('timesheet.allDay') : `${format.time(Math.max(b.from, group.day.from))}–${format.time(Math.min(b.to, group.day.to))}` }}</td>
+          <td class="px-3 py-1.5 italic" colspan="5">{{ b.kind === 'absence' ? $t('timesheet.absent') : $t('timesheet.busy') }}</td>
+          <td class="px-1 py-0.5" />
+        </tr>
+        <tr v-if="group.entries.length === 0 && group.events.length === 0 && group.others.length === 0 && group.busy.length === 0" class="border-b last:border-b-0">
           <td :colspan="withPeople ? 9 : 8" class="px-3 py-6 text-center text-muted-foreground">{{ $t('timesheet.empty') }}</td>
         </tr>
       </tbody>

@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import type { AddonTimelineItem, TimeEntry } from '@/bindings'
 import { useFormat } from '@/composables/useFormat'
 import { type Anchor, pointAnchor } from '@/lib/anchor'
+import type { PersonDay } from '@/lib/busy'
 import { textOn } from '@/lib/colors'
 import { layoutLanes, type Lanes } from '@/lib/lanes'
 import { HOUR, fromInputs, toDateInput, type DayRange } from '@/lib/time'
@@ -30,7 +31,7 @@ const props = defineProps<{
   events?: AddonTimelineItem[]
   /** Other people (timesheet filter bar): each gets a column of its own in
    * every day, next to the person's own. Read only. */
-  others?: { id: string; name: string; entries: TimeEntry[] }[]
+  others?: PersonDay[]
   /** An edge was dragged: save the new start and end (end `null` while
    * running). Resolves to whether it was saved. Bound as `@resize`. */
   onResize?: (entry: TimeEntry, startAt: number, endAt: number | null) => Promise<boolean>
@@ -222,6 +223,15 @@ interface EventBlock extends Lanes, Slot {
   item: AddonTimelineItem
 }
 
+/** When another person is busy, within a day. */
+interface BusyBlock extends Slot {
+  key: string
+  start: number
+  end: number
+  kind: 'meeting' | 'absence'
+  who: string
+}
+
 /** The people shown, own first. */
 const legend = computed(() => [t('timesheet.me'), ...(props.others ?? []).map((o) => o.name)])
 
@@ -249,7 +259,12 @@ const columns = computed(() =>
         .filter((i) => !i.allDay)
         .map((item) => ({ item, start: Math.max(item.startAt, day.from), end: Math.min(item.endAt, day.to) })),
     ).map((b) => ({ ...b, slot: 0, slots }))
-    return { day, blocks, events, allDay: items.filter((i) => i.allDay) }
+    const busy: BusyBlock[] = (props.others ?? []).flatMap((o, i) =>
+      o.busy
+        .filter((b) => b.from < day.to && b.to > day.from)
+        .map((b) => ({ key: `${o.id}/${b.kind}/${b.from}`, start: Math.max(b.from, day.from), end: Math.min(b.to, day.to), kind: b.kind, who: o.name, slot: i + 1, slots })),
+    )
+    return { day, blocks, events, busy, allDay: items.filter((i) => i.allDay) }
   }),
 )
 
@@ -271,6 +286,11 @@ function across(b: Lanes & Slot) {
     left: `calc(${((b.slot + b.lane / b.lanes) / b.slots) * 100}% + 2px)`,
     width: `calc(${100 / (b.slots * b.lanes)}% - 4px)`,
   }
+}
+
+function busyStyle(day: DayRange, b: BusyBlock) {
+  const top = y(day, b.start)
+  return { top: `${top}px`, height: `${Math.max(y(day, b.end) - top, MIN_BLOCK_PX)}px`, ...across({ ...b, lane: 0, lanes: 1 }) }
 }
 
 function blockStyle(day: DayRange, b: Block) {
@@ -512,6 +532,14 @@ function hourLabel(h: number) {
             class="pointer-events-none absolute inset-x-0 border-t border-dashed border-border/70"
             :style="{ top: `${(h - hours.first) * hourPx}px` }"
           />
+          <!-- When the other people are busy, behind everything else -->
+          <div
+            v-for="b in col.busy"
+            :key="b.key"
+            class="absolute overflow-hidden rounded-md border border-dashed border-muted-foreground/50 bg-muted/60 px-1.5 py-0.5 text-[11px] italic leading-tight text-muted-foreground"
+            :style="busyStyle(col.day, b)"
+            :title="`${b.who} · ${b.kind === 'absence' ? $t('timesheet.absent') : $t('timesheet.busy')}`"
+          >{{ b.kind === 'absence' ? $t('timesheet.absent') : $t('timesheet.busy') }}</div>
           <!-- Timeline items behind the entries -->
           <button
             v-for="ev in col.events"
