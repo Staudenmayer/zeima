@@ -81,21 +81,34 @@ async function confirmDelete() {
   </EmptyState>
 
   <div class="grid gap-6">
-    <ul v-if="activities.active.length" class="divide-y rounded-lg border">
-      <li
-        v-for="activity in activities.active"
-        :key="activity.id"
-        class="group flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted/40"
-      >
-        <span class="size-3 rounded-sm" :style="{ backgroundColor: activity.color }" />
-        <span class="flex-1">{{ activity.name }}</span>
-        <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(activity)"><Pencil /></Button>
-          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('activities.archive')" @click="setArchived(activity, true)"><Archive /></Button>
-          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
-        </div>
-      </li>
-    </ul>
+    <div v-if="activities.active.length" class="overflow-x-auto rounded-lg border">
+      <table class="w-full text-sm">
+        <thead class="text-left text-xs text-muted-foreground">
+          <tr class="border-b">
+            <th class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</th>
+            <th class="w-28 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="activity in activities.active"
+            :key="activity.id"
+            class="group border-b last:border-b-0 hover:bg-muted/30"
+            :class="workspaces.canEditShared ? 'cursor-pointer' : ''"
+            @click="workspaces.canEditShared && open(activity)"
+          >
+            <td class="px-3 py-1.5"><span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm" :style="{ backgroundColor: activity.color }" />{{ activity.name }}</span></td>
+            <td class="px-1 py-0.5" @click.stop>
+              <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(activity)"><Pencil /></Button>
+                <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('activities.archive')" @click="setArchived(activity, true)"><Archive /></Button>
+                <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <section v-if="suggestions.length">
       <h2 class="mb-2 text-sm font-medium">{{ $t('activities.suggested') }}</h2>
@@ -108,16 +121,27 @@ async function confirmDelete() {
 
     <section v-if="archived.length">
       <h2 class="mb-2 text-sm font-medium text-muted-foreground">{{ $t('activities.archivedSection') }}</h2>
-      <ul class="divide-y rounded-lg border">
-        <li v-for="activity in archived" :key="activity.id" class="group flex items-center gap-3 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/40">
-          <span class="size-3 rounded-sm opacity-60" :style="{ backgroundColor: activity.color }" />
-          <span class="flex-1">{{ activity.name }}</span>
-          <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('activities.unarchive')" @click="setArchived(activity, false)"><ArchiveRestore /></Button>
-            <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
-          </div>
-        </li>
-      </ul>
+      <div class="overflow-x-auto rounded-lg border">
+        <table class="w-full text-sm">
+          <thead class="text-left text-xs text-muted-foreground">
+            <tr class="border-b">
+              <th class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</th>
+              <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="activity in archived" :key="activity.id" class="group border-b text-muted-foreground last:border-b-0 hover:bg-muted/30">
+              <td class="px-3 py-1.5"><span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm opacity-60" :style="{ backgroundColor: activity.color }" />{{ activity.name }}</span></td>
+              <td class="px-1 py-0.5" @click.stop>
+                <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('activities.unarchive')" @click="setArchived(activity, false)"><ArchiveRestore /></Button>
+                  <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 

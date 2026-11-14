@@ -312,14 +312,30 @@ async function addAdjustment() {
           <Button type="submit" variant="outline"><Plus /> {{ $t('work.addAdjustment') }}</Button>
         </form>
         <p v-if="adjustments.length === 0" class="text-sm text-muted-foreground">{{ $t('work.noAdjustments') }}</p>
-        <ul v-else class="divide-y rounded-lg border text-sm">
-          <li v-for="a in adjustments" :key="a.id" class="flex items-center gap-3 px-3 py-2">
-            <span class="w-28 text-muted-foreground">{{ format.longDate(parseDate(a.date)) }}</span>
-            <span class="w-20 font-medium tabular-nums">{{ settings.formatSigned(a.minutes * MINUTE) }}</span>
-            <span class="flex-1 truncate">{{ a.reason }}</span>
-            <Button size="icon" variant="ghost" class="size-7" @click="run(call(commands.adjustmentDelete(a.id)))"><Trash2 /></Button>
-          </li>
-        </ul>
+        <div v-else class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <th class="px-3 py-2 font-medium">{{ $t('work.adjustmentDate') }}</th>
+                <th class="px-3 py-2 text-right font-medium">{{ $t('work.adjustmentMinutes') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('work.reason') }}</th>
+                <th class="w-12 px-1 py-2"><span class="sr-only">{{ $t('common.delete') }}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="a in adjustments" :key="a.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+                <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ format.longDate(parseDate(a.date)) }}</td>
+                <td class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums">{{ settings.formatSigned(a.minutes * MINUTE) }}</td>
+                <td class="max-w-0 w-full truncate px-3 py-1.5">{{ a.reason }}</td>
+                <td class="px-1 py-0.5">
+                  <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="run(call(commands.adjustmentDelete(a.id)))"><Trash2 /></Button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </CardContent>
     </Card>
   </div>

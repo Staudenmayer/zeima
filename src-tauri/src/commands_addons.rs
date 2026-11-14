@@ -468,6 +468,8 @@ pub struct AddonTimelineItem {
     pub activity_id: Option<String>,
     pub project_id: Option<String>,
     pub tag_ids: Vec<String>,
+    pub billable: bool,
+    pub cost_center_id: Option<String>,
     pub note: String,
 }
 
@@ -505,6 +507,8 @@ pub async fn addon_timeline(
             activity_id: e.activity_id,
             project_id: e.project_id,
             tag_ids: e.tag_ids,
+            billable: false,
+            cost_center_id: None,
         })
         .collect();
     // The meetings of an organization's workspace are on the timeline too, so
@@ -526,9 +530,11 @@ pub async fn addon_timeline(
                 all_day: false,
                 detail: o.meeting.location,
                 color: Some("#3b82f6".into()),
-                activity_id: None,
+                activity_id: o.meeting.activity_id,
                 project_id: o.meeting.project_id,
-                tag_ids: Vec::new(),
+                tag_ids: o.meeting.tag_ids,
+                billable: o.meeting.billable,
+                cost_center_id: o.meeting.cost_center_id,
             });
         }
     }

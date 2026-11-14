@@ -200,6 +200,7 @@ async fn local_row_fields(
         ("daysJson", "days"),
         ("memberIdsJson", "memberIds"),
         ("attendeeIdsJson", "attendeeIds"),
+        ("tagIdsJson", "tagIds"),
     ] {
         if let Some(Value::String(text)) = out.remove(column) {
             out.insert(
@@ -684,6 +685,10 @@ impl Core {
                 }
                 if table == "project" && name == "memberIds" {
                     values.push(("member_ids_json".into(), Bind::Text(field.v.to_string())));
+                    continue;
+                }
+                if table == "meeting" && name == "tagIds" {
+                    values.push(("tag_ids_json".into(), Bind::Text(field.v.to_string())));
                     continue;
                 }
                 if table == "meeting" && name == "attendeeIds" {

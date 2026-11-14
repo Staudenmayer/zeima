@@ -15,6 +15,9 @@ export interface EntryDraft {
   projectId: string | null
   tagIds: string[]
   note: string
+  /** Where the draft comes with its own (a meeting): otherwise the project's default and automatic. */
+  billable?: boolean
+  costCenterId?: string | null
 }
 
 /**
@@ -111,10 +114,13 @@ export function useEntryForm(
         end.value = toTimeInput(preset.endAt)
         note.value = preset.note
         // The project's default, as when picking it by hand.
-        billable.value = preset.projectId ? (projects.byId.get(preset.projectId)?.billableDefault ?? false) : false
+        billable.value =
+          preset.billable ?? (preset.projectId ? (projects.byId.get(preset.projectId)?.billableDefault ?? false) : false)
+        costCenterId.value = preset.costCenterId ?? null
       }
     }
-    costCenterTouched.value = false
+    // A cost center that came with the draft is a choice, not the automatic one.
+    costCenterTouched.value = draft()?.costCenterId != null
   }
 
   // The user moving the start date moves the end date along (same length).

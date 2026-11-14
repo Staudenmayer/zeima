@@ -154,13 +154,26 @@ watch([preset, () => workspaces.active?.id], () => {
 
     <section v-if="departmentTotals.length" class="grid gap-1">
       <h2 class="text-sm font-medium">{{ $t('team.departments') }}</h2>
-      <ul class="divide-y rounded-lg border text-sm">
-        <li v-for="g in departmentTotals" :key="g.path" class="flex items-center gap-3 px-3 py-1.5">
-          <span class="flex-1">{{ g.path }} <span class="text-xs text-muted-foreground">{{ $t('team.people', g.count) }}</span></span>
-          <span class="tabular-nums">{{ hours(g.total) }}</span>
-          <span class="w-24 text-right text-xs tabular-nums text-muted-foreground">{{ $t('team.billableShort', { h: hours(g.billable) }) }}</span>
-        </li>
-      </ul>
+      <div class="overflow-x-auto rounded-lg border">
+        <table class="w-full text-sm">
+          <thead class="text-left text-xs text-muted-foreground">
+            <tr class="border-b">
+              <th class="px-3 py-2 font-medium">{{ $t('team.department') }}</th>
+              <th class="px-3 py-2 font-medium">{{ $t('team.peopleColumn') }}</th>
+              <th class="px-3 py-2 text-right font-medium">{{ $t('team.total') }}</th>
+              <th class="px-3 py-2 text-right font-medium">{{ $t('team.billable') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="g in departmentTotals" :key="g.path" class="border-b last:border-b-0 hover:bg-muted/30">
+              <td class="px-3 py-1.5 font-medium">{{ g.path }}</td>
+              <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ $t('team.people', g.count) }}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{{ hours(g.total) }}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ hours(g.billable) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <section v-if="outliers.length" class="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">

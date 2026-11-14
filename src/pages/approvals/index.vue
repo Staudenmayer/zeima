@@ -78,16 +78,33 @@ async function reject() {
 
   <section v-else class="grid gap-2">
     <h2 class="text-sm font-medium">{{ $t('approvals.absenceRequests') }}</h2>
-    <ul class="divide-y rounded-lg border">
-      <li v-for="a in requests" :key="a.id" class="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
-        <div class="min-w-0 flex-1">
-          <p class="font-medium">{{ nameOf(a.userId) || $t('approvals.someone') }} · {{ range(a) }}</p>
-          <p class="truncate text-xs text-muted-foreground">{{ typeName(a) }}<span v-if="a.note"> · {{ a.note }}</span></p>
-        </div>
-        <Button size="sm" @click="decide(a, true)"><Check /> {{ $t('approvals.approve') }}</Button>
-        <Button size="sm" variant="outline" @click="askReject(a)"><X /> {{ $t('approvals.reject') }}</Button>
-      </li>
-    </ul>
+    <div class="overflow-x-auto rounded-lg border">
+      <table class="w-full text-sm">
+        <thead class="text-left text-xs text-muted-foreground">
+          <tr class="border-b">
+            <th class="px-3 py-2 font-medium">{{ $t('approvals.person') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('absences.period') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('absences.type') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('entry.note') }}</th>
+            <th class="w-48 px-1 py-2"><span class="sr-only">{{ $t('approvals.approve') }}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="a in requests" :key="a.id" class="border-b last:border-b-0 hover:bg-muted/30">
+            <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ nameOf(a.userId) || $t('approvals.someone') }}</td>
+            <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ range(a) }}</td>
+            <td class="whitespace-nowrap px-3 py-1.5">{{ typeName(a) }}</td>
+            <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="a.note">{{ a.note }}</td>
+            <td class="px-1 py-0.5">
+              <div class="flex justify-end gap-1">
+                <Button size="sm" @click="decide(a, true)"><Check /> {{ $t('approvals.approve') }}</Button>
+                <Button size="sm" variant="outline" @click="askReject(a)"><X /> {{ $t('approvals.reject') }}</Button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <Dialog :open="rejecting !== null" @update:open="(o) => !o && (rejecting = null)">

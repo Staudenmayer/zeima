@@ -6,6 +6,8 @@ import { useStorage } from '@vueuse/core'
 import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock, Copy, List, Pencil, Play, Plus, Scissors, Trash2, X } from '@lucide/vue'
 import { commands, type AddonTimelineItem, type EntryPatch, type TimeEntry } from '@/bindings'
 import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu,
@@ -74,6 +76,50 @@ const { entries, summaries } = useEntries(range, days)
 const { byDate, holidayName } = useWorkDays(range)
 const { items: timeline } = useTimeline(range)
 
+// ---------------------------------------------------------------- filters
+// Entries, meetings and addon events are filtered alike, in every view.
+const KINDS = ['entries', 'events'] as const
+const filter = ref({
+  kinds: [] as (string | null)[],
+  activityIds: [] as (string | null)[],
+  projectIds: [] as (string | null)[],
+  tagIds: [] as (string | null)[],
+  billable: 'all' as 'all' | 'yes' | 'no',
+})
+const hasFilter = computed(() => {
+  const f = filter.value
+  return f.kinds.length + f.activityIds.length + f.projectIds.length + f.tagIds.length > 0 || f.billable !== 'all'
+})
+function clearFilter() {
+  filter.value = { kinds: [], activityIds: [], projectIds: [], tagIds: [], billable: 'all' }
+}
+const kindOptions = computed<FilterOption[]>(() => KINDS.map((k) => ({ value: k, label: t(`timesheet.kinds.${k}`) })))
+const activityOptions = computed<FilterOption[]>(() => [
+  ...activities.all.map((a) => ({ value: a.id, label: a.name, color: a.color })),
+  { value: null, label: t('activities.none') },
+])
+const projectOptions = computed<FilterOption[]>(() => [
+  ...projects.all.map((p) => ({ value: p.id, label: p.alias ? `${p.name} (${p.alias})` : p.name, color: p.color })),
+  { value: null, label: t('common.noProject') },
+])
+const tagOptions = computed<FilterOption[]>(() => [
+  ...tags.all.map((tag) => ({ value: tag.id, label: tag.name, color: tag.color })),
+  { value: null, label: t('reports.noTag') },
+])
+type Filterable = { activityId: string | null; projectId: string | null; tagIds: string[]; billable: boolean }
+function matches(x: Filterable): boolean {
+  const f = filter.value
+  if (f.activityIds.length && !f.activityIds.includes(x.activityId)) return false
+  if (f.projectIds.length && !f.projectIds.includes(x.projectId)) return false
+  if (f.tagIds.length && !(x.tagIds.length ? x.tagIds.some((id) => f.tagIds.includes(id)) : f.tagIds.includes(null))) return false
+  if (f.billable !== 'all' && x.billable !== (f.billable === 'yes')) return false
+  return true
+}
+const showsKind = (kind: (typeof KINDS)[number]) => filter.value.kinds.length === 0 || filter.value.kinds.includes(kind)
+const filterEntries = (list: TimeEntry[]) => (showsKind('entries') ? list.filter(matches) : [])
+const shownEntries = computed(() => filterEntries(entries.value))
+const shownTimeline = computed(() => (showsKind('events') ? timeline.value.filter(matches) : []))
+
 // Owners and managers can lay other people's days next to their own (day view).
 const canPickPeople = computed(() => workspaces.inOrg && (workspaces.role === 'owner' || workspaces.role === 'manager'))
 watch(
@@ -94,6 +140,7 @@ const candidates = computed(() =>
 const peopleIds = ref<string[]>([])
 const shownIds = computed(() => (canPickPeople.value ? peopleIds.value.filter((id) => candidates.value.some((c) => c.id === id)) : []))
 const otherDays = ref<{ id: string; name: string; entries: TimeEntry[] }[]>([])
+const shownOthers = computed(() => otherDays.value.map((o) => ({ ...o, entries: filterEntries(o.entries) })))
 let loadToken = 0
 async function loadOthers() {
   const token = ++loadToken
@@ -119,16 +166,25 @@ function move(direction: -1 | 1) {
   anchor.value = addDays(anchor.value, direction * (mode.value === 'day' ? 1 : 7))
 }
 
+/** Tracked time of day `i`: the totals of the server, or of what the filter shows. */
+function totalOf(i: number): number {
+  if (!hasFilter.value) return summaries.value[i]?.totalMs ?? 0
+  const day = days.value[i]!
+  return shownEntries.value.filter((e) => e.startAt >= day.from && e.startAt < day.to).reduce((n, e) => n + durationMs(e), 0)
+}
+
 /** Entries grouped by the day they start, newest day first. */
 const groups = computed(() =>
   days.value
     .map((day, i) => ({
       day,
       work: byDate(toDateInput(day.from)),
-      totalMs: summaries.value[i]?.totalMs ?? 0,
-      entries: entries.value.filter((e) => e.startAt >= day.from && e.startAt < day.to).reverse(),
+      totalMs: totalOf(i),
+      entries: shownEntries.value.filter((e) => e.startAt >= day.from && e.startAt < day.to).reverse(),
+      // Meetings and addon events of the day (as in the calendar), to track from here.
+      events: shownTimeline.value.filter((i) => !i.allDay && i.startAt >= day.from && i.startAt < day.to),
     }))
-    .filter((g) => mode.value === 'day' || g.entries.length > 0)
+    .filter((g) => mode.value === 'day' || g.entries.length > 0 || g.events.length > 0)
     .reverse(),
 )
 
@@ -166,6 +222,8 @@ function track(item: AddonTimelineItem) {
     projectId: item.projectId,
     tagIds: item.tagIds,
     note: item.note,
+    billable: item.billable,
+    costCenterId: item.costCenterId,
   }
   entryDialogOpen.value = true
 }
@@ -337,15 +395,32 @@ async function confirmSplit() {
     <Button @click="openNew()"><Plus /> {{ $t('timesheet.addEntry') }}</Button>
   </PageHeader>
 
+  <!-- Filters: what the calendar, the table and the totals show. -->
+  <div class="mb-3 flex flex-wrap items-center gap-2">
+    <MultiFilter v-model="filter.kinds" :label="$t('timesheet.show')" :options="kindOptions" />
+    <MultiFilter v-model="filter.activityIds" :label="$t('entry.activity')" :options="activityOptions" />
+    <MultiFilter v-model="filter.projectIds" :label="$t('entry.project')" :options="projectOptions" />
+    <MultiFilter v-if="tags.all.length" v-model="filter.tagIds" :label="$t('entry.tags')" :options="tagOptions" />
+    <Select v-model="filter.billable">
+      <SelectTrigger size="sm" class="w-40"><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">{{ $t('reports.billableAll') }}</SelectItem>
+        <SelectItem value="yes">{{ $t('reports.billable') }}</SelectItem>
+        <SelectItem value="no">{{ $t('reports.notBillable') }}</SelectItem>
+      </SelectContent>
+    </Select>
+    <Button v-if="hasFilter" size="sm" variant="ghost" @click="clearFilter"><X /> {{ $t('reports.clearFilter') }}</Button>
+  </div>
+
   <DayTimeline
     v-if="view === 'calendar' && mode === 'day'"
     class="flex-1"
     :day="days[0]"
-    :entries="entries"
-    :total="summaries[0]?.totalMs ?? 0"
+    :entries="shownEntries"
+    :total="totalOf(0)"
     :now="timer.now"
-    :events="timeline"
-    :others="otherDays"
+    :events="shownTimeline"
+    :others="shownOthers"
     :candidates="candidates"
     :selected="shownIds"
     @update:selected="peopleIds = $event"
@@ -358,10 +433,10 @@ async function confirmSplit() {
     v-else-if="view === 'calendar'"
     class="min-h-80 flex-1"
     :days="days"
-    :entries="entries"
-    :totals="days.map((_, i) => summaries[i]?.totalMs ?? 0)"
+    :entries="shownEntries"
+    :totals="days.map((_, i) => totalOf(i))"
     :now="timer.now"
-    :events="timeline"
+    :events="shownTimeline"
     @edit="openPopover"
     @create="openNew"
     @resize="resizeEntry"
@@ -369,8 +444,9 @@ async function confirmSplit() {
     @track="track"
   />
 
-  <EmptyState v-else-if="groups.every((g) => g.entries.length === 0)" :icon="Clock" :text="$t('timesheet.empty')">
-    <Button variant="outline" @click="openNew()"><Plus /> {{ $t('timesheet.addEntry') }}</Button>
+  <EmptyState v-else-if="groups.every((g) => g.entries.length === 0 && g.events.length === 0)" :icon="Clock" :text="hasFilter ? $t('timesheet.noMatch') : $t('timesheet.empty')">
+    <Button v-if="hasFilter" variant="outline" @click="clearFilter"><X /> {{ $t('reports.clearFilter') }}</Button>
+    <Button v-else variant="outline" @click="openNew()"><Plus /> {{ $t('timesheet.addEntry') }}</Button>
   </EmptyState>
 
   <template v-else>
@@ -417,6 +493,34 @@ async function confirmSplit() {
               </span>
             </div>
           </th>
+        </tr>
+        <tr
+          v-for="item in group.events"
+          :key="`${item.addonId}/${item.id}`"
+          class="group cursor-pointer border-b border-dashed text-muted-foreground last:border-b-0 hover:bg-muted/30"
+          :title="$t('timesheet.trackEvent')"
+          @click="track(item)"
+        >
+          <td class="w-8 py-1.5 pr-0 pl-3" />
+          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ format.time(item.startAt) }}–{{ format.time(item.endAt) }}</td>
+          <td class="max-w-44 px-3 py-1.5">
+            <ActivityLabel v-if="item.activityId" :activity="activities.byId.get(item.activityId)" />
+            <span v-else>–</span>
+          </td>
+          <td class="max-w-56 px-3 py-1.5">
+            <ProjectDot v-if="item.projectId" :project="projects.byId.get(item.projectId) ?? null" show-alias />
+            <span v-else>–</span>
+          </td>
+          <td class="px-3 py-1.5"><TagList :ids="item.tagIds" /></td>
+          <td class="max-w-0 w-full truncate px-3 py-1.5" :title="item.detail ?? item.title">
+            <span class="font-medium text-foreground">{{ item.title }}</span><span v-if="item.detail"> · {{ item.detail }}</span>
+          </td>
+          <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ settings.formatDuration(item.endAt - item.startAt) }}</td>
+          <td class="px-1 py-0.5" @click.stop>
+            <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+              <Button size="icon" variant="ghost" class="size-7" :title="$t('timesheet.trackEvent')" @click="track(item)"><Play /></Button>
+            </div>
+          </td>
         </tr>
         <tr
           v-for="entry in group.entries"
@@ -466,7 +570,7 @@ async function confirmSplit() {
             </div>
           </td>
         </tr>
-        <tr v-if="group.entries.length === 0" class="border-b last:border-b-0">
+        <tr v-if="group.entries.length === 0 && group.events.length === 0" class="border-b last:border-b-0">
           <td colspan="8" class="px-3 py-6 text-center text-muted-foreground">{{ $t('timesheet.empty') }}</td>
         </tr>
       </tbody>

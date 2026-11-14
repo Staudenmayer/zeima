@@ -138,21 +138,44 @@ async function addHoliday() {
       <EmptyState v-if="absences.length === 0" :icon="Palmtree" :text="$t('absences.empty')">
         <Button variant="outline" @click="open(null)"><Plus /> {{ $t('absences.add') }}</Button>
       </EmptyState>
-      <ul v-else class="divide-y rounded-lg border">
-        <li v-for="a in absences" :key="a.id" class="group flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted/40">
-          <span class="size-3 rounded-full" :style="{ backgroundColor: work.absenceTypesById.get(a.typeId)?.color }" />
-          <span class="w-40 font-medium">{{ range(a) }}</span>
-          <span>{{ work.absenceTypesById.get(a.typeId) ? work.absenceTypeName(work.absenceTypesById.get(a.typeId)!) : '' }}</span>
-          <span v-if="a.halfDay" class="text-xs text-muted-foreground">{{ $t(`absences.halfDays.${a.halfDay}`) }}</span>
-          <Badge v-if="a.status !== 'approved'" :variant="a.status === 'rejected' ? 'destructive' : 'secondary'">{{ $t(`absences.status.${a.status}`) }}</Badge>
-          <span v-if="a.status === 'rejected' && a.decisionNote" class="text-xs text-muted-foreground">{{ a.decisionNote }}</span>
-          <span class="flex-1 truncate text-muted-foreground">{{ a.note }}</span>
-          <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(a)"><Pencil /></Button>
-            <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(a)"><Trash2 /></Button>
-          </div>
-        </li>
-      </ul>
+      <div v-else class="overflow-x-auto rounded-lg border">
+        <table class="w-full text-sm">
+          <thead class="text-left text-xs text-muted-foreground">
+            <tr class="border-b">
+              <th class="px-3 py-2 font-medium">{{ $t('absences.period') }}</th>
+              <th class="px-3 py-2 font-medium">{{ $t('absences.type') }}</th>
+              <th class="px-3 py-2 font-medium">{{ $t('absences.statusColumn') }}</th>
+              <th class="px-3 py-2 font-medium">{{ $t('entry.note') }}</th>
+              <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in absences" :key="a.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="open(a)">
+              <td class="whitespace-nowrap px-3 py-1.5 font-medium tabular-nums">{{ range(a) }}</td>
+              <td class="whitespace-nowrap px-3 py-1.5">
+                <span class="flex items-center gap-2">
+                  <span class="size-3 shrink-0 rounded-full" :style="{ backgroundColor: work.absenceTypesById.get(a.typeId)?.color }" />
+                  {{ work.absenceTypesById.get(a.typeId) ? work.absenceTypeName(work.absenceTypesById.get(a.typeId)!) : '' }}
+                  <span v-if="a.halfDay" class="text-xs text-muted-foreground">{{ $t(`absences.halfDays.${a.halfDay}`) }}</span>
+                </span>
+              </td>
+              <td class="whitespace-nowrap px-3 py-1.5">
+                <Badge v-if="a.status !== 'approved'" :variant="a.status === 'rejected' ? 'destructive' : 'secondary'">{{ $t(`absences.status.${a.status}`) }}</Badge>
+                <span v-else class="text-muted-foreground">{{ $t('absences.status.approved') }}</span>
+              </td>
+              <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="a.note">
+                <span v-if="a.status === 'rejected' && a.decisionNote" class="mr-2 text-xs">{{ a.decisionNote }}</span>{{ a.note }}
+              </td>
+              <td class="px-1 py-0.5" @click.stop>
+                <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(a)"><Pencil /></Button>
+                  <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(a)"><Trash2 /></Button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <div class="grid content-start gap-6">

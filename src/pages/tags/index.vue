@@ -70,17 +70,31 @@ async function confirmDelete() {
         <span v-if="section.projectId === null">{{ $t('tags.global') }}</span>
         <ProjectDot v-else :project="section.project" show-alias />
       </h2>
-      <ul class="divide-y rounded-lg border">
-        <li v-for="tag in section.list" :key="tag.id" class="group flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted/40">
-          <span class="size-3 rounded-full" :style="{ backgroundColor: tag.color }" />
-          <span class="flex-1">{{ tag.name }}</span>
-          <span v-if="tag.groupName" class="text-xs text-muted-foreground">{{ $t('tags.group') }}: {{ tag.groupName }}</span>
-          <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-            <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(tag)"><Pencil /></Button>
-            <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(tag)"><Trash2 /></Button>
-          </div>
-        </li>
-      </ul>
+      <div class="overflow-x-auto rounded-lg border">
+        <table class="w-full text-sm">
+          <thead class="text-left text-xs text-muted-foreground">
+            <tr class="border-b">
+              <th class="px-3 py-2 font-medium">{{ $t('tags.name') }}</th>
+              <th class="px-3 py-2 font-medium">{{ $t('tags.group') }}</th>
+              <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="tag in section.list" :key="tag.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="workspaces.canEditShared ? 'cursor-pointer' : ''" @click="workspaces.canEditShared && open(tag)">
+              <td class="px-3 py-1.5">
+                <span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-full" :style="{ backgroundColor: tag.color }" />{{ tag.name }}</span>
+              </td>
+              <td class="px-3 py-1.5 text-muted-foreground">{{ tag.groupName || '–' }}</td>
+              <td class="px-1 py-0.5" @click.stop>
+                <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(tag)"><Pencil /></Button>
+                  <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(tag)"><Trash2 /></Button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 

@@ -151,12 +151,22 @@ function backupDate(file: string) {
           <Button variant="ghost" @click="run(() => call(commands.backupOpenDir()))"><FolderOpen /> {{ $t('settings.data.openFolder') }}</Button>
         </div>
         <p v-if="backups" class="truncate font-mono text-xs text-muted-foreground" :title="backups.dir">{{ backups.dir }}</p>
-        <ul v-if="backups?.files.length" class="divide-y rounded-lg border text-sm">
-          <li v-for="file in backups.files" :key="file" class="flex items-center justify-between gap-3 px-3 py-1.5">
-            <span>{{ backupDate(file) }}</span>
-            <span class="font-mono text-xs text-muted-foreground">{{ file }}</span>
-          </li>
-        </ul>
+        <div v-if="backups?.files.length" class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <th class="px-3 py-2 font-medium">{{ $t('settings.data.backupDate') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('settings.data.backupFile') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="file in backups.files" :key="file" class="border-b last:border-b-0 hover:bg-muted/30">
+                <td class="whitespace-nowrap px-3 py-1.5">{{ backupDate(file) }}</td>
+                <td class="px-3 py-1.5 font-mono text-xs text-muted-foreground">{{ file }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p v-else class="text-sm text-muted-foreground">{{ $t('settings.data.noBackups') }}</p>
       </CardContent>
     </Card>

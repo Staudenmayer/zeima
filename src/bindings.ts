@@ -447,6 +447,8 @@ export type AddonTimelineItem = {
 	activityId: string | null,
 	projectId: string | null,
 	tagIds: string[],
+	billable: boolean,
+	costCenterId: string | null,
 	note: string,
 };
 
@@ -849,6 +851,12 @@ export type Meeting = {
 	location: string | null,
 	onlineUrl: string | null,
 	projectId: string | null,
+	/**  The activity time spent in it is tracked under. */
+	activityId: string | null,
+	/**  Tags, billable and cost center for the time tracked in it (none: automatic). */
+	tagIds: string[],
+	billable: boolean,
+	costCenterId: string | null,
 	note: string,
 	/**  `FREQ=WEEKLY;BYDAY=MO;COUNT=10` style; see [`crate::meeting`]. */
 	rrule: string | null,
@@ -865,6 +873,12 @@ export type MeetingInput = {
 	location: string | null,
 	onlineUrl: string | null,
 	projectId: string | null,
+	/**  The activity time spent in it is tracked under. */
+	activityId: string | null,
+	/**  Tags, billable and cost center for the time tracked in it (none: automatic). */
+	tagIds: string[],
+	billable: boolean,
+	costCenterId: string | null,
 	note: string,
 	rrule: string | null,
 	attendeeIds: string[],

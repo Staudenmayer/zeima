@@ -263,7 +263,7 @@ function onTrackDblClick(event: MouseEvent) {
                 v-for="ev in eventBlocks"
                 :key="`${ev.item.addonId}/${ev.item.id}`"
                 type="button"
-                class="absolute flex flex-col justify-center overflow-hidden rounded-md border border-dashed px-1.5 text-left text-[11px] leading-tight text-foreground transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:brightness-125"
+                class="absolute flex flex-col justify-start overflow-hidden rounded-md border border-dashed px-1.5 py-1 text-left text-[11px] leading-tight text-foreground transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:brightness-125"
                 :style="ev.style"
                 :title="eventTooltip(ev.item)"
                 :aria-label="`${$t('timesheet.trackEvent')}: ${ev.item.title}`"
@@ -278,7 +278,7 @@ function onTrackDblClick(event: MouseEvent) {
               v-for="b in row.blocks"
               :key="b.entry.id"
               :type="row.mine ? 'button' : undefined"
-              class="absolute flex flex-col justify-center gap-0.5 overflow-hidden rounded-md px-2 text-left text-[11px] leading-tight shadow-xs"
+              class="absolute flex flex-col justify-start gap-0.5 overflow-hidden rounded-md px-2 py-1 text-left text-[11px] leading-tight shadow-xs"
               :class="[
                 b.entry.endAt === null ? 'ring-1 ring-green-500/60' : '',
                 row.mine ? 'transition hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:brightness-125' : '',
@@ -287,7 +287,7 @@ function onTrackDblClick(event: MouseEvent) {
               :title="tooltip(b.entry, b.activity?.name, b.project?.name)"
               @click="row.mine && onBlockClick(b.entry, $event)"
             >
-              <span class="flex min-w-0 items-center gap-1">
+              <span class="flex min-w-0 items-start gap-1">
                 <span class="truncate font-medium">{{ b.activity?.name ?? $t('activities.none') }}</span>
                 <span
                   v-if="b.entry.billable"

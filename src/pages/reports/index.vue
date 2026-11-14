@@ -340,7 +340,7 @@ function entryDuration(e: { startAt: number; endAt: number | null }) {
             :class="row.children.length ? 'cursor-pointer' : ''"
             @click="row.children.length && toggle(row)"
           >
-            <td class="px-3 py-2">
+            <td class="px-3 py-1.5">
               <div class="flex min-w-0 items-center gap-2">
                 <ChevronRight
                   v-if="row.children.length"
@@ -360,7 +360,7 @@ function entryDuration(e: { startAt: number; endAt: number | null }) {
                 </template>
               </div>
             </td>
-            <td class="hidden px-3 py-2 sm:table-cell">
+            <td class="hidden px-3 py-1.5 sm:table-cell">
               <div class="h-1.5 overflow-hidden rounded-full bg-muted">
                 <div
                   class="h-full rounded-full bg-primary/70"
@@ -371,9 +371,9 @@ function entryDuration(e: { startAt: number; endAt: number | null }) {
                 />
               </div>
             </td>
-            <td class="px-3 py-2 text-right font-medium tabular-nums">{{ hours(row.ms) }}</td>
-            <td class="px-3 py-2 text-right tabular-nums text-muted-foreground">{{ hours(row.billableMs) }}</td>
-            <td class="px-3 py-2 text-right tabular-nums text-muted-foreground">{{ row.entryCount }}</td>
+            <td class="px-3 py-1.5 text-right font-medium tabular-nums">{{ hours(row.ms) }}</td>
+            <td class="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ hours(row.billableMs) }}</td>
+            <td class="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{{ row.entryCount }}</td>
           </tr>
           <template v-if="expanded.has(rowId(row)) && shownGroups[1]">
             <tr v-for="child in row.children" :key="`${rowId(row)}/${rowId(child)}`" class="border-b bg-muted/20 text-[13px]">
@@ -399,11 +399,11 @@ function entryDuration(e: { startAt: number; endAt: number | null }) {
       </tbody>
       <tfoot>
         <tr class="border-t bg-muted/40 font-medium">
-          <td class="px-3 py-2">{{ $t('common.total') }}</td>
+          <td class="px-3 py-1.5">{{ $t('common.total') }}</td>
           <td class="hidden sm:table-cell" />
-          <td class="px-3 py-2 text-right tabular-nums">{{ hours(report.totalMs) }}</td>
-          <td class="px-3 py-2 text-right tabular-nums">{{ hours(report.billableMs) }}</td>
-          <td class="px-3 py-2 text-right tabular-nums">{{ report.entryCount }}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums">{{ hours(report.totalMs) }}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums">{{ hours(report.billableMs) }}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums">{{ report.entryCount }}</td>
         </tr>
       </tfoot>
     </table>

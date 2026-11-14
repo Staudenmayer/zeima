@@ -29,6 +29,12 @@ pub struct Meeting {
     pub location: Option<String>,
     pub online_url: Option<String>,
     pub project_id: Option<String>,
+    /// The activity time spent in it is tracked under.
+    pub activity_id: Option<String>,
+    /// Tags, billable and cost center for the time tracked in it (none: automatic).
+    pub tag_ids: Vec<String>,
+    pub billable: bool,
+    pub cost_center_id: Option<String>,
     pub note: String,
     /// `FREQ=WEEKLY;BYDAY=MO;COUNT=10` style; see [`crate::meeting`].
     pub rrule: Option<String>,
@@ -50,6 +56,12 @@ pub struct MeetingInput {
     pub location: Option<String>,
     pub online_url: Option<String>,
     pub project_id: Option<String>,
+    /// The activity time spent in it is tracked under.
+    pub activity_id: Option<String>,
+    /// Tags, billable and cost center for the time tracked in it (none: automatic).
+    pub tag_ids: Vec<String>,
+    pub billable: bool,
+    pub cost_center_id: Option<String>,
     pub note: String,
     pub rrule: Option<String>,
     pub attendee_ids: Vec<String>,
@@ -83,7 +95,7 @@ pub struct MeetingOccurrence {
 
 macro_rules! columns {
     () => {
-        "id, user_id, title, start_at, end_at, tz, location, online_url, project_id, note, rrule, attendee_ids_json, cancelled"
+        "id, user_id, title, start_at, end_at, tz, location, online_url, project_id, activity_id, tag_ids_json, billable, cost_center_id, note, rrule, attendee_ids_json, cancelled"
     };
 }
 
@@ -98,6 +110,10 @@ fn from_row(r: &SqliteRow) -> Result<Meeting> {
         location: r.try_get("location")?,
         online_url: r.try_get("online_url")?,
         project_id: r.try_get("project_id")?,
+        activity_id: r.try_get("activity_id")?,
+        tag_ids: serde_json::from_str(&r.try_get::<String, _>("tag_ids_json")?).unwrap_or_default(),
+        billable: r.try_get("billable")?,
+        cost_center_id: r.try_get("cost_center_id")?,
         note: r.try_get("note")?,
         rrule: r.try_get("rrule")?,
         attendee_ids: serde_json::from_str(&r.try_get::<String, _>("attendee_ids_json")?).unwrap_or_default(),
@@ -143,6 +159,11 @@ impl MeetingInput {
             }
         }
         self.project_id = trimmed(&self.project_id);
+        self.activity_id = trimmed(&self.activity_id);
+        self.cost_center_id = trimmed(&self.cost_center_id);
+        self.tag_ids.retain(|t| !t.trim().is_empty());
+        self.tag_ids.sort();
+        self.tag_ids.dedup();
         self.rrule = trimmed(&self.rrule);
         if self.rrule.as_deref().is_some_and(|r| !is_valid_rule(r)) {
             return Err(Error::validation("rrule", "this repeat rule is not supported"));
@@ -215,6 +236,10 @@ impl Core {
             location: input.location,
             online_url: input.online_url,
             project_id: input.project_id,
+            activity_id: input.activity_id,
+            tag_ids: input.tag_ids,
+            billable: input.billable,
+            cost_center_id: input.cost_center_id,
             note: input.note,
             rrule: input.rrule,
             attendee_ids: input.attendee_ids,
@@ -222,11 +247,12 @@ impl Core {
         };
         sqlx::query(
             "INSERT INTO meeting (id, workspace_id, user_id, title, start_at, end_at, tz, location, online_url, project_id,
-                note, rrule, attendee_ids_json, cancelled, created_at, updated_at, hlc, origin_device)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+                activity_id, tag_ids_json, billable, cost_center_id, note, rrule, attendee_ids_json, cancelled, created_at, updated_at, hlc, origin_device)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
              ON CONFLICT (id) DO UPDATE SET title = excluded.title, start_at = excluded.start_at, end_at = excluded.end_at,
                 tz = excluded.tz, location = excluded.location, online_url = excluded.online_url,
-                project_id = excluded.project_id, note = excluded.note, rrule = excluded.rrule,
+                project_id = excluded.project_id, activity_id = excluded.activity_id, tag_ids_json = excluded.tag_ids_json, billable = excluded.billable,
+                cost_center_id = excluded.cost_center_id, note = excluded.note, rrule = excluded.rrule,
                 attendee_ids_json = excluded.attendee_ids_json, cancelled = 0, updated_at = excluded.updated_at,
                 hlc = excluded.hlc, origin_device = excluded.origin_device",
         )
@@ -240,6 +266,10 @@ impl Core {
         .bind(&meeting.location)
         .bind(&meeting.online_url)
         .bind(&meeting.project_id)
+        .bind(&meeting.activity_id)
+        .bind(serde_json::to_string(&meeting.tag_ids)?)
+        .bind(meeting.billable)
+        .bind(&meeting.cost_center_id)
         .bind(&meeting.note)
         .bind(&meeting.rrule)
         .bind(serde_json::to_string(&meeting.attendee_ids)?)

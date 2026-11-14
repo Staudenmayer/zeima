@@ -599,6 +599,10 @@ async fn meetings_are_called_answered_and_repeat() {
         location: Some("Room 4".into()),
         online_url: Some("https://meet.example.com/x".into()),
         project_id: None,
+        activity_id: Some(" work-1 ".into()),
+        tag_ids: vec!["t2".into(), "t1".into(), "t1".into()],
+        billable: true,
+        cost_center_id: Some("cc-1".into()),
         note: "agenda".into(),
         rrule: rrule.map(Into::into),
         attendee_ids: attendees.into_iter().map(Into::into).collect(),
@@ -631,6 +635,30 @@ async fn meetings_are_called_answered_and_repeat() {
         (meeting.title.as_str(), meeting.attendee_ids.clone()),
         ("Weekly sync", vec![BEN.to_string()]),
         "the organizer is not an attendee, and none twice"
+    );
+    assert_eq!(
+        meeting.activity_id.as_deref(),
+        Some("work-1"),
+        "the activity is kept, trimmed"
+    );
+    assert_eq!(
+        ben.list_meetings(date("2026-10-12"), date("2026-10-12"))
+            .await
+            .unwrap()[0]
+            .meeting
+            .activity_id
+            .as_deref(),
+        Some("work-1"),
+        "and reaches the people asked"
+    );
+    assert_eq!(
+        (
+            meeting.tag_ids.clone(),
+            meeting.billable,
+            meeting.cost_center_id.as_deref()
+        ),
+        (vec!["t1".to_string(), "t2".to_string()], true, Some("cc-1")),
+        "tags (sorted, once), billable and the cost center are kept"
     );
 
     // Three weeks of occurrences, for the organizer and the person asked.

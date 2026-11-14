@@ -69,36 +69,36 @@ const budgetLabel = (p: Project) => (p.budgetMinutes === null ? null : `${settin
     <Button v-if="workspaces.canEditShared" variant="outline" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
   </EmptyState>
 
-  <div v-else class="overflow-hidden rounded-lg border">
+  <div v-else class="overflow-x-auto rounded-lg border">
     <table class="w-full text-sm">
-      <thead class="bg-muted/50 text-left text-xs text-muted-foreground">
-        <tr>
+      <thead class="text-left text-xs text-muted-foreground">
+        <tr class="border-b">
           <th class="px-3 py-2 font-medium">{{ $t('projects.name') }}</th>
           <th class="px-3 py-2 font-medium">{{ $t('projects.client') }}</th>
           <th class="px-3 py-2 font-medium">{{ $t('projects.budget') }}</th>
           <th class="px-3 py-2 font-medium">{{ $t('nav.tags') }}</th>
           <th class="px-3 py-2 font-medium">{{ $t('projects.status') }}</th>
-          <th class="w-20" />
+          <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
         </tr>
       </thead>
-      <tbody class="divide-y">
-        <tr v-for="p in list" :key="p.id" class="group hover:bg-muted/40" @dblclick="open(p)">
-          <td class="px-3 py-2">
+      <tbody>
+        <tr v-for="p in list" :key="p.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="(workspaces.canEditShared || p.managerId === account.status.user?.id) && open(p)">
+          <td class="px-3 py-1.5">
             <div class="flex items-center gap-2">
               <ProjectDot :project="p" show-alias />
               <span v-if="p.parentId" class="text-xs text-muted-foreground">↳ {{ projects.byId.get(p.parentId)?.name }}</span>
             </div>
           </td>
-          <td class="px-3 py-2 text-muted-foreground">{{ p.client ?? '–' }}</td>
-          <td class="px-3 py-2 tabular-nums text-muted-foreground">
+          <td class="px-3 py-1.5 text-muted-foreground">{{ p.client ?? '–' }}</td>
+          <td class="px-3 py-1.5 tabular-nums text-muted-foreground">
             <template v-if="budgetLabel(p)">{{ budgetLabel(p) }} · {{ $t(`projects.periods.${p.budgetPeriod}`) }}</template>
             <template v-else>–</template>
           </td>
-          <td class="px-3 py-2 text-muted-foreground">{{ tagCount(p.id) || '–' }}</td>
-          <td class="px-3 py-2">
+          <td class="px-3 py-1.5 text-muted-foreground">{{ tagCount(p.id) || '–' }}</td>
+          <td class="px-3 py-1.5">
             <Badge :variant="p.status === 'active' ? 'secondary' : 'outline'">{{ $t(`projects.statuses.${p.status}`) }}</Badge>
           </td>
-          <td class="px-2 py-1 text-right">
+          <td class="px-1 py-0.5" @click.stop>
             <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
               <Button v-if="workspaces.canEditShared || p.managerId === account.status.user?.id" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(p)"><Pencil /></Button>
               <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(p)"><Trash2 /></Button>

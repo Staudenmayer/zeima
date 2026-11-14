@@ -92,42 +92,72 @@ const cancelOpen = ref(false)
     <Button variant="outline" @click="openDialog(null)"><Plus /> {{ $t('meetings.new') }}</Button>
   </EmptyState>
 
-  <div v-else class="grid gap-6">
-    <section v-for="d in days" :key="d.date" class="grid gap-2">
-      <h2 class="text-sm font-medium">{{ dayLabel(d.date) }}</h2>
-      <ul class="grid gap-2">
-        <li v-for="o in d.list" :key="`${o.meeting.id}@${o.startAt}`" class="rounded-lg border p-3 text-sm" :class="o.meeting.cancelled ? 'opacity-60' : ''">
-          <div class="flex flex-wrap items-center gap-3">
-            <span class="w-28 tabular-nums text-muted-foreground">{{ when(o) }}</span>
-            <span class="flex-1 font-medium" :class="o.meeting.cancelled ? 'line-through' : ''">{{ o.meeting.title }}</span>
-            <Badge v-if="o.meeting.cancelled" variant="destructive">{{ $t('meetings.cancelled') }}</Badge>
-            <Badge v-else-if="o.meeting.rrule" variant="outline">{{ $t('meetings.repeating') }}</Badge>
-            <span v-if="organizer(o.meeting)" class="text-xs text-muted-foreground">{{ $t('meetings.by', { name: organizer(o.meeting) }) }}</span>
-          </div>
-          <div class="mt-1 flex flex-wrap items-center gap-3 pl-[7.75rem] text-xs text-muted-foreground">
-            <span v-if="o.meeting.location" class="flex items-center gap-1"><MapPin class="size-3" /> {{ o.meeting.location }}</span>
-            <button v-if="o.meeting.onlineUrl" type="button" class="flex items-center gap-1 hover:underline" @click="openUrl(o.meeting.onlineUrl)"><ExternalLink class="size-3" /> {{ $t('meetings.join') }}</button>
-            <span v-if="o.meeting.projectId && projects.byId.get(o.meeting.projectId)">{{ projects.byId.get(o.meeting.projectId)?.name }}</span>
-            <span v-if="o.meeting.attendeeIds.length" :title="[names(o, 'accepted') && `✓ ${names(o, 'accepted')}`, names(o, 'tentative') && `? ${names(o, 'tentative')}`, names(o, 'declined') && `✗ ${names(o, 'declined')}`].filter(Boolean).join('\n')">
-              {{ $t('meetings.counts', counts(o)) }}
-            </span>
-          </div>
-          <p v-if="o.meeting.note" class="mt-1 whitespace-pre-line pl-[7.75rem] text-xs text-muted-foreground">{{ o.meeting.note }}</p>
-          <div v-if="!o.meeting.cancelled" class="mt-2 flex flex-wrap items-center gap-2 pl-[7.75rem]">
-            <template v-if="o.meeting.userId !== me">
-              <Button size="sm" :variant="o.myStatus === 'accepted' ? 'default' : 'outline'" @click="respond(o, 'accepted')">{{ $t('meetings.accept') }}</Button>
-              <Button size="sm" :variant="o.myStatus === 'tentative' ? 'default' : 'outline'" @click="respond(o, 'tentative')">{{ $t('meetings.maybe') }}</Button>
-              <Button size="sm" :variant="o.myStatus === 'declined' ? 'destructive' : 'outline'" @click="respond(o, 'declined')">{{ $t('meetings.decline') }}</Button>
-            </template>
-            <template v-else>
-              <Button size="sm" variant="ghost" @click="openDialog(o.meeting)"><Pencil /> {{ $t('common.edit') }}</Button>
-              <Button size="sm" variant="ghost" @click="((cancelling = o.meeting), (cancelOpen = true))"><Ban /> {{ $t('meetings.cancel') }}</Button>
-            </template>
-            <Button size="sm" variant="ghost" @click="run(() => call(commands.meetingExportIcs(o.meeting.id)))"><Download /> {{ $t('meetings.export') }}</Button>
-          </div>
-        </li>
-      </ul>
-    </section>
+  <div v-else class="grid gap-3">
+    <div class="overflow-x-auto rounded-lg border">
+      <table class="w-full text-sm">
+        <thead class="text-left text-xs text-muted-foreground">
+          <tr class="border-b">
+            <th class="w-28 px-3 py-2 font-medium">{{ $t('timesheet.time') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('meetings.title') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('meetings.location') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('meetings.projectColumn') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('meetings.attendees') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('meetings.answer') }}</th>
+            <th class="w-28 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+          </tr>
+        </thead>
+        <tbody v-for="d in days" :key="d.date">
+          <tr class="border-b bg-muted/40">
+            <th colspan="7" class="px-3 py-1.5 text-left font-medium">{{ dayLabel(d.date) }}</th>
+          </tr>
+          <tr
+            v-for="o in d.list"
+            :key="`${o.meeting.id}@${o.startAt}`"
+            class="group border-b last:border-b-0 hover:bg-muted/30"
+            :class="[o.meeting.cancelled ? 'opacity-60' : '', o.meeting.userId === me && !o.meeting.cancelled ? 'cursor-pointer' : '']"
+            @click="o.meeting.userId === me && !o.meeting.cancelled && openDialog(o.meeting)"
+          >
+            <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">{{ when(o) }}</td>
+            <td class="max-w-72 px-3 py-1.5">
+              <div class="flex items-center gap-2">
+                <span class="truncate font-medium" :class="o.meeting.cancelled ? 'line-through' : ''" :title="o.meeting.note || undefined">{{ o.meeting.title }}</span>
+                <Badge v-if="o.meeting.cancelled" variant="destructive">{{ $t('meetings.cancelled') }}</Badge>
+                <Badge v-else-if="o.meeting.rrule" variant="outline">{{ $t('meetings.repeating') }}</Badge>
+              </div>
+              <p v-if="organizer(o.meeting)" class="truncate text-xs text-muted-foreground">{{ $t('meetings.by', { name: organizer(o.meeting) }) }}</p>
+              <p v-if="o.meeting.note" class="truncate text-xs text-muted-foreground" :title="o.meeting.note">{{ o.meeting.note }}</p>
+            </td>
+            <td class="px-3 py-1.5 text-muted-foreground" @click.stop>
+              <span v-if="o.meeting.location" class="flex items-center gap-1"><MapPin class="size-3 shrink-0" /> {{ o.meeting.location }}</span>
+              <button v-if="o.meeting.onlineUrl" type="button" class="flex items-center gap-1 whitespace-nowrap hover:underline" @click="openUrl(o.meeting.onlineUrl)"><ExternalLink class="size-3 shrink-0" /> {{ $t('meetings.join') }}</button>
+              <span v-if="!o.meeting.location && !o.meeting.onlineUrl">–</span>
+            </td>
+            <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ (o.meeting.projectId && projects.byId.get(o.meeting.projectId)?.name) || '–' }}</td>
+            <td
+              class="whitespace-nowrap px-3 py-1.5 text-muted-foreground"
+              :title="[names(o, 'accepted') && `✓ ${names(o, 'accepted')}`, names(o, 'tentative') && `? ${names(o, 'tentative')}`, names(o, 'declined') && `✗ ${names(o, 'declined')}`].filter(Boolean).join('\n')"
+            >{{ o.meeting.attendeeIds.length ? $t('meetings.counts', counts(o)) : '–' }}</td>
+            <td class="whitespace-nowrap px-3 py-1.5" @click.stop>
+              <div v-if="o.meeting.userId !== me && !o.meeting.cancelled" class="flex gap-1">
+                <Button size="sm" class="h-7" :variant="o.myStatus === 'accepted' ? 'default' : 'outline'" @click="respond(o, 'accepted')">{{ $t('meetings.accept') }}</Button>
+                <Button size="sm" class="h-7" :variant="o.myStatus === 'tentative' ? 'default' : 'outline'" @click="respond(o, 'tentative')">{{ $t('meetings.maybe') }}</Button>
+                <Button size="sm" class="h-7" :variant="o.myStatus === 'declined' ? 'destructive' : 'outline'" @click="respond(o, 'declined')">{{ $t('meetings.decline') }}</Button>
+              </div>
+              <span v-else class="text-muted-foreground">–</span>
+            </td>
+            <td class="px-1 py-0.5" @click.stop>
+              <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <template v-if="o.meeting.userId === me && !o.meeting.cancelled">
+                  <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openDialog(o.meeting)"><Pencil /></Button>
+                  <Button size="icon" variant="ghost" class="size-7" :title="$t('meetings.cancel')" @click="((cancelling = o.meeting), (cancelOpen = true))"><Ban /></Button>
+                </template>
+                <Button size="icon" variant="ghost" class="size-7" :title="$t('meetings.export')" @click="run(() => call(commands.meetingExportIcs(o.meeting.id)))"><Download /></Button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <p class="text-xs text-muted-foreground">{{ $t('meetings.hint') }}</p>
   </div>
 

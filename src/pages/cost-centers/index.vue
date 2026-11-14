@@ -142,25 +142,42 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
       </div>
     </section>
 
-    <ul class="divide-y rounded-lg border">
-      <li
-        v-for="{ cc, depth } in pageRows"
-        :key="cc.id"
-        class="group flex items-center gap-3 px-3 py-2 text-sm hover:bg-muted/40"
-        :class="cc.active ? '' : 'text-muted-foreground'"
-        @dblclick="open(cc)"
-      >
-        <span class="w-24 shrink-0 font-mono text-xs" :style="{ paddingLeft: `${depth * 1}rem` }">{{ cc.code }}</span>
-        <span class="flex-1 truncate">{{ cc.name }}</span>
-        <span class="text-xs text-muted-foreground tabular-nums">{{ validity(cc) }}</span>
-        <Badge v-if="cc.id === currentDefault?.costCenterId" variant="outline">{{ $t('costCenters.default') }}</Badge>
-        <Badge v-if="!cc.active" variant="secondary">{{ $t('costCenters.inactive') }}</Badge>
-        <div class="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(cc)"><Pencil /></Button>
-          <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(cc)"><Trash2 /></Button>
-        </div>
-      </li>
-    </ul>
+    <div class="overflow-x-auto rounded-lg border">
+      <table class="w-full text-sm">
+        <thead class="text-left text-xs text-muted-foreground">
+          <tr class="border-b">
+            <th class="w-32 px-3 py-2 font-medium">{{ $t('costCenters.code') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('costCenters.name') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('costCenters.validity') }}</th>
+            <th class="px-3 py-2 font-medium">{{ $t('costCenters.status') }}</th>
+            <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="{ cc, depth } in pageRows"
+            :key="cc.id"
+            class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30"
+            :class="cc.active ? '' : 'text-muted-foreground'"
+            @click="workspaces.canEditShared && open(cc)"
+          >
+            <td class="px-3 py-1.5 font-mono text-xs" :style="{ paddingLeft: `calc(0.75rem + ${depth}rem)` }">{{ cc.code }}</td>
+            <td class="max-w-0 w-full truncate px-3 py-1.5">{{ cc.name }}</td>
+            <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">{{ validity(cc) || '–' }}</td>
+            <td class="whitespace-nowrap px-3 py-1.5">
+              <Badge v-if="cc.id === currentDefault?.costCenterId" variant="outline">{{ $t('costCenters.default') }}</Badge>
+              <Badge v-if="!cc.active" variant="secondary">{{ $t('costCenters.inactive') }}</Badge>
+            </td>
+            <td class="px-1 py-0.5" @click.stop>
+              <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(cc)"><Pencil /></Button>
+                <Button v-if="workspaces.canEditShared" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(cc)"><Trash2 /></Button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <div v-if="pageCount > 1" class="-mt-2 flex items-center justify-between gap-3 text-sm">
       <span class="tabular-nums text-muted-foreground">

@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { Building2, MailPlus, Plus, Trash2, UserMinus, UserX, UserCheck, X } from '@lucide/vue'
+import { Building2, MailPlus, Pencil, Plus, Trash2, UserMinus, UserX, UserCheck, X } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -209,32 +209,48 @@ const deleteOrgOpen = ref(false)
       </TabsList>
 
       <TabsContent value="members">
-        <ul class="divide-y rounded-lg border">
-          <li v-for="m in org.members" :key="m.id" class="flex items-center gap-3 px-3 py-2 text-sm">
-            <div class="min-w-0 flex-1">
-              <p class="truncate font-medium">{{ label(m) }}</p>
-              <p v-if="m.name && m.email" class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
-            </div>
-            <Badge v-if="!m.active" variant="outline">{{ $t('org.deactivated') }}</Badge>
-            <Select v-if="canEditRole(m)" :model-value="m.role" @update:model-value="(r) => run(() => org.updateMember(m.id, { role: r as OrgRole }))">
-              <SelectTrigger class="h-8 w-32"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="r in ROLES" :key="r" :value="r">{{ $t(`org.roles.${r}`) }}</SelectItem>
-              </SelectContent>
-            </Select>
-            <Badge v-else variant="secondary">{{ $t(`org.roles.${m.role}`) }}</Badge>
-            <div v-if="canTouch(m)" class="flex">
-              <Button
-                size="icon" variant="ghost" class="size-7"
-                :title="m.active ? $t('org.deactivate') : $t('org.reactivate')"
-                @click="run(() => org.updateMember(m.id, { active: !m.active }))"
-              >
-                <UserX v-if="m.active" /><UserCheck v-else />
-              </Button>
-              <Button size="icon" variant="ghost" class="size-7" :title="$t('org.remove')" @click="askRemove(m)"><UserMinus /></Button>
-            </div>
-          </li>
-        </ul>
+        <div class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.member') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.role') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.status') }}</th>
+                <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in org.members" :key="m.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+                <td class="px-3 py-1.5">
+                  <p class="truncate font-medium">{{ label(m) }}</p>
+                  <p v-if="m.name && m.email" class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
+                </td>
+                <td class="px-3 py-1.5">
+                  <Select v-if="canEditRole(m)" :model-value="m.role" @update:model-value="(r) => run(() => org.updateMember(m.id, { role: r as OrgRole }))">
+                    <SelectTrigger class="h-8 w-32"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="r in ROLES" :key="r" :value="r">{{ $t(`org.roles.${r}`) }}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Badge v-else variant="secondary">{{ $t(`org.roles.${m.role}`) }}</Badge>
+                </td>
+                <td class="px-3 py-1.5"><Badge v-if="!m.active" variant="outline">{{ $t('org.deactivated') }}</Badge><span v-else class="text-muted-foreground">{{ $t('org.active') }}</span></td>
+                <td class="px-1 py-0.5">
+                  <div v-if="canTouch(m)" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button
+                      size="icon" variant="ghost" class="size-7"
+                      :title="m.active ? $t('org.deactivate') : $t('org.reactivate')"
+                      @click="run(() => org.updateMember(m.id, { active: !m.active }))"
+                    >
+                      <UserX v-if="m.active" /><UserCheck v-else />
+                    </Button>
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('org.remove')" @click="askRemove(m)"><UserMinus /></Button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <div v-if="isOwner" class="mt-6">
           <Button variant="outline" class="text-destructive" @click="deleteOrgOpen = true"><Trash2 /> {{ $t('org.deleteOrg') }}</Button>
         </div>
@@ -242,27 +258,53 @@ const deleteOrgOpen = ref(false)
 
       <TabsContent value="online">
         <p v-if="org.presence.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('org.nobodyOnline') }}</p>
-        <ul v-else class="divide-y rounded-lg border">
-          <li v-for="p in org.presence" :key="p.userId" class="flex items-center gap-3 px-3 py-2 text-sm">
-            <span class="size-2.5 rounded-full" :style="{ backgroundColor: STATE_COLOR[p.state] }" />
-            <span class="flex-1 truncate font-medium">{{ memberName(p.userId) }}</span>
-            <span v-if="p.projectId" class="truncate text-muted-foreground">{{ projects.byId.get(p.projectId)?.name }}</span>
-            <span class="text-xs text-muted-foreground">{{ $t(`org.presenceStates.${p.state}`) }}</span>
-          </li>
-        </ul>
+        <div v-else class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.member') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.project') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.status') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in org.presence" :key="p.userId" class="border-b last:border-b-0 hover:bg-muted/30">
+                <td class="px-3 py-1.5 font-medium"><span class="flex items-center gap-2"><span class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: STATE_COLOR[p.state] }" />{{ memberName(p.userId) }}</span></td>
+                <td class="px-3 py-1.5 text-muted-foreground">{{ p.projectId ? projects.byId.get(p.projectId)?.name : '–' }}</td>
+                <td class="px-3 py-1.5 text-muted-foreground">{{ $t(`org.presenceStates.${p.state}`) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.presenceHint') }}</p>
       </TabsContent>
 
       <TabsContent v-if="canInvite" value="invitations">
         <p v-if="org.invitations.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('org.noInvitations') }}</p>
-        <ul v-else class="divide-y rounded-lg border">
-          <li v-for="i in org.invitations" :key="i.id" class="flex items-center gap-3 px-3 py-2 text-sm">
-            <span class="flex-1 truncate">{{ i.email }}</span>
-            <span class="text-xs text-muted-foreground">{{ format.shortDate(i.createdAt) }}</span>
-            <Badge variant="secondary">{{ $t(`org.roles.${i.role}`) }}</Badge>
-            <Button size="icon" variant="ghost" class="size-7" :title="$t('org.withdraw')" @click="run(() => org.withdraw(i.id))"><X /></Button>
-          </li>
-        </ul>
+        <div v-else class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <th class="px-3 py-2 font-medium">{{ $t('org.email') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.invited') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.role') }}</th>
+                <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="i in org.invitations" :key="i.id" class="group border-b last:border-b-0 hover:bg-muted/30">
+                <td class="px-3 py-1.5">{{ i.email }}</td>
+                <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ format.shortDate(i.createdAt) }}</td>
+                <td class="px-3 py-1.5"><Badge variant="secondary">{{ $t(`org.roles.${i.role}`) }}</Badge></td>
+                <td class="px-1 py-0.5">
+                  <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('org.withdraw')" @click="run(() => org.withdraw(i.id))"><X /></Button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.invitationHint') }}</p>
       </TabsContent>
 
@@ -294,27 +336,51 @@ const deleteOrgOpen = ref(false)
 
       <TabsContent v-if="canManage" value="policies">
         <p v-if="!workspaces.inOrg" class="rounded-md border p-3 text-sm text-muted-foreground">{{ $t('org.policy.switch') }}</p>
-        <ul v-else class="divide-y rounded-lg border">
-          <li v-for="s in policyScopes" :key="s.path ?? 'org'" class="flex items-center gap-3 px-3 py-2 text-sm">
-            <div class="min-w-0 flex-1">
-              <p class="font-medium">{{ s.label }}</p>
-              <p class="truncate text-xs text-muted-foreground">{{ policySummary(policyOf(s.path)) }}</p>
-            </div>
-            <Button size="sm" variant="outline" @click="editPolicy(s)">{{ $t('common.edit') }}</Button>
-            <Button v-if="policyOf(s.path)" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="run(() => org.deletePolicy(policyOf(s.path)!.id))"><Trash2 /></Button>
-          </li>
-        </ul>
+        <div v-else class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.scope') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.rules') }}</th>
+                <th class="w-24 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="s in policyScopes" :key="s.path ?? 'org'" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="editPolicy(s)">
+                <td class="whitespace-nowrap px-3 py-1.5 font-medium">{{ s.label }}</td>
+                <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground">{{ policySummary(policyOf(s.path)) }}</td>
+                <td class="px-1 py-0.5" @click.stop>
+                  <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="editPolicy(s)"><Pencil /></Button>
+                    <Button v-if="policyOf(s.path)" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="run(() => org.deletePolicy(policyOf(s.path)!.id))"><Trash2 /></Button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.policy.hint') }}</p>
       </TabsContent>
 
       <TabsContent v-if="org.role && CAN.audit(org.role)" value="activity">
-        <ul class="divide-y rounded-lg border">
-          <li v-for="a in org.audit" :key="a.id" class="flex items-baseline gap-3 px-3 py-2 text-sm">
-            <span class="w-40 shrink-0 text-xs text-muted-foreground">{{ format.shortDate(a.at) }} {{ format.time(a.at) }}</span>
-            <span class="flex-1">{{ actionLabel(a.action) }}<span v-if="a.target" class="text-muted-foreground"> · {{ a.target.length === 36 ? memberName(a.target) : a.target }}</span></span>
-            <span class="text-xs text-muted-foreground">{{ actor(a.actorId) }}</span>
-          </li>
-        </ul>
+        <div class="overflow-x-auto rounded-lg border">
+          <table class="w-full text-sm">
+            <thead class="text-left text-xs text-muted-foreground">
+              <tr class="border-b">
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.when') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.what') }}</th>
+                <th class="px-3 py-2 font-medium">{{ $t('org.col.who') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="a in org.audit" :key="a.id" class="border-b last:border-b-0 hover:bg-muted/30">
+                <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">{{ format.shortDate(a.at) }} {{ format.time(a.at) }}</td>
+                <td class="px-3 py-1.5">{{ actionLabel(a.action) }}<span v-if="a.target" class="text-muted-foreground"> · {{ a.target.length === 36 ? memberName(a.target) : a.target }}</span></td>
+                <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ actor(a.actorId) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <div v-if="!org.auditDone" class="mt-3 text-center">
           <Button variant="outline" size="sm" @click="run(() => org.loadMoreAudit())">{{ $t('org.loadMore') }}</Button>
         </div>
