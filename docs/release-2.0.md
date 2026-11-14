@@ -53,10 +53,11 @@ organization:
   `docs/keycloak.md`.
 - **Plans**: on the cloud the organization routes need a plan with the `org`
   feature (Team, Enterprise). Self-hosted installs rely on the license.
-- **Compatibility**: apps 1.x still sync their personal workspace with a 2.0
-  server. Organization features need the 2.0 app. A 2.0 app against an older
-  server works as before for the personal workspace; organization pages ask
-  for a newer server.
+- **Compatibility** (by design, not yet tried with a real 1.x app): an app 1.x
+  keeps syncing its personal workspace with a 2.0 server, because 2.0 adds
+  tables and routes without changing the old ones. A 2.0 app against an older
+  server syncs its personal workspace as before; the organization pages show
+  the server's "not found" error there.
 - **One API process** for now: presence is kept in memory.
 
 ## Checks before tagging
