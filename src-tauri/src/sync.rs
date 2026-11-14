@@ -735,6 +735,12 @@ async fn listen_once(app: &AppHandle) -> Result<(), String> {
     let (mut socket, _) = tokio_tungstenite::connect_async(request)
         .await
         .map_err(|e| e.to_string())?;
+    // Connected, with a fresh token: catch up on whatever happened while this
+    // device was not listening (the start, a restored or refreshed sign-in, a
+    // dropped connection). A failed run shows in the sync status.
+    if let Err(err) = run(app).await {
+        eprintln!("sync failed: {err}");
+    }
     while let Some(message) = socket.next().await {
         match message.map_err(|e| e.to_string())? {
             Message::Text(text) if text.as_str().contains("\"changes\"") => {
@@ -771,7 +777,49 @@ pub fn spawn_listener(app: AppHandle) {
                 Ok(()) => pause = Duration::from_secs(5),
                 Err(_) => pause = (pause * 2).min(Duration::from_secs(120)),
             }
-            tokio::time::sleep(pause).await;
+            // A sign-in ends the wait: no minutes of silence after logging in.
+            tokio::select! {
+                () = tokio::time::sleep(pause) => {}
+                () = LISTENER_WAKE.notified() => pause = Duration::from_secs(5),
+            }
+        }
+    });
+}
+
+/// The longest the app waits for the last sync before it quits.
+const EXIT_SYNC_LIMIT: Duration = Duration::from_secs(8);
+
+/// Called when the app is asked to quit: syncs one last time (at most
+/// `EXIT_SYNC_LIMIT`, so an unreachable server cannot keep it open), then quits
+/// with `code`. Returns true when the quit has to wait for that; false when
+/// this is the quit that follows it.
+pub fn before_exit(app: &AppHandle, code: i32) -> bool {
+    static EXITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if EXITING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return false;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        match tokio::time::timeout(EXIT_SYNC_LIMIT, run(&app)).await {
+            Ok(Err(err)) => eprintln!("sync on quit failed: {err}"),
+            Err(_) => eprintln!("sync on quit took too long, quitting"),
+            Ok(Ok(_)) => {}
+        }
+        app.exit(code);
+    });
+    true
+}
+
+static LISTENER_WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Right after a sign-in: syncs now and lets the "changes available" channel
+/// connect without waiting out its pause.
+pub fn after_sign_in(app: &AppHandle) {
+    LISTENER_WAKE.notify_one();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(err) = run(&app).await {
+            eprintln!("sync failed: {err}");
         }
     });
 }

@@ -293,8 +293,16 @@ pub fn run() {
             activity::spawn(app.handle().clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Quitting (the tray's Quit) first sends what is still unsent.
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if sync::before_exit(app, code.unwrap_or(0)) {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
 #[cfg(test)]

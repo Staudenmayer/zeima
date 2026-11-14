@@ -370,7 +370,9 @@ pub async fn account_sign_in(
         Err(e) if e == "cancelled" => return Err(err("cancelled", e)),
         Err(e) => return Err(err("oauth", e)),
     }
-    account_status(app, state).await
+    let status = account_status(app.clone(), state).await;
+    crate::sync::after_sign_in(&app);
+    status
 }
 
 #[tauri::command]
