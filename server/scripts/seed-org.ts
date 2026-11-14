@@ -201,7 +201,10 @@ const today = new Date()
 today.setUTCHours(0, 0, 0, 0)
 const rnd = (seed: string) => {
   let h = createHash('sha1').update(seed).digest().readUInt32LE(0)
-  return () => ((h = (Math.imul(h, 1664525) + 1013904223) >>> 0) / 2 ** 32)
+  return () => {
+    h = (Math.imul(h, 1664525) + 1013904223) >>> 0
+    return h / 2 ** 32
+  }
 }
 const PLAN: [string, string, number, number, string[], string][] = [
   ['Planning', 'Atlas', 8.5, 9.5, [], 'Plan the day'],
