@@ -739,6 +739,7 @@ const de: typeof en = {
     hint: 'Alle in der Organisation sehen diese Liste. Abteilungen und Tätigkeiten werden unter Organisation festgelegt.',
   },
   meetings: {
+    addAttendees: 'Personen wählen…',
     rooms: 'Räume',
     otherPlacePlaceholder: 'Wo (optional)',
     otherPlace: 'Anderer Ort',
@@ -854,6 +855,7 @@ const de: typeof en = {
     parent: 'Innerhalb von',
     departmentsHint: 'Die Abteilungen der Organisation, mit Schrägstrich verschachtelt (dev/backend). Ordne Personen in der Mitgliederliste zu (Person anklicken).',
     renameDepartment: 'Abteilung umbenennen',
+    pickDepartments: 'Abteilungen wählen…',
     noDepartments: 'Noch keine Abteilungen. Mit Abteilungen sehen Manager ihr eigenes Team.',
     peopleCount: 'niemand | 1 Person | {n} Personen',
     addPerson: 'Person hinzufügen …',

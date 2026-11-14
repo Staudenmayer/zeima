@@ -737,6 +737,7 @@ export default {
     hint: 'Everyone in the organization sees this list. Departments and job descriptions are set under Organization.',
   },
   meetings: {
+    addAttendees: 'Choose people…',
     rooms: 'Rooms',
     otherPlacePlaceholder: 'Where (optional)',
     otherPlace: 'Another place',
@@ -852,6 +853,7 @@ export default {
     parent: 'Inside',
     departmentsHint: 'The departments of the organization, nested with a slash (dev/backend). Put people into them in the member list (click a person).',
     renameDepartment: 'Rename department',
+    pickDepartments: 'Choose departments…',
     noDepartments: 'No departments yet. Departments let managers see their own team.',
     peopleCount: 'no people | 1 person | {n} people',
     addPerson: 'Add person…',

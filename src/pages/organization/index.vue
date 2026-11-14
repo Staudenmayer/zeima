@@ -13,8 +13,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import PolicyDialog from '@/components/time/PolicyDialog.vue'
+import MultiSelect from '@/components/time/MultiSelect.vue'
 import PresenceDot from '@/components/time/PresenceDot.vue'
-import { Checkbox } from '@/components/ui/checkbox'
 import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
@@ -272,9 +272,8 @@ function openPerson(r: PersonRow) {
   personJob.value = (r.member ? org.directory.find((e) => e.id === r.member!.id)?.jobId : r.invitation?.jobId) ?? NO_JOB
   personOpen.value = true
 }
-function toggleGroup(list: string[], id: string, on: boolean) {
-  return on ? [...new Set([...list, id])] : list.filter((x) => x !== id)
-}
+/** The departments to pick from, nested as they are. */
+const departmentOptions = computed(() => org.departments.map((g) => ({ value: g.id, label: g.name, depth: g.path.split('/').length - 1 })))
 async function savePerson() {
   const r = editingPerson.value
   if (!r) return
@@ -556,12 +555,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
         </div>
         <div v-if="org.departments.length" class="grid gap-2">
           <Label>{{ $t('org.tabs.departments') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
-          <div class="grid max-h-36 gap-1.5 overflow-y-auto rounded-md border p-2">
-            <label v-for="g in org.departments" :key="g.id" class="flex items-center gap-2 text-sm" :style="{ paddingLeft: `${(g.path.split('/').length - 1) * 1}rem` }">
-              <Checkbox :model-value="inviteGroups.includes(g.id)" @update:model-value="(on) => (inviteGroups = toggleGroup(inviteGroups, g.id, on === true))" />
-              {{ g.name }}
-            </label>
-          </div>
+          <MultiSelect v-model="inviteGroups" :options="departmentOptions" :placeholder="$t('org.pickDepartments')" :search-placeholder="$t('directory.search')" />
         </div>
         <div class="grid gap-2">
           <Label>{{ $t('directory.jobTitle') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
@@ -616,12 +610,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
       <form class="grid gap-4" @submit.prevent="savePerson">
         <div v-if="org.departments.length" class="grid gap-2">
           <Label>{{ $t('org.tabs.departments') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
-          <div class="grid max-h-36 gap-1.5 overflow-y-auto rounded-md border p-2">
-            <label v-for="g in org.departments" :key="g.id" class="flex items-center gap-2 text-sm" :style="{ paddingLeft: `${(g.path.split('/').length - 1) * 1}rem` }">
-              <Checkbox :model-value="personGroups.includes(g.id)" @update:model-value="(on) => (personGroups = toggleGroup(personGroups, g.id, on === true))" />
-              {{ g.name }}
-            </label>
-          </div>
+          <MultiSelect v-model="personGroups" :options="departmentOptions" :placeholder="$t('org.pickDepartments')" :search-placeholder="$t('directory.search')" />
         </div>
         <div class="grid gap-2">
           <Label>{{ $t('directory.jobTitle') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>

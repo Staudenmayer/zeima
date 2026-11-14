@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { commands, type Meeting, type MeetingInput, type Room } from '@/bindings'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,6 +18,7 @@ import { useOrgStore } from '@/stores/org'
 import { useProjectsStore } from '@/stores/projects'
 import { useWorkspaceStore } from '@/stores/workspace'
 import ActivitySelect from './ActivitySelect.vue'
+import MultiSelect from './MultiSelect.vue'
 import CostCenterSelect from './CostCenterSelect.vue'
 import ProjectSelect from './ProjectSelect.vue'
 import TagPicker from './TagPicker.vue'
@@ -195,13 +195,6 @@ const conflicts = computed(() =>
 )
 const clock = (ms: number) => toTimeInput(ms)
 
-function toggle(id: string, on: boolean) {
-  const set = new Set(form.value.attendees)
-  if (on) set.add(id)
-  else set.delete(id)
-  form.value.attendees = [...set]
-}
-
 async function save() {
   const f = form.value
   if (f.roomId && roomBooked.value.has(f.roomId)) {
@@ -282,13 +275,13 @@ async function save() {
         </div>
         <div class="grid gap-2">
           <Label>{{ $t('meetings.attendees') }}</Label>
-          <div class="grid max-h-36 gap-1.5 overflow-y-auto rounded-md border p-2">
-            <label v-for="p in others" :key="p.id" class="flex items-center gap-2 text-sm">
-              <Checkbox :model-value="form.attendees.includes(p.id)" @update:model-value="toggle(p.id, $event === true)" />
-              {{ p.name || $t('team.someone') }}
-            </label>
-            <p v-if="others.length === 0" class="text-sm text-muted-foreground">{{ $t('meetings.noPeople') }}</p>
-          </div>
+          <MultiSelect
+            v-model="form.attendees"
+            :options="others.map((p) => ({ value: p.id, label: p.name || $t('team.someone') }))"
+            :placeholder="$t('meetings.addAttendees')"
+            :empty="$t('meetings.noPeople')"
+            :search-placeholder="$t('directory.search')"
+          />
           <p v-for="c in conflicts" :key="c.id" class="text-xs text-amber-600">
             {{ $t('meetings.busy', { name: nameOf(c.id), times: c.times.map((t) => (t.kind === 'absence' ? $t('meetings.absent') : `${clock(t.from)}–${clock(t.to)}`)).join(', ') }) }}
           </p>
