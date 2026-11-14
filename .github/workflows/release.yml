@@ -73,6 +73,22 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - run: bun install --frozen-lockfile
+      - name: macOS signing (only when the Apple secrets are set)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # Unset secrets arrive as empty strings, and Tauri treats an empty
+        # APPLE_CERTIFICATE as "sign" and fails. Export only what is set.
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then echo "No Apple certificate: building unsigned."; exit 0; fi
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -n "${!v}" ]; then echo "$v=${!v}" >> "$GITHUB_ENV"; fi
+          done
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -81,14 +97,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Keys of the licence issuers this build trusts (a repository variable).
           ZEIMA_ENTITLEMENT_KEYS: ${{ vars.ZEIMA_ENTITLEMENT_KEYS }}
-          # macOS signing and notarization. Without these secrets the build is
-          # unsigned (Gatekeeper warns). See docs/releasing.md.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tauriScript: bunx tauri
           tagName: ${{ github.ref_name }}
@@ -105,7 +113,7 @@ jobs:
     # zips are attached to. Waiting inside this job timed out, because the
     # builds take longer than the wait. Still runs if one platform failed.
     needs: [verify, build]
-    if: ${{ !cancelled() && needs.verify.result == 'success' }}
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
