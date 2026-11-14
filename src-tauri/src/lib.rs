@@ -16,6 +16,7 @@ mod license;
 mod oauth;
 mod org;
 mod os;
+mod presence;
 mod secrets;
 mod settings;
 mod shortcuts;
@@ -173,6 +174,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             events::Navigate,
             events::PromptsChanged,
             events::SyncChanged,
+            events::PresenceChanged,
         ])
 }
 
@@ -259,6 +261,7 @@ pub fn run() {
             background::spawn(app.handle().clone());
             sync::spawn_listener(app.handle().clone());
             sync::spawn_push_watcher(app.handle().clone());
+            presence::spawn(app.handle().clone());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { activity::on_startup(&handle).await });
             let handle = app.handle().clone();

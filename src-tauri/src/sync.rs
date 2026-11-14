@@ -729,6 +729,16 @@ async fn listen_once(app: &AppHandle) -> Result<(), String> {
                     eprintln!("sync failed: {err}");
                 }
             }
+            Message::Text(text) if text.as_str().contains("\"presence\"") => {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(text.as_str()) {
+                    if let Some(org_id) = value.get("orgId").and_then(|v| v.as_str()) {
+                        let _ = crate::events::PresenceChanged {
+                            org_id: org_id.into(),
+                        }
+                        .emit(app);
+                    }
+                }
+            }
             Message::Close(_) => break,
             _ => {}
         }

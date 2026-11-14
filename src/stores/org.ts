@@ -36,6 +36,12 @@ export interface Department {
   parentId: string | null
   memberIds: string[]
 }
+export interface PresenceItem {
+  userId: string
+  state: 'online' | 'tracking' | 'in_meeting' | 'away'
+  projectId: string | null
+  since: number
+}
 export interface AuditEntry {
   id: number
   at: number
@@ -64,6 +70,7 @@ export const useOrgStore = defineStore('org', () => {
   const departments = ref<Department[]>([])
   const audit = ref<AuditEntry[]>([])
   const auditDone = ref(false)
+  const presence = ref<PresenceItem[]>([])
   const loading = ref(false)
 
   const role = computed<OrgRole | null>(() => orgs.value.find((o) => o.id === activeId.value)?.role ?? null)
@@ -103,6 +110,10 @@ export const useOrgStore = defineStore('org', () => {
     } finally {
       loading.value = false
     }
+  }
+
+  async function loadPresence() {
+    if (activeId.value) presence.value = await api<PresenceItem[]>('GET', `${base()}/presence`)
   }
 
   async function loadMoreAudit() {
@@ -162,7 +173,7 @@ export const useOrgStore = defineStore('org', () => {
 
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
-    loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
+    presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

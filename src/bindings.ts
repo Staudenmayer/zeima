@@ -233,6 +233,7 @@ export const commands = {
 export const events = {
 	dataChanged: makeEvent<DataChanged>("data-changed"),
 	navigate: makeEvent<Navigate>("navigate"),
+	presenceChanged: makeEvent<PresenceChanged>("presence-changed"),
 	promptsChanged: makeEvent<PromptsChanged>("prompts-changed"),
 	quickSwitchOpened: makeEvent<QuickSwitchOpened>("quick-switch-opened"),
 	syncChanged: makeEvent<SyncChanged>("sync-changed"),
@@ -457,6 +458,11 @@ export type AppSettings = {
 	timeFormat?: TimeFormat,
 	numberFormat?: NumberFormat,
 	weekStart?: WeekStart,
+	/**
+	 *  Tell the organizations which project the running timer is on. Off by
+	 *  default: they hear only that the person is tracking.
+	 */
+	shareProjectPresence?: boolean,
 };
 
 export type AutoPauseConfig = {
@@ -859,6 +865,11 @@ export type PlanOffer = {
 export type PlanStatus = "valid" | "grace" | 
 /**  No token, or it lapsed. */
 "free";
+
+/**  Somebody's presence in an organization changed. */
+export type PresenceChanged = {
+	orgId: string,
+};
 
 /**  Summary of a bundled profile for pickers. */
 export type ProfileInfo = {

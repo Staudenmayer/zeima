@@ -10,6 +10,7 @@ import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { ORG_ROLES, type OrgRole, SECURITY } from '../../plugins/auth.ts'
 import { type Actor, authorize, scopeOf } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
+import { PRESENCE_STATES } from '../../plugins/presence.ts'
 import { audit, auditEntries, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
 
 const Role = Type.Union(ORG_ROLES.map((r) => Type.Literal(r)))
@@ -513,6 +514,63 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       },
     })
   }
+
+  // --------------------------------------------------------------- presence
+  const PresenceItem = Type.Object({
+    userId: Type.String(),
+    state: Type.Union(PRESENCE_STATES.map((s) => Type.Literal(s))),
+    projectId: Type.Union([Type.String(), Type.Null()], { description: 'Only when the person chose to share what they work on' }),
+    since: Type.Integer({ description: 'Unix ms' }),
+  })
+
+  app.put(
+    '/orgs/:orgId/presence',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Reports the caller\'s presence (online, tracking, in a meeting, away)',
+        description:
+          'Devices report on every change and about once a minute; a report older than two and a half minutes no longer counts, and neither does one from a person with no connected device. ' +
+          'Send `projectId` only if the person chose to share what they work on. `offline` removes the report.',
+        security: SECURITY,
+        params: OrgParams,
+        body: Type.Object({
+          state: Type.Union([...PRESENCE_STATES.map((s) => Type.Literal(s)), Type.Literal('offline')]),
+          projectId: Type.Optional(Type.Union([Type.String({ format: 'uuid' }), Type.Null()])),
+        }),
+        response: { 204: Type.Null(), ...problems(400, 401, 403) },
+      },
+    },
+    async (request, reply) => {
+      const { orgId } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      const { state, projectId } = request.body
+      const changed =
+        state === 'offline'
+          ? app.presence.remove(actor.user.id, orgId).length > 0
+          : app.presence.set(orgId, actor.user.id, state, projectId ?? null, Date.now())
+      if (changed) await app.notifyPresence(orgId)
+      return reply.code(204).send(null)
+    },
+  )
+
+  app.get(
+    '/orgs/:orgId/presence',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Who is online, tracking or away in the organization',
+        security: SECURITY,
+        params: OrgParams,
+        response: { 200: Type.Array(PresenceItem), ...problems(401, 403) },
+      },
+    },
+    async (request) => {
+      const { orgId } = request.params
+      actorIn({ user: request.user! }, orgId)
+      return app.presence.list(orgId, Date.now(), (userId) => app.hub.has(userId))
+    },
+  )
 
   app.get(
     '/orgs/:orgId/audit',

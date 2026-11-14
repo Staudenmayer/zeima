@@ -12,7 +12,10 @@ import type { FastifyInstance } from 'fastify'
 import fp from 'fastify-plugin'
 import { Type } from 'typebox'
 import type { WebSocket } from 'ws'
+import { schema } from '../db/index.ts'
 import { SECURITY } from './auth.ts'
+import { PresenceBoard } from './presence.ts'
+import { eq } from 'drizzle-orm'
 
 export const TOKEN_EXPIRED = 4401
 
@@ -49,6 +52,21 @@ export class Hub {
     }
   }
 
+  /** Whether one of the user's devices is connected. */
+  has(userId: string) {
+    return (this.clients.get(userId)?.size ?? 0) > 0
+  }
+
+  /** Tells the users' devices that presence in an organization changed. */
+  notifyPresence(userIds: Iterable<string>, orgId: string) {
+    const message = JSON.stringify({ type: 'presence', orgId })
+    for (const userId of new Set(userIds)) {
+      for (const client of this.clients.get(userId) ?? []) {
+        if (client.socket.readyState === client.socket.OPEN) client.socket.send(message)
+      }
+    }
+  }
+
   get size() {
     let n = 0
     for (const set of this.clients.values()) n += set.size
@@ -59,6 +77,9 @@ export class Hub {
 declare module 'fastify' {
   interface FastifyInstance {
     hub: Hub
+    presence: PresenceBoard
+    /** Tells the members of an organization that presence changed. */
+    notifyPresence: (orgId: string) => Promise<void>
   }
 }
 
@@ -67,6 +88,13 @@ export const realtimePlugin = fp(
     await app.register(websocket, { options: { maxPayload: 1024 } })
     const hub = new Hub()
     app.decorate('hub', hub)
+    const presence = new PresenceBoard()
+    app.decorate('presence', presence)
+    app.decorate('notifyPresence', async (orgId: string) => {
+      if (!app.db) return
+      const members = await app.db.select({ id: schema.kcOrgMember.userId }).from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, orgId))
+      hub.notifyPresence(members.map((m) => m.id), orgId)
+    })
 
     app.get(
       '/v1/sync/events',
@@ -91,6 +119,10 @@ export const realtimePlugin = fp(
         socket.on('close', () => {
           clearTimeout(timer)
           remove()
+          // The last device is gone: the person is no longer present.
+          if (!hub.has(user.id)) {
+            for (const orgId of presence.remove(user.id)) void app.notifyPresence(orgId).catch(() => {})
+          }
         })
         socket.send(JSON.stringify({ type: 'ready' }))
       },

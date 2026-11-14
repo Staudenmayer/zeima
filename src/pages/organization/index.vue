@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Building2, MailPlus, Plus, Trash2, UserMinus, UserX, UserCheck, X } from '@lucide/vue'
@@ -14,7 +14,9 @@ import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import { useFormat } from '@/composables/useFormat'
+import { events } from '@/bindings'
 import { errorMessage } from '@/lib/ipc'
+import { useProjectsStore } from '@/stores/projects'
 import { useAccountStore } from '@/stores/account'
 import { CAN, type Department, type Invitation, type Member, type OrgRole, useOrgStore } from '@/stores/org'
 
@@ -33,11 +35,27 @@ const isOwner = computed(() => !!org.role && CAN.delete(org.role))
 /** Roles this person may hand out in an invitation. */
 const inviteRoles = computed<Invitation['role'][]>(() => (canAssign.value ? ['member', 'manager', 'admin'] : ['member']))
 
-onMounted(load)
+const projects = useProjectsStore()
+let unlisten: (() => void) | undefined
+let refresh: ReturnType<typeof setInterval> | undefined
+onMounted(async () => {
+  await load()
+  // Others' status changes arrive as events; a quiet minute still ages out stale reports.
+  unlisten = await events.presenceChanged.listen((e) => {
+    if (e.payload.orgId === org.activeId) void org.loadPresence().catch(() => {})
+  })
+  refresh = setInterval(() => void org.loadPresence().catch(() => {}), 60_000)
+})
+onUnmounted(() => {
+  unlisten?.()
+  clearInterval(refresh)
+})
+const STATE_COLOR: Record<string, string> = { online: '#22c55e', tracking: '#3b82f6', in_meeting: '#f59e0b', away: '#9ca3af' }
 async function load() {
   if (!account.status.signedIn) return
   try {
     await org.load()
+    await org.loadPresence().catch(() => {})
   } catch (err) {
     toast.error(errorMessage(err))
   }
@@ -154,6 +172,7 @@ const deleteOrgOpen = ref(false)
     <Tabs default-value="members">
       <TabsList>
         <TabsTrigger value="members">{{ $t('org.tabs.members') }}</TabsTrigger>
+        <TabsTrigger value="online">{{ $t('org.tabs.online') }}<span v-if="org.presence.length" class="ml-1 text-muted-foreground">({{ org.presence.length }})</span></TabsTrigger>
         <TabsTrigger v-if="canInvite" value="invitations">
           {{ $t('org.tabs.invitations') }}<span v-if="org.invitations.length" class="ml-1 text-muted-foreground">({{ org.invitations.length }})</span>
         </TabsTrigger>
@@ -191,6 +210,19 @@ const deleteOrgOpen = ref(false)
         <div v-if="isOwner" class="mt-6">
           <Button variant="outline" class="text-destructive" @click="deleteOrgOpen = true"><Trash2 /> {{ $t('org.deleteOrg') }}</Button>
         </div>
+      </TabsContent>
+
+      <TabsContent value="online">
+        <p v-if="org.presence.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('org.nobodyOnline') }}</p>
+        <ul v-else class="divide-y rounded-lg border">
+          <li v-for="p in org.presence" :key="p.userId" class="flex items-center gap-3 px-3 py-2 text-sm">
+            <span class="size-2.5 rounded-full" :style="{ backgroundColor: STATE_COLOR[p.state] }" />
+            <span class="flex-1 truncate font-medium">{{ memberName(p.userId) }}</span>
+            <span v-if="p.projectId" class="truncate text-muted-foreground">{{ projects.byId.get(p.projectId)?.name }}</span>
+            <span class="text-xs text-muted-foreground">{{ $t(`org.presenceStates.${p.state}`) }}</span>
+          </li>
+        </ul>
+        <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.presenceHint') }}</p>
       </TabsContent>
 
       <TabsContent v-if="canInvite" value="invitations">

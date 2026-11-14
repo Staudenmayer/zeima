@@ -316,6 +316,58 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     })
   })
 
+  describe('presence', () => {
+    /** A connected device that records what the server sends it. */
+    const connect = (userId: string) => {
+      const sent: string[] = []
+      const socket = { readyState: 1, OPEN: 1, send: (m: string) => sent.push(m) }
+      const remove = app.hub.add(userId, { socket: socket as never, deviceId: null })
+      return { sent, remove }
+    }
+    const put = (uid: string, role: string, body: object) => call('PUT', `/v1/orgs/${ORG}/presence`, uid, role, body)
+    const present = async (uid: string, role: string) => (await call('GET', `/v1/orgs/${ORG}/presence`, uid, role)).json() as { userId: string; state: string; projectId: string | null }[]
+
+    it('shows who reports and is connected, and tells the others', async () => {
+      await reset()
+      const ada = connect(ADMIN)
+      const max = connect(MEMBER)
+      expect((await put(ADMIN, 'admin', { state: 'tracking', projectId: id(77) })).statusCode).toBe(204)
+      expect(await present(MEMBER, 'member')).toMatchObject([{ userId: ADMIN, state: 'tracking', projectId: id(77) }])
+      // Everyone in the organization hears about it, with the organization named.
+      expect(max.sent).toContain(JSON.stringify({ type: 'presence', orgId: ORG }))
+      // The same report again changes nothing, so nobody is bothered.
+      const heard = max.sent.length
+      await put(ADMIN, 'admin', { state: 'tracking', projectId: id(77) })
+      expect(max.sent.length).toBe(heard)
+      await put(ADMIN, 'admin', { state: 'away' })
+      expect((await present(OWNER, 'owner'))[0]).toMatchObject({ state: 'away', projectId: null })
+      expect(max.sent.length).toBe(heard + 1)
+      ada.remove()
+      max.remove()
+    })
+
+    it('forgets people whose last device is gone, and those who say they are offline', async () => {
+      await reset()
+      const owner = connect(OWNER)
+      const admin = connect(ADMIN)
+      await put(OWNER, 'owner', { state: 'online' })
+      await put(ADMIN, 'admin', { state: 'online' })
+      expect((await present(OWNER, 'owner')).map((p) => p.userId).sort()).toEqual([OWNER, ADMIN].sort())
+      admin.remove() // no device left: not present, whatever they reported
+      expect((await present(OWNER, 'owner')).map((p) => p.userId)).toEqual([OWNER])
+      await put(OWNER, 'owner', { state: 'offline' })
+      expect(await present(OWNER, 'owner')).toEqual([])
+      owner.remove()
+    })
+
+    it('is for members only, and an unknown state is refused', async () => {
+      await reset()
+      expect((await call('GET', `/v1/orgs/${ORG}/presence`, OTHER, null)).statusCode).toBe(403)
+      expect((await put(OTHER, null as never, { state: 'online' })).statusCode).toBe(403)
+      expect((await put(ADMIN, 'admin', { state: 'dancing' })).statusCode).toBe(400)
+    })
+  })
+
   it('shows the audit log to owners and admins only, newest first', async () => {
     await reset()
     await call('POST', `/v1/orgs/${ORG}/invitations`, OWNER, 'owner', { email: 'a@example.com' })

@@ -46,6 +46,13 @@ pub struct Navigate {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct PromptsChanged;
 
+/// Somebody's presence in an organization changed.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct PresenceChanged {
+    pub org_id: String,
+}
+
 /// A sync started or finished; the sync status in the UI refreshes.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct SyncChanged;

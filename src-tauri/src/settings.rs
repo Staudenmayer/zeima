@@ -38,6 +38,9 @@ pub struct AppSettings {
     pub time_format: TimeFormat,
     pub number_format: NumberFormat,
     pub week_start: WeekStart,
+    /// Tell the organizations which project the running timer is on. Off by
+    /// default: they hear only that the person is tracking.
+    pub share_project_presence: bool,
 }
 
 impl Default for AppSettings {
@@ -55,6 +58,7 @@ impl Default for AppSettings {
             time_format: TimeFormat::Auto,
             number_format: NumberFormat::Auto,
             week_start: WeekStart::Auto,
+            share_project_presence: false,
         }
     }
 }

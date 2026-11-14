@@ -15,6 +15,7 @@ import PageHeader from '@/components/time/PageHeader.vue'
 import SettingsNav from '@/components/time/SettingsNav.vue'
 import TimezonePicker from '@/components/time/TimezonePicker.vue'
 import { errorMessage } from '@/lib/ipc'
+import { useAccountStore } from '@/stores/account'
 import { useSettingsStore } from '@/stores/settings'
 import { useSetupStore } from '@/stores/setup'
 import { useUpdatesStore } from '@/stores/updates'
@@ -23,6 +24,7 @@ definePage({ meta: { titleKey: 'nav.settings' } })
 
 const { t } = useI18n()
 const store = useSettingsStore()
+const account = useAccountStore()
 const setup = useSetupStore()
 const updates = useUpdatesStore()
 const upToDate = ref(false)
@@ -160,6 +162,13 @@ async function save() {
             <p class="text-xs text-muted-foreground">{{ $t('settings.autostartHint') }}</p>
           </div>
           <Switch v-model="form.autostart" />
+        </div>
+        <div v-if="account.status.signedIn" class="grid gap-2 sm:grid-cols-2 sm:items-center">
+          <div>
+            <Label>{{ $t('settings.sharePresence') }}</Label>
+            <p class="text-xs text-muted-foreground">{{ $t('settings.sharePresenceHint') }}</p>
+          </div>
+          <Switch :model-value="form.shareProjectPresence ?? false" @update:model-value="form.shareProjectPresence = $event" />
         </div>
       </CardContent>
     </Card>
