@@ -17,6 +17,7 @@ import type { AuthUser } from '../../plugins/auth.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
 import { ensureOrgWorkspace } from '../orgs/service.ts'
+import { isApproved, lockPeriod } from './approvals.ts'
 import { checkOrgWrite, visibleToCaller } from './orgrules.ts'
 import { type Change, type Json, merge, type Outcome, type RowState } from '../../sync/merge.ts'
 
@@ -38,6 +39,7 @@ export const SYNCED_TABLES = [
   'custom_holiday',
   'balance_adjustment',
   'display_settings',
+  'timesheet_submission',
 ] as const
 
 const Uuid = Type.String({ format: 'uuid' })
@@ -218,7 +220,13 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
             }
           }
           const { state, outcome } = merge(current, mergeable, actor)
-          if (outcome.status === 'applied') await saveRow(tx, workspaceId, change.table, change.rowId, state, current !== null)
+          if (outcome.status === 'applied') {
+            await saveRow(tx, workspaceId, change.table, change.rowId, state, current !== null)
+            // Approving a timesheet locks its period's entries.
+            if (change.table === 'timesheet_submission' && isApproved(state) && !isApproved(current)) {
+              await lockPeriod(tx, workspaceId, state, change.hlc)
+            }
+          }
           results.push(outcome)
         }
         return { results, wsOwner: ws.ownerId, wsOrg: ws.orgId }

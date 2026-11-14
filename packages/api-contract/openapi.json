@@ -2638,6 +2638,12 @@
                               "enum": [
                                 "display_settings"
                               ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "timesheet_submission"
+                              ]
                             }
                           ]
                         },

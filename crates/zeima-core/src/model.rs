@@ -38,6 +38,8 @@ macro_rules! string_enum {
     };
 }
 
+pub(crate) use string_enum;
+
 string_enum!(BudgetPeriod { Total => "total", Monthly => "monthly", Weekly => "weekly" });
 string_enum!(
     /// Who sees a shared project: everyone in the organization, or only the

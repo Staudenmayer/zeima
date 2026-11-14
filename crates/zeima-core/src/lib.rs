@@ -40,8 +40,9 @@ pub use repo::{
     default_schedule, AddonRecord, Balance, BudgetStatus, HolidayView, ProfileSummary, VacationSummary,
     WorkScheduleInput,
 };
-#[cfg(feature = "db")]
 pub use repo::{ApplyReport, FieldView, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
+#[cfg(feature = "db")]
+pub use repo::{SubmissionStatus, TimesheetSubmission};
 
 #[cfg(feature = "db")]
 pub use db::{Core, WorkspaceInfo};

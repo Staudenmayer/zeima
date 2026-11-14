@@ -1,0 +1,167 @@
+#![cfg(feature = "db")]
+
+mod common;
+
+use std::sync::Arc;
+
+use zeima_core::clock::ManualClock;
+use zeima_core::model::BalanceAdjustmentInput;
+use zeima_core::{Core, Error, SubmissionStatus, SYNC_BATCH};
+
+const T0: i64 = 1_791_187_200_000;
+const WS: &str = "0192f000-0000-7000-8000-00000000a001";
+const ORG: &str = "0192f000-0000-7000-8000-00000000b001";
+const ADA: &str = "0192f000-0000-7000-8000-00000000c001";
+const BEN: &str = "0192f000-0000-7000-8000-00000000c002";
+
+fn date(s: &str) -> chrono::NaiveDate {
+    s.parse().unwrap()
+}
+
+/// One database, two people in the shared workspace (as two handles).
+async fn setup() -> (Core, Core, Core) {
+    let personal = common::with_activity(
+        Core::open_in_memory(Arc::new(ManualClock::new(T0)))
+            .await
+            .unwrap(),
+    )
+    .await;
+    personal
+        .adopt_org_workspace(WS, ORG, "Acme", ADA, "Ada")
+        .await
+        .unwrap();
+    personal
+        .adopt_org_workspace(WS, ORG, "Acme", BEN, "Ben")
+        .await
+        .unwrap();
+    let (ada, ben) = (personal.scoped(WS, ADA), personal.scoped(WS, BEN));
+    (personal, ada, ben)
+}
+
+#[tokio::test]
+async fn a_timesheet_is_submitted_then_decided_by_someone_else() {
+    let (_, ada, ben) = setup().await;
+    let sub = ada
+        .submit_timesheet(date("2026-10-05"), date("2026-10-11"), " week 41 ")
+        .await
+        .unwrap();
+    assert_eq!(
+        (sub.status, sub.note.as_str(), sub.user_id.as_str()),
+        (SubmissionStatus::Submitted, "week 41", ADA)
+    );
+
+    // Not twice, not overlapping.
+    assert!(matches!(
+        ada.submit_timesheet(date("2026-10-05"), date("2026-10-11"), "")
+            .await,
+        Err(Error::Conflict(_))
+    ));
+    assert!(matches!(
+        ada.submit_timesheet(date("2026-10-10"), date("2026-10-18"), "")
+            .await,
+        Err(Error::Conflict(_))
+    ));
+    // Not before it starts.
+    assert!(ada
+        .submit_timesheet(date("2026-10-12"), date("2026-10-11"), "")
+        .await
+        .is_err());
+
+    // Not by oneself.
+    assert!(matches!(
+        ada.decide_submission(&sub.id, true, "").await,
+        Err(Error::Validation { .. })
+    ));
+    let approved = ben.decide_submission(&sub.id, true, "ok").await.unwrap();
+    assert_eq!(
+        (
+            approved.status,
+            approved.decided_by.as_deref(),
+            approved.decision_note.as_str()
+        ),
+        (SubmissionStatus::Approved, Some(BEN), "ok")
+    );
+    assert!(approved.decided_at.is_some());
+    // Decided once; no taking back an approved one.
+    assert!(matches!(
+        ben.decide_submission(&sub.id, false, "").await,
+        Err(Error::Conflict(_))
+    ));
+    assert!(matches!(
+        ada.withdraw_submission(&sub.id).await,
+        Err(Error::Conflict(_))
+    ));
+    assert_eq!(
+        ada.list_submissions().await.unwrap()[0].status,
+        SubmissionStatus::Approved
+    );
+}
+
+#[tokio::test]
+async fn a_rejected_timesheet_is_submitted_again_and_a_waiting_one_taken_back() {
+    let (_, ada, ben) = setup().await;
+    let first = ada
+        .submit_timesheet(date("2026-10-12"), date("2026-10-18"), "")
+        .await
+        .unwrap();
+    ben.decide_submission(&first.id, false, "hours missing")
+        .await
+        .unwrap();
+    let again = ada
+        .submit_timesheet(date("2026-10-12"), date("2026-10-18"), "fixed")
+        .await
+        .unwrap();
+    assert_eq!(again.id, first.id, "the same record is submitted again");
+    assert_eq!(
+        (again.status, again.decided_by, again.decision_note.as_str()),
+        (SubmissionStatus::Submitted, None, "")
+    );
+    ada.withdraw_submission(&again.id).await.unwrap();
+    assert!(ada.list_submissions().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn only_shared_workspaces_have_timesheets() {
+    let (personal, ..) = setup().await;
+    assert!(matches!(
+        personal
+            .submit_timesheet(date("2026-10-05"), date("2026-10-11"), "")
+            .await,
+        Err(Error::Validation { .. })
+    ));
+}
+
+#[tokio::test]
+async fn a_persons_own_rows_carry_their_account_in_a_shared_workspace() {
+    let (personal, ada, _) = setup().await;
+    personal
+        .create_adjustment(BalanceAdjustmentInput {
+            date: date("2026-10-05"),
+            minutes: 30,
+            reason: "mine".into(),
+        })
+        .await
+        .unwrap();
+    ada.create_adjustment(BalanceAdjustmentInput {
+        date: date("2026-10-05"),
+        minutes: 60,
+        reason: "shared".into(),
+    })
+    .await
+    .unwrap();
+    let in_org = ada.sync_outbox(SYNC_BATCH).await.unwrap();
+    let adjustment = in_org
+        .changes
+        .iter()
+        .find(|c| c.table == "balance_adjustment")
+        .unwrap();
+    assert_eq!(adjustment.fields["userId"], ADA);
+    // The personal workspace keeps its local ids to itself.
+    let own = personal.sync_outbox(SYNC_BATCH).await.unwrap();
+    let adjustment = own
+        .changes
+        .iter()
+        .find(|c| c.table == "balance_adjustment")
+        .unwrap();
+    assert!(!adjustment.fields.contains_key("userId"));
+}

@@ -35,6 +35,7 @@ const READ: Record<string, string> = {
   balance_adjustment: 'member.read',
   work_schedule: 'member.read',
   work_settings: 'member.read',
+  timesheet_submission: 'entry.approve',
 }
 
 const OWN = new Set([...Object.keys(READ), 'jurisdiction_selection'])
@@ -71,6 +72,48 @@ export async function sharesGroup(db: Db, orgId: string, actorGroups: readonly s
   return rows.length > 0
 }
 
+const DECISION_FIELDS = ['decidedBy', 'decidedAt', 'decisionNote']
+
+/**
+ * A timesheet submission: its owner hands it in (and takes it back while it
+ * waits, or hands in a rejected one again); someone with `entry.approve` over
+ * the owner decides a waiting one, and may touch nothing else.
+ */
+async function checkSubmission(
+  db: Db,
+  actor: Actor,
+  orgId: string,
+  change: Change,
+  current: RowState | null,
+  owner: string,
+): Promise<Outcome | null> {
+  const forbidden: Outcome = { status: 'rejected', reason: 'forbidden' }
+  const status = plain(current?.fields.status)
+  if (owner === actor.user.id) {
+    if (current && status !== 'submitted' && status !== 'rejected') return forbidden // decided: closed
+    if (change.op === 'delete') return status === 'submitted' ? null : forbidden
+    if (change.fields?.status !== undefined && change.fields.status !== 'submitted') return { status: 'rejected', reason: 'forbidden_field' }
+    if (!current && change.fields?.status !== 'submitted') return forbidden
+    // Handing in again clears the decision; anything else about it is not theirs to write.
+    for (const f of DECISION_FIELDS) {
+      const v = change.fields?.[f]
+      if (v !== undefined && v !== null && v !== '') return { status: 'rejected', reason: 'forbidden_field' }
+    }
+    return null
+  }
+  // Someone else's: decide a waiting one, nothing more.
+  if (!current || change.op === 'delete' || status !== 'submitted') return forbidden
+  const scope = scopeOf(actor, 'entry.approve')
+  const covered = scope === 'org' || (scope === 'group' && (await sharesGroup(db, orgId, actor.user.orgs[orgId]?.groups ?? [], owner)))
+  if (!covered) return forbidden
+  const fields = change.fields ?? {}
+  const decision = fields.status
+  if (decision !== 'approved' && decision !== 'rejected') return { status: 'rejected', reason: 'forbidden_field' }
+  if (Object.keys(fields).some((f) => f !== 'status' && !DECISION_FIELDS.includes(f))) return { status: 'rejected', reason: 'forbidden_field' }
+  if (fields.decidedBy !== undefined && fields.decidedBy !== actor.user.id) return { status: 'rejected', reason: 'forbidden_field' }
+  return null
+}
+
 /** Null if the change may go on to the merge; otherwise the reason it is refused. */
 export async function checkOrgWrite(
   db: Db,
@@ -96,6 +139,7 @@ export async function checkOrgWrite(
   // Own rows: the owner never changes after the row exists.
   const owner = ownerOf(current, change)
   if (!owner) return { status: 'rejected', reason: 'forbidden' }
+  if (change.table === 'timesheet_submission') return checkSubmission(db, actor, orgId, change, current, owner)
   const moved = change.fields?.userId
   if (current && typeof moved === 'string' && moved !== owner) return { status: 'rejected', reason: 'forbidden_field' }
   if (owner === actor.user.id) return null

@@ -452,6 +452,7 @@ impl WriteTx<'_> {
         stamp: &Stamp,
         payload: Option<String>,
     ) -> Result<()> {
+        let payload = self.with_owner(table, payload);
         sqlx::query(
             "INSERT INTO change_log (table_name, row_id, op, hlc, payload, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
         )
@@ -464,6 +465,28 @@ impl WriteTx<'_> {
             .execute(&mut *self.tx)
             .await?;
         Ok(())
+    }
+
+    /// In a shared workspace the server decides who may change a row by its
+    /// `userId`, so rows of one person's own data carry it.
+    fn with_owner(&self, table: &str, payload: Option<String>) -> Option<String> {
+        const PERSONAL: [&str; 5] = [
+            "absence",
+            "balance_adjustment",
+            "work_settings",
+            "work_schedule",
+            "timesheet_submission",
+        ];
+        let ctx = &self.core.ctx;
+        if !ctx.shared || !PERSONAL.contains(&table) {
+            return payload;
+        }
+        let mut value: serde_json::Value = serde_json::from_str(payload.as_deref()?).ok()?;
+        let object = value.as_object_mut()?;
+        object
+            .entry("userId")
+            .or_insert_with(|| serde_json::Value::String(ctx.user_id.clone()));
+        Some(value.to_string())
     }
 
     /// Queues a domain event; it is published when the transaction commits.

@@ -9,6 +9,7 @@ mod data;
 mod display;
 mod entries;
 mod projects;
+mod submissions;
 mod sync_apply;
 mod sync_groups;
 mod sync_ids;
@@ -18,6 +19,7 @@ mod work;
 
 pub use addons::AddonRecord;
 pub use budget::BudgetStatus;
+pub use submissions::{SubmissionStatus, TimesheetSubmission};
 pub use sync_apply::{ApplyReport, FieldView, RemoteRow, SyncConflict};
 pub use sync_outbox::{Outbox, BATCH as SYNC_BATCH, SYNCED_TABLES};
 pub(crate) use work::invalidate_entry_days;
