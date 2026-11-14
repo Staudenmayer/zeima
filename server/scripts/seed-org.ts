@@ -104,15 +104,24 @@ async function patient<T>(fn: () => Promise<T>, ok: (v: T) => boolean): Promise<
     await sleep(10_000)
   }
 }
-const discovery = await patient(async () => json(await fetch(`${PUBLIC_URL}/.well-known/zeima-server`)), (d: { issuer?: string }) => !!d.issuer)
+interface Discovery {
+  issuer?: string
+  apiUrl: string
+}
+/** What `signIn` of the end-to-end helpers gives back. */
+interface SignedIn {
+  renew(): Promise<void>
+  readonly token: string
+}
+const discovery = await patient(async () => (await json(await fetch(`${PUBLIC_URL}/.well-known/zeima-server`))) as Discovery, (d) => !!d.issuer)
 const device = randomUUID()
 let counter = 0
 const hlc = () => `${String(Date.now()).padStart(15, '0')}-${String(counter++ % 1_000_000).padStart(6, '0')}-${device}`
 
-type Session = Awaited<ReturnType<typeof signIn>> & { workspaceId: string; key: string }
+type Session = SignedIn & { workspaceId: string; key: string }
 const sessions = new Map<string, Session>()
 for (const p of PEOPLE) {
-  const s = await patient(() => signIn(discovery, { email: `seed-${p.key}@example.com`, password: PASSWORD }), () => true)
+  const s = await patient(async () => (await signIn(discovery, { email: `seed-${p.key}@example.com`, password: PASSWORD })) as SignedIn, () => true)
   await s.renew() // the token now has the organization and role
   const call = (path: string) => fetch(`${discovery.apiUrl}${path}`, { headers: { authorization: `Bearer ${s.token}` } })
   const list = await patient(async () => json(await call('/v1/workspaces')), (v: unknown) => Array.isArray(v))
