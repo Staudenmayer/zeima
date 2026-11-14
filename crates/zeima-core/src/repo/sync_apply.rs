@@ -26,7 +26,7 @@ use sqlx::{Connection, Row, SqliteConnection};
 
 use super::sync_groups::{expand, group_payload};
 use super::sync_ids::{local_of_canonical, reference_in, remember, rule, Rule, REFERENCES};
-use super::sync_outbox::{LOCAL_FIELDS, SYNCED_TABLES};
+use super::sync_outbox::{is_local_field, SYNCED_TABLES};
 use crate::hlc;
 use crate::sync::{merge_state, RowState, Versioned};
 use crate::{Core, Result};
@@ -310,6 +310,7 @@ async fn load_pending(
     table: &str,
     row_id: &str,
     known: &RowState,
+    shared: bool,
 ) -> Result<Pending> {
     let rows = sqlx::query(
         "SELECT op, hlc, payload FROM change_log \
@@ -348,7 +349,7 @@ async fn load_pending(
             let mut payload: Value = serde_json::from_str(&text)?;
             group_payload(table, &mut payload);
             for (name, value) in payload.as_object().into_iter().flatten() {
-                if LOCAL_FIELDS.contains(&name.as_str()) {
+                if is_local_field(name, shared) {
                     continue;
                 }
                 if current.get(name) != Some(value) {
@@ -439,7 +440,7 @@ impl Core {
                 ..row.clone()
             };
             // Unpushed local changes to this row decide which incoming fields lose.
-            let pending = load_pending(&mut tx, &row.table, &local_id, &known).await?;
+            let pending = load_pending(&mut tx, &row.table, &local_id, &known, self.ctx().shared).await?;
 
             let mut savepoint = tx.begin().await?;
             match self
@@ -603,7 +604,7 @@ impl Core {
             .fields
             .iter()
             .filter(|(name, f)| {
-                if LOCAL_FIELDS.contains(&name.as_str()) {
+                if is_local_field(name, self.ctx().shared) {
                     return false;
                 }
                 if !exists {
@@ -710,8 +711,26 @@ impl Core {
         }
         // Rows of this user. (The country selection's user is NULL: it is the
         // workspace default.)
-        if cols.contains("user_id") && cols.not_null("user_id") {
+        // (In a shared workspace the row's own user came with it.)
+        if cols.contains("user_id") && cols.not_null("user_id") && !values.iter().any(|(c, _)| c == "user_id")
+        {
             values.push(("user_id".into(), Bind::Text(self.ctx().user_id.clone())));
+        }
+        // Other people's rows name users this device has not met.
+        if let Some((_, Bind::Text(owner))) = values.iter().find(|(c, _)| c == "user_id") {
+            if self.ctx().shared && *owner != self.ctx().user_id {
+                let now = self.now_ms();
+                sqlx::query(
+                    "INSERT OR IGNORE INTO app_user (id, display_name, created_at, updated_at, hlc, origin_device)
+                     VALUES (?, 'Member', ?, ?, ?, 'server')",
+                )
+                .bind(owner)
+                .bind(now)
+                .bind(now)
+                .bind(format!("{now:015}-000000-server"))
+                .execute(&mut *conn)
+                .await?;
+            }
         }
         if !exists {
             // Rows from older clients may lack the stamps NOT NULL columns need.
@@ -826,7 +845,7 @@ impl Core {
 
         let mut fields: Vec<(String, Value)> = Vec::new();
         for (name, versioned) in &state.fields {
-            if LOCAL_FIELDS.contains(&name.as_str()) || matches!(name.as_str(), "createdAt" | "updatedAt") {
+            if is_local_field(name, self.ctx().shared) || matches!(name.as_str(), "createdAt" | "updatedAt") {
                 continue;
             }
             match expand(table, name, &versioned.v) {

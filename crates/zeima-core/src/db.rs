@@ -28,6 +28,10 @@ pub struct Context {
     pub device_id: String,
     pub workspace_id: String,
     pub user_id: String,
+    /// An organization's shared workspace: `user_id` is the Keycloak account
+    /// and is part of the synced rows (the server checks who owns what).
+    /// In the personal workspace it is a local id that never leaves the device.
+    pub shared: bool,
 }
 
 /// A workspace on this device.
@@ -97,6 +101,7 @@ impl Core {
                 device_id: device_id.clone(),
                 workspace_id: String::new(),
                 user_id: String::new(),
+                shared: false,
             },
             hlc: Arc::new(Mutex::new(HlcClock::new(device_id))),
             clock,
@@ -190,6 +195,7 @@ impl Core {
                 device_id: self.ctx.device_id.clone(),
                 workspace_id: workspace_id.to_string(),
                 user_id: user_id.to_string(),
+                shared: true,
             },
             hlc: self.hlc.clone(),
             clock: self.clock.clone(),
@@ -446,12 +452,15 @@ impl WriteTx<'_> {
         stamp: &Stamp,
         payload: Option<String>,
     ) -> Result<()> {
-        sqlx::query("INSERT INTO change_log (table_name, row_id, op, hlc, payload) VALUES (?, ?, ?, ?, ?)")
+        sqlx::query(
+            "INSERT INTO change_log (table_name, row_id, op, hlc, payload, workspace_id) VALUES (?, ?, ?, ?, ?, ?)",
+        )
             .bind(table)
             .bind(row_id)
             .bind(op)
             .bind(&stamp.hlc)
             .bind(payload)
+            .bind(&self.core.ctx.workspace_id)
             .execute(&mut *self.tx)
             .await?;
         Ok(())

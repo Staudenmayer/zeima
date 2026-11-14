@@ -86,13 +86,19 @@ async fn load_state(
 }
 
 /// The fields of `payload` that differ from what the server has.
-fn changed_fields(payload: &Value, state: Option<&RowState>) -> BTreeMap<String, Value> {
+/// Whether a field names this device's own workspace or user (see
+/// `LOCAL_FIELDS`). In a shared workspace the user is the account and is sent.
+pub fn is_local_field(name: &str, shared: bool) -> bool {
+    LOCAL_FIELDS.contains(&name) && !(shared && name == "userId")
+}
+
+fn changed_fields(payload: &Value, state: Option<&RowState>, shared: bool) -> BTreeMap<String, Value> {
     let Some(object) = payload.as_object() else {
         return BTreeMap::new();
     };
     object
         .iter()
-        .filter(|(name, _)| !LOCAL_FIELDS.contains(&name.as_str()))
+        .filter(|(name, _)| !is_local_field(name, shared))
         .filter(|(name, value)| {
             state
                 .and_then(|s| s.fields.get(*name))
@@ -108,10 +114,11 @@ impl Core {
     pub async fn sync_outbox(&self, limit: i64) -> Result<Outbox> {
         let rows = sqlx::query(concat!(
             "SELECT seq, table_name, row_id, op, hlc, payload FROM change_log \
-             WHERE pushed_at IS NULL AND table_name IN (",
+             WHERE pushed_at IS NULL AND workspace_id IS ? AND table_name IN (",
             synced_tables_sql!(),
             ") ORDER BY seq LIMIT ?"
         ))
+        .bind(&self.ctx().workspace_id)
         .bind(limit)
         .fetch_all(self.pool())
         .await?;
@@ -173,7 +180,7 @@ impl Core {
                     fields: BTreeMap::new(),
                 }
             } else {
-                let fields = changed_fields(&payload, known.as_ref());
+                let fields = changed_fields(&payload, known.as_ref(), self.ctx().shared);
                 if fields.is_empty() {
                     continue;
                 }

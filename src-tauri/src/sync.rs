@@ -132,9 +132,14 @@ struct PushAnswer {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ServerWorkspace {
     id: String,
     kind: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    org_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -193,8 +198,12 @@ async fn server_workspace(
 }
 
 /// Sends everything pending. Returns how many changes were sent.
-async fn push_all(app: &AppHandle, api: &str, token: &str, workspace_id: &str) -> Result<usize, String> {
-    let core = &app.state::<AppState>().core;
+async fn push_all(
+    core: &zeima_core::Core,
+    api: &str,
+    token: &str,
+    workspace_id: &str,
+) -> Result<usize, String> {
     let device_id = core.ctx().device_id.clone();
     let mut sent = 0;
     for _ in 0..MAX_BATCHES {
@@ -227,7 +236,13 @@ async fn push_all(app: &AppHandle, api: &str, token: &str, workspace_id: &str) -
 }
 
 /// Brings the server's changes in. Returns how many local rows changed.
-async fn pull_all(app: &AppHandle, api: &str, token: &str, workspace_id: &str) -> Result<usize, String> {
+async fn pull_all(
+    app: &AppHandle,
+    api: &str,
+    token: &str,
+    workspace_id: &str,
+    shared: &[(String, zeima_core::Core)],
+) -> Result<usize, String> {
     let core = &app.state::<AppState>().core;
     let mut applied = 0;
     for _ in 0..MAX_BATCHES {
@@ -241,13 +256,23 @@ async fn pull_all(app: &AppHandle, api: &str, token: &str, workspace_id: &str) -
             .map_err(|e| e.to_string())??;
         let page: PullAnswer =
             serde_json::from_value(answer).map_err(|e| format!("the server's answer: {e}"))?;
-        let rows: Vec<RemoteRow> = page
+        // Each row goes to the workspace it belongs to; rows of workspaces
+        // this device does not know are skipped.
+        let (personal, others): (Vec<RemoteRow>, Vec<RemoteRow>) = page
             .rows
             .into_iter()
-            .filter(|r| r.workspace_id == workspace_id)
-            .collect();
-        let report = core.sync_apply(&rows).await.map_err(|e| e.to_string())?;
-        applied += report.applied;
+            .partition(|r| r.workspace_id == workspace_id);
+        applied += core
+            .sync_apply(&personal)
+            .await
+            .map_err(|e| e.to_string())?
+            .applied;
+        for (id, scope) in shared {
+            let mine: Vec<RemoteRow> = others.iter().filter(|r| r.workspace_id == *id).cloned().collect();
+            if !mine.is_empty() {
+                applied += scope.sync_apply(&mine).await.map_err(|e| e.to_string())?.applied;
+            }
+        }
         core.set_sync_cursor(page.cursor)
             .await
             .map_err(|e| e.to_string())?;
@@ -329,6 +354,44 @@ async fn refresh_entitlement(app: &AppHandle, api: &str, token: &str) {
     }
 }
 
+/// The organizations' shared workspaces the server lists for this account,
+/// recorded on this device, each with a handle that acts in it as the
+/// account (whose id is the token's subject).
+async fn adopt_shared_workspaces(
+    app: &AppHandle,
+    api: &str,
+    token: &str,
+) -> Result<Vec<(String, zeima_core::Core)>, String> {
+    let Some(user) = account::user_from_token(token) else {
+        return Ok(Vec::new());
+    };
+    let (url, tok) = (format!("{api}/v1/workspaces"), token.to_string());
+    let list = tauri::async_runtime::spawn_blocking(move || get_json(&url, &tok))
+        .await
+        .map_err(|e| e.to_string())??;
+    let core = &app.state::<AppState>().core;
+    let mut shared = Vec::new();
+    for w in serde_json::from_value::<Vec<ServerWorkspace>>(list)
+        .map_err(|e| format!("the server's answer: {e}"))?
+        .into_iter()
+        .filter(|w| w.kind == "org")
+    {
+        let Some(org_id) = w.org_id.as_deref() else {
+            continue;
+        };
+        let name = user
+            .name
+            .clone()
+            .or(user.email.clone())
+            .unwrap_or_else(|| "Me".into());
+        core.adopt_org_workspace(&w.id, org_id, &w.name, &user.id, &name)
+            .await
+            .map_err(|e| e.to_string())?;
+        shared.push((w.id.clone(), core.scoped(&w.id, &user.id)));
+    }
+    Ok(shared)
+}
+
 /// One sync: push, then pull. Returns the number of changes sent.
 async fn sync_once(app: &AppHandle) -> Result<Option<usize>, String> {
     let Some((server, token)) = account::current_token(app).await? else {
@@ -372,8 +435,13 @@ async fn sync_once(app: &AppHandle) -> Result<Option<usize>, String> {
         }
     }
 
-    let sent = push_all(app, &api, &token, &workspace_id).await?;
-    let pulled = pull_all(app, &api, &token, &workspace_id).await?;
+    // Organizations' shared workspaces: one handle on each, acting as the account.
+    let shared = adopt_shared_workspaces(app, &api, &token).await?;
+    let mut sent = push_all(core, &api, &token, &workspace_id).await?;
+    for (id, scope) in &shared {
+        sent += push_all(scope, &api, &token, id).await?;
+    }
+    let pulled = pull_all(app, &api, &token, &workspace_id, &shared).await?;
     if pulled > 0 {
         adopt_synced_settings(app).await;
         reload_windows(app).await;
