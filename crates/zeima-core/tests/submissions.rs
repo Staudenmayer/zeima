@@ -377,3 +377,50 @@ async fn the_team_summary_adds_up_each_persons_projects() {
     );
     assert_eq!((team[1].user_id.as_str(), team[1].total_ms), (BEN, 2 * HOUR));
 }
+
+#[tokio::test]
+async fn work_locations_are_one_row_per_person_and_day() {
+    use zeima_core::LocationKind;
+    let (personal, ada, ben) = setup().await;
+    ada.set_location(date("2026-10-05"), Some(LocationKind::Office))
+        .await
+        .unwrap();
+    ada.set_location(date("2026-10-05"), Some(LocationKind::Home))
+        .await
+        .unwrap();
+    ben.set_location(date("2026-10-05"), Some(LocationKind::Travel))
+        .await
+        .unwrap();
+    let day = ada
+        .list_locations(date("2026-10-05"), date("2026-10-05"))
+        .await
+        .unwrap();
+    assert_eq!(
+        day.iter()
+            .map(|l| (l.user_id.as_str(), l.kind))
+            .collect::<Vec<_>>(),
+        vec![(ADA, LocationKind::Home), (BEN, LocationKind::Travel)]
+    );
+    // Clearing and setting again reuses the row (the same id on every device).
+    let id = day[0].id.clone();
+    ada.set_location(date("2026-10-05"), None).await.unwrap();
+    assert_eq!(
+        ada.list_locations(date("2026-10-05"), date("2026-10-05"))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    ada.set_location(date("2026-10-05"), Some(LocationKind::Office))
+        .await
+        .unwrap();
+    let again = ada
+        .list_locations(date("2026-10-05"), date("2026-10-05"))
+        .await
+        .unwrap();
+    assert_eq!(again[0].id, id);
+    assert!(personal
+        .set_location(date("2026-10-05"), Some(LocationKind::Home))
+        .await
+        .is_err());
+}

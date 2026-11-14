@@ -47,7 +47,7 @@ const mine = computed(() => submissions.all.filter((s) => s.userId === me.value)
 const toApprove = computed(() => submissions.all.filter((s) => s.userId !== me.value && s.status === 'submitted'))
 const decided = computed(() => submissions.all.filter((s) => s.userId !== me.value && s.status !== 'submitted'))
 
-const nameOf = (id: string) => org.members.find((m) => m.id === id)?.name ?? org.members.find((m) => m.id === id)?.email ?? ''
+const nameOf = (id: string) => org.nameOf(id)
 const day = (iso: string) => format.shortDate(Date.parse(`${iso}T12:00:00`))
 const period = (s: TimesheetSubmission) => `${day(s.periodStart)} – ${day(s.periodEnd)}`
 

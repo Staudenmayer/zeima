@@ -12,6 +12,7 @@ import {
   Building2,
   ClipboardCheck,
   Users,
+  MapPinned,
   Landmark,
   LayoutDashboard,
   Palmtree,
@@ -60,6 +61,7 @@ const tracking = computed(() => [
   { title: t('nav.reports'), url: '/reports', icon: BarChart3 },
   { title: t('nav.absences'), url: '/absences', icon: Palmtree },
   ...(workspaces.inOrg ? [{ title: t('nav.approvals'), url: '/approvals', icon: ClipboardCheck }] : []),
+  ...(workspaces.inOrg ? [{ title: t('nav.locations'), url: '/locations', icon: MapPinned }] : []),
   // Owners and managers see other people's time; for the rest the page would show only themselves.
   ...(workspaces.inOrg && (workspaces.role === 'owner' || workspaces.role === 'manager')
     ? [{ title: t('nav.team'), url: '/team', icon: Users }]

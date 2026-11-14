@@ -36,7 +36,11 @@ const READ: Record<string, string> = {
   work_schedule: 'member.read',
   work_settings: 'member.read',
   timesheet_submission: 'entry.approve',
+  work_location: 'member.read',
 }
+
+/** Own rows everyone in the organization may read (where people work is for planning together). */
+const PUBLIC = new Set(['work_location'])
 
 const OWN = new Set([...Object.keys(READ), 'jurisdiction_selection'])
 
@@ -224,6 +228,10 @@ export async function visibleToCaller<T extends { workspaceId: string; table: st
     if (kind === 'never') continue
     if (kind === 'shared') {
       if (row.table === 'project' && plain(row.fields.visibility) === 'members' && !canSeeProject(actor, orgId, row.fields)) continue
+      out.push(row)
+      continue
+    }
+    if (PUBLIC.has(row.table)) {
       out.push(row)
       continue
     }

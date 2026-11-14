@@ -169,6 +169,7 @@ const SOFT_DELETE_TABLES: &[&str] = &[
     "custom_holiday",
     "balance_adjustment",
     "timesheet_submission",
+    "work_location",
     "cost_center",
     "cost_center_assignment",
 ];

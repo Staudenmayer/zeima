@@ -125,7 +125,7 @@ function askDeleteDept(g: Department) {
   deleting.value = g
   deleteDeptOpen.value = true
 }
-const memberName = (id: string) => org.members.find((m) => m.id === id)?.name ?? org.members.find((m) => m.id === id)?.email ?? id
+const memberName = (id: string) => org.nameOf(id) || id
 const addable = (g: Department) => org.members.filter((m) => !g.memberIds.includes(m.id))
 
 // ---------------------------------------------------------------- activity

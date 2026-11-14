@@ -415,3 +415,30 @@ pub async fn team_summary(
 ) -> CmdResult<Vec<zeima_core::TeamMember>> {
     Ok(state.data().team_summary(range).await?)
 }
+
+// --------------------------------------------------------------------------
+// Where people work (shared workspaces)
+// --------------------------------------------------------------------------
+
+#[tauri::command]
+#[specta::specta]
+pub async fn locations_list(
+    state: State<'_, AppState>,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> CmdResult<Vec<zeima_core::WorkLocation>> {
+    Ok(state.data().list_locations(from, to).await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn location_set(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    date: NaiveDate,
+    kind: Option<zeima_core::LocationKind>,
+) -> CmdResult<()> {
+    state.data().set_location(date, kind).await?;
+    work_changed(&app).await;
+    Ok(())
+}

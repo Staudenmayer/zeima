@@ -51,7 +51,7 @@ const loading = ref(false)
 const hours = (ms: number) => formatDuration(ms, settings.settings?.durationFormat ?? 'hm')
 const total = computed(() => team.value.reduce((n, m) => n + m.totalMs, 0))
 const billable = computed(() => team.value.reduce((n, m) => n + m.billableMs, 0))
-const nameOf = (id: string) => org.members.find((m) => m.id === id)?.name ?? org.members.find((m) => m.id === id)?.email ?? ''
+const nameOf = (id: string) => org.nameOf(id)
 const projectName = (id: string | null) => (id ? (projects.byId.get(id)?.name ?? '') : '')
 const waiting = computed(() => submissions.all.filter((s) => s.status === 'submitted').length)
 const widest = computed(() => Math.max(1, ...team.value.map((m) => m.totalMs)))

@@ -515,6 +515,26 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     })
   }
 
+  app.get(
+    '/orgs/:orgId/people',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Names of everyone in the organization (for lists that show other people)',
+        description: 'Only the display name, so presence, locations and timesheets can say who is who. No email addresses.',
+        security: SECURITY,
+        params: OrgParams,
+        response: { 200: Type.Array(Type.Object({ id: Type.String(), name: Type.Union([Type.String(), Type.Null()]) })), ...problems(401, 403, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId } = request.params
+      actorIn({ user: request.user! }, orgId)
+      const rows = await listMembers(database(), orgId)
+      return rows.map((m) => ({ id: m.id, name: m.name }))
+    },
+  )
+
   // --------------------------------------------------------------- presence
   const PresenceItem = Type.Object({
     userId: Type.String(),

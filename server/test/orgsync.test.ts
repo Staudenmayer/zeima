@@ -246,6 +246,17 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     })
   })
 
+  it('shares where people work with everyone, and lets only the owner set it', async () => {
+    const L = id(60)
+    const loc = { userId: ANNA, date: '2026-10-05', kind: 'office' }
+    expect(await results(ANNA, [upsert('work_location', L, 500, loc)])).toEqual([{ status: 'applied' }])
+    expect(await results(BEN, [upsert('work_location', L, 510, { kind: 'home' })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+    expect(await results(OWNER, [upsert('work_location', id(61), 510, { ...loc, userId: ANNA })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+    // Benn and the admin, who see none of Anna's entries, see where she works.
+    for (const who of [BEN, ADMIN, MANAGER]) expect(await pulledIds(who)).toContain(L)
+    expect(await results(ANNA, [upsert('work_location', L, 520, { kind: 'home' })])).toEqual([{ status: 'applied' }])
+  })
+
   it('does not change personal workspaces', async () => {
     const mine = id(300)
     expect((await app.inject({ method: 'POST', url: '/v1/workspaces', headers: await headers(ANNA), payload: { id: mine, name: 'Anna' } })).statusCode).toBe(200)

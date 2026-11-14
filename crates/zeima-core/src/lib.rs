@@ -42,6 +42,7 @@ pub use repo::{
 };
 pub use repo::{ApplyReport, FieldView, Outbox, RemoteRow, SyncConflict, SYNCED_TABLES, SYNC_BATCH};
 #[cfg(feature = "db")]
+pub use repo::{LocationKind, WorkLocation};
 pub use repo::{SubmissionStatus, TeamMember, TimesheetSubmission};
 
 #[cfg(feature = "db")]

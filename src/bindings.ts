@@ -188,6 +188,8 @@ export const commands = {
 	 *  details become the error, with its `code`.
 	 */
 	orgRequest: (method: string, path: string, body: string | null) => typedError<string | null, CmdError>(__TAURI_INVOKE("org_request", { method, path, body })),
+	locationsList: (from: string, to: string) => typedError<WorkLocation[], CmdError>(__TAURI_INVOKE("locations_list", { from, to })),
+	locationSet: (date: string, kind: "office" | "home" | "travel" | "other" | null) => typedError<null, CmdError>(__TAURI_INVOKE("location_set", { date, kind })),
 	/**
 	 *  Time tracked by everyone this device has entries of in the workspace
 	 *  (what the person's role lets the server send).
@@ -766,6 +768,8 @@ export type JurisdictionSelection = {
 	region: string | null,
 };
 
+export type LocationKind = "office" | "home" | "travel" | "other";
+
 /**  Ask the main window to open a route (e.g. from the tray). */
 export type Navigate = {
 	path: string,
@@ -1267,6 +1271,14 @@ export type WorkDay = {
 	holiday: string | null,
 	absenceTypeIds: string[],
 	warnings: DayWarning[],
+};
+
+export type WorkLocation = {
+	id: string,
+	/**  The person (their account id). */
+	userId: string,
+	date: string,
+	kind: LocationKind,
 };
 
 export type WorkSchedule = {

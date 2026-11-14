@@ -2163,6 +2163,95 @@
         }
       }
     },
+    "/v1/orgs/{orgId}/people": {
+      "get": {
+        "summary": "Names of everyone in the organization (for lists that show other people)",
+        "tags": [
+          "organizations"
+        ],
+        "description": "Only the display name, so presence, locations and timesheets can say who is who. No email addresses.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/orgs/{orgId}/presence": {
       "put": {
         "summary": "Reports the caller's presence (online, tracking, in a meeting, away)",
@@ -2874,6 +2963,12 @@
                               "type": "string",
                               "enum": [
                                 "timesheet_submission"
+                              ]
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "work_location"
                               ]
                             }
                           ]

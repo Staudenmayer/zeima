@@ -71,6 +71,8 @@ export const useOrgStore = defineStore('org', () => {
   const audit = ref<AuditEntry[]>([])
   const auditDone = ref(false)
   const presence = ref<PresenceItem[]>([])
+  /** Names of everyone in the organization (every member may read them). */
+  const people = ref<{ id: string; name: string | null }[]>([])
   const loading = ref(false)
 
   const role = computed<OrgRole | null>(() => orgs.value.find((o) => o.id === activeId.value)?.role ?? null)
@@ -79,6 +81,12 @@ export const useOrgStore = defineStore('org', () => {
   async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
     const text = await call(commands.orgRequest(method, path, body === undefined ? null : JSON.stringify(body)))
     return (text ? JSON.parse(text) : null) as T
+  }
+
+  /** A person's name, from what the role may read of the members or else the names list. */
+  function nameOf(id: string): string {
+    const m = members.value.find((x) => x.id === id)
+    return m?.name || m?.email || people.value.find((x) => x.id === id)?.name || ''
   }
 
   const base = () => `/v1/orgs/${activeId.value}`
@@ -96,6 +104,7 @@ export const useOrgStore = defineStore('org', () => {
       if (!activeId.value) return
       info.value = await api<OrgInfo>('GET', base())
       const r = role.value!
+      people.value = await api<{ id: string; name: string | null }[]>('GET', `${base()}/people`).catch(() => [])
       const [m, g, i] = await Promise.all([
         api<Member[]>('GET', `${base()}/members`),
         api<Department[]>('GET', `${base()}/groups`),
@@ -173,7 +182,7 @@ export const useOrgStore = defineStore('org', () => {
 
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
-    presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
+    people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

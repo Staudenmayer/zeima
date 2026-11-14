@@ -136,6 +136,19 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     expect(await names(MANAGER, 'manager')).toEqual(['Mia'])
   })
 
+  it('lists the names of everyone, without addresses, to every member', async () => {
+    await reset()
+    const res = await call('GET', `/v1/orgs/${ORG}/people`, MEMBER, 'member')
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual([
+      { id: ADMIN, name: 'Adam' },
+      { id: MEMBER, name: 'Max' },
+      { id: MANAGER, name: 'Mia' },
+      { id: OWNER, name: 'Olga' },
+    ])
+    expect((await call('GET', `/v1/orgs/${ORG}/people`, OTHER, null)).statusCode).toBe(403)
+  })
+
   describe('invitations', () => {
     it('invites with a role; only owners may invite admins and managers', async () => {
       await reset()
