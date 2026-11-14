@@ -317,8 +317,17 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       expect(busy[BEN]).toEqual([])
       expect(JSON.stringify(busy)).not.toContain('Sync')
       // Declining frees the person; a cancelled meeting is nobody's.
+      const meetingsOf = async (who: string) => ((await ask(BEN, { userIds: [who], ...week })).json()[who] as { kind: string; from: number }[]).filter((b) => b.kind === 'meeting')
+      // One date declined on its own frees only that date; the answer for a date wins over the series'.
+      const second = start + 7 * 86_400_000
+      expect(await results(ANNA, [upsert('meeting_response', id(88), 725, answer({ userId: ANNA, status: 'declined', occurrenceAt: second }))])).toEqual([{ status: 'applied' }])
+      expect((await meetingsOf(ANNA)).map((b) => b.from)).toEqual([start])
+      expect(await results(ANNA, [upsert('meeting_response', id(89), 726, answer({ userId: ANNA, status: 'declined', occurrenceAt: 'soon' }))])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
       await results(ANNA, [upsert('meeting_response', R_ANNA, 730, { status: 'declined' })])
-      const meetingsOf = async (who: string) => ((await ask(BEN, { userIds: [who], ...week })).json()[who] as { kind: string }[]).filter((b) => b.kind === 'meeting')
+      await results(ANNA, [upsert('meeting_response', id(88), 731, { status: 'accepted' })])
+      expect((await meetingsOf(ANNA)).map((b) => b.from)).toEqual([second])
+      // Taking the date's answer back lets the series answer count again.
+      await results(ANNA, [{ table: 'meeting_response', rowId: id(88), op: 'delete', hlc: hlc(732) }])
       expect(await meetingsOf(ANNA)).toEqual([])
       await results(MANAGER, [upsert('meeting', M2, 740, { ...meeting, startAt: start + 86_400_000, endAt: start + 86_400_000 + 3_600_000, rrule: null, attendeeIds: [], cancelled: true })])
       expect(await meetingsOf(MANAGER)).toHaveLength(2)

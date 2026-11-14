@@ -47,7 +47,7 @@ const emit = defineEmits<{
   /** Times of the entry being dragged, live; `null` when the drag ends. */
   preview: [times: { id: string; startAt: number; endAt: number | null } | null]
   /** Click on a timed timeline item: create an entry from it. */
-  track: [item: AddonTimelineItem]
+  track: [item: AddonTimelineItem, anchor: Anchor]
 }>()
 
 const { t } = useI18n()
@@ -202,6 +202,14 @@ function onBlockClick(entry: TimeEntry, event: MouseEvent, mine = true) {
   // like a context menu. Narrow ones get it beside the block.
   const x = pointer && rect.width > POPOVER_ROOM_PX ? event.clientX : undefined
   emit('edit', entry, pointAnchor(el, y, x))
+}
+
+/** A click on a timeline item (a meeting, an event): opens it next to the click, like an entry. */
+function clickItem(item: AddonTimelineItem, event: MouseEvent) {
+  const el = event.currentTarget as HTMLElement
+  const rect = el.getBoundingClientRect()
+  const pointer = event.detail !== 0
+  emit('track', item, pointAnchor(el, pointer ? event.clientY : rect.top, pointer && rect.width > POPOVER_ROOM_PX ? event.clientX : undefined))
 }
 
 /** Shown in the block: the preview while dragging. */
@@ -554,7 +562,7 @@ function hourLabel(h: number) {
             :style="eventStyle(col.day, ev)"
             :title="eventTooltip(ev.item)"
             :aria-label="`${$t('timesheet.trackEvent')}: ${ev.item.title}`"
-            @click="emit('track', ev.item)"
+            @click="clickItem(ev.item, $event)"
           >
             <span class="truncate font-medium">{{ ev.item.title }}</span>
             <span v-if="ev.item.detail && blockHeight(col.day, ev) >= 30" class="truncate text-muted-foreground">{{ ev.item.detail }}</span>

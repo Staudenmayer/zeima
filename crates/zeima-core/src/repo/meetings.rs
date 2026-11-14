@@ -81,6 +81,10 @@ pub struct MeetingResponse {
     pub user_id: String,
     pub meeting_id: String,
     pub status: RsvpStatus,
+    /// Set when the answer is for one date of a repeating meeting (the start of
+    /// that date, unix ms); empty for an answer to the whole series.
+    #[cfg_attr(feature = "specta", specta(type = Option<specta_typescript::Number>))]
+    pub occurrence_at: Option<i64>,
 }
 
 /// One time a meeting happens, with the answers this device knows.
@@ -93,9 +97,15 @@ pub struct MeetingOccurrence {
     pub start_at: i64,
     #[cfg_attr(feature = "specta", specta(type = specta_typescript::Number))]
     pub end_at: i64,
+    /// The answers for this date: each person's own for the date if they gave one,
+    /// else their answer to the series.
     pub responses: Vec<MeetingResponse>,
-    /// The person's own answer, if they gave one.
+    /// The person's answer for this date (their date's own, else the series').
     pub my_status: Option<RsvpStatus>,
+    /// The person's answer to the whole series, whatever they said for this date.
+    pub series_status: Option<RsvpStatus>,
+    /// Whether the person answered this date on its own.
+    pub my_date_answer: bool,
 }
 
 /// How far ahead a room booking is checked (repeating meetings).
@@ -130,12 +140,35 @@ fn from_row(r: &SqliteRow) -> Result<Meeting> {
     })
 }
 
-fn response_id(workspace_id: &str, meeting_id: &str, user_id: &str) -> String {
-    uuid::Uuid::new_v5(
-        &uuid::Uuid::NAMESPACE_OID,
-        format!("meeting_response|{workspace_id}|{meeting_id}|{user_id}").as_bytes(),
+fn response_id(workspace_id: &str, meeting_id: &str, user_id: &str, occurrence_at: Option<i64>) -> String {
+    // The series answer keeps the id it always had.
+    let key = match occurrence_at {
+        None => format!("meeting_response|{workspace_id}|{meeting_id}|{user_id}"),
+        Some(at) => format!("meeting_response|{workspace_id}|{meeting_id}|{user_id}|{at}"),
+    };
+    uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, key.as_bytes()).to_string()
+}
+
+/// A date given for an answer must be one the meeting really has.
+fn check_occurrence(meeting: &Meeting, at: i64) -> Result<()> {
+    let found = occurrences(
+        meeting.start_at,
+        meeting.end_at,
+        &meeting.tz,
+        meeting.rrule.as_deref(),
+        at,
+        at + 1,
     )
-    .to_string()
+    .iter()
+    .any(|(start, _)| *start == at);
+    if found {
+        Ok(())
+    } else {
+        Err(Error::validation(
+            "occurrenceAt",
+            "the meeting does not happen at that time",
+        ))
+    }
 }
 
 fn trimmed(text: &Option<String>) -> Option<String> {
@@ -378,8 +411,15 @@ impl Core {
         Ok(meeting)
     }
 
-    /// The person's answer to a meeting they are asked to.
-    pub async fn respond_to_meeting(&self, meeting_id: &str, status: RsvpStatus) -> Result<MeetingResponse> {
+    /// The person's answer to a meeting they are asked to: for the whole series, or
+    /// (with `occurrence_at`, the start of one of its dates) for that date only, which
+    /// then counts instead of the series answer.
+    pub async fn respond_to_meeting(
+        &self,
+        meeting_id: &str,
+        status: RsvpStatus,
+        occurrence_at: Option<i64>,
+    ) -> Result<MeetingResponse> {
         self.require_shared_meetings()?;
         let meeting = self.get_meeting(meeting_id).await?;
         let me = self.ctx().user_id.clone();
@@ -389,24 +429,30 @@ impl Core {
                 "you are not asked to this meeting",
             ));
         }
+        if let Some(at) = occurrence_at {
+            check_occurrence(&meeting, at)?;
+        }
         let mut tx = self.begin().await?;
         let ws = tx.ctx().workspace_id.clone();
         // An answer that already exists (made on another device, or by older data with
-        // another id) is changed in place: there is one live answer per person and meeting.
+        // another id) is changed in place: there is one live answer per person, meeting
+        // and date (or series).
         let existing: Option<String> = sqlx::query_scalar(
             "SELECT id FROM meeting_response
-             WHERE workspace_id = ? AND meeting_id = ? AND user_id = ? AND deleted_at IS NULL",
+             WHERE workspace_id = ? AND meeting_id = ? AND user_id = ? AND deleted_at IS NULL
+               AND COALESCE(occurrence_at, -1) = COALESCE(?, -1)",
         )
         .bind(&ws)
         .bind(meeting_id)
         .bind(&me)
+        .bind(occurrence_at)
         .fetch_optional(tx.conn())
         .await?;
-        let id = existing.unwrap_or_else(|| response_id(&ws, meeting_id, &me));
+        let id = existing.unwrap_or_else(|| response_id(&ws, meeting_id, &me, occurrence_at));
         let s = tx.stamp();
         sqlx::query(
-            "INSERT INTO meeting_response (id, workspace_id, user_id, meeting_id, status, created_at, updated_at, hlc, origin_device)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO meeting_response (id, workspace_id, user_id, meeting_id, occurrence_at, status, created_at, updated_at, hlc, origin_device)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (id) DO UPDATE SET status = excluded.status, deleted_at = NULL,
                 updated_at = excluded.updated_at, hlc = excluded.hlc, origin_device = excluded.origin_device",
         )
@@ -414,6 +460,7 @@ impl Core {
         .bind(&ws)
         .bind(&me)
         .bind(meeting_id)
+        .bind(occurrence_at)
         .bind(status.as_str())
         .bind(s.now)
         .bind(s.now)
@@ -426,10 +473,33 @@ impl Core {
             user_id: me,
             meeting_id: meeting_id.to_string(),
             status,
+            occurrence_at,
         };
         tx.log_upsert("meeting_response", &id, &s, &response).await?;
         tx.commit().await?;
         Ok(response)
+    }
+
+    /// Takes back the person's answer for one date, so the series answer counts again.
+    pub async fn clear_date_answer(&self, meeting_id: &str, occurrence_at: i64) -> Result<()> {
+        self.require_shared_meetings()?;
+        let me = self.ctx().user_id.clone();
+        let mut tx = self.begin().await?;
+        let ws = tx.ctx().workspace_id.clone();
+        let ids: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM meeting_response
+             WHERE workspace_id = ? AND meeting_id = ? AND user_id = ? AND occurrence_at = ? AND deleted_at IS NULL",
+        )
+        .bind(&ws)
+        .bind(meeting_id)
+        .bind(&me)
+        .bind(occurrence_at)
+        .fetch_all(tx.conn())
+        .await?;
+        for id in ids {
+            super::soft_delete(&mut tx, "meeting_response", &id).await?;
+        }
+        tx.commit().await
     }
 
     /// The times meetings happen within `from..=to` (the person's days in the default zone),
@@ -459,7 +529,7 @@ impl Core {
         .iter()
         .map(from_row)
         .collect::<Result<_>>()?;
-        let responses: Vec<MeetingResponse> = sqlx::query("SELECT id, user_id, meeting_id, status FROM meeting_response WHERE workspace_id = ? AND deleted_at IS NULL")
+        let responses: Vec<MeetingResponse> = sqlx::query("SELECT id, user_id, meeting_id, occurrence_at, status FROM meeting_response WHERE workspace_id = ? AND deleted_at IS NULL")
             .bind(&self.ctx().workspace_id)
             .fetch_all(self.pool())
             .await?
@@ -469,6 +539,7 @@ impl Core {
                     id: r.try_get("id")?,
                     user_id: r.try_get("user_id")?,
                     meeting_id: r.try_get("meeting_id")?,
+                    occurrence_at: r.try_get("occurrence_at")?,
                     status: r.try_get::<String, _>("status")?.parse()?,
                 })
             })
@@ -480,21 +551,45 @@ impl Core {
             if !asked {
                 continue;
             }
-            let mine: Vec<MeetingResponse> = responses
-                .iter()
-                .filter(|r| r.meeting_id == m.id)
-                .cloned()
-                .collect();
-            let my_status = mine.iter().find(|r| r.user_id == *me).map(|r| r.status);
+            let all: Vec<&MeetingResponse> = responses.iter().filter(|r| r.meeting_id == m.id).collect();
             for (start_at, end_at) in
                 occurrences(m.start_at, m.end_at, &m.tz, m.rrule.as_deref(), from_ms, to_ms)
             {
+                // Per person: the answer for this date if there is one, else the series'.
+                let mut people: Vec<&str> = all.iter().map(|r| r.user_id.as_str()).collect();
+                people.sort_unstable();
+                people.dedup();
+                let responses_here: Vec<MeetingResponse> = people
+                    .iter()
+                    .filter_map(|u| {
+                        let of_person = || all.iter().filter(|r| r.user_id == *u);
+                        of_person()
+                            .find(|r| r.occurrence_at == Some(start_at))
+                            .or_else(|| of_person().find(|r| r.occurrence_at.is_none()))
+                            .map(|r| (*r).clone())
+                    })
+                    .collect();
+                let mine = |dated: bool| {
+                    all.iter()
+                        .find(|r| {
+                            r.user_id == *me
+                                && if dated {
+                                    r.occurrence_at == Some(start_at)
+                                } else {
+                                    r.occurrence_at.is_none()
+                                }
+                        })
+                        .map(|r| r.status)
+                };
+                let (dated, series) = (mine(true), mine(false));
                 out.push(MeetingOccurrence {
                     meeting: m.clone(),
                     start_at,
                     end_at,
-                    responses: mine.clone(),
-                    my_status,
+                    responses: responses_here,
+                    my_status: dated.or(series),
+                    series_status: series,
+                    my_date_answer: dated.is_some(),
                 });
             }
         }

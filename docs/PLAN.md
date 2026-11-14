@@ -191,13 +191,12 @@ What 2.0 deliberately does not include, and why:
 - [x] **Meetings visible to colleagues as "busy" only.** Every member can add people in the timesheet; the server's free/busy gives meetings and approved absences as Busy / Absent blocks, never the title, note or activity. (The server already answered this; the app now shows it in the day, week and table views.)
 - [x] **Meeting rooms with booking conflicts.** Admins keep a list of rooms (Meetings → Rooms); a meeting picks one; the server refuses overlapping bookings, repeats included, and the dialog marks rooms booked at the chosen time. Open: a booking refused after the fact (two people at once) is dropped silently on the device that sent it, and the Organization page has no rooms tab yet (they are kept from the Meetings page).
 
-**Planned: answer one date of a repeating meeting.** Today a person's answer (accept, maybe, decline) belongs to the whole meeting, so declining one date declines the whole series. Wanted: a repeating meeting keeps the series answer, and a person can override a single date ("Decline this one"; open: whether "Accept only this one" should exist as well).
+**Answer one date of a repeating meeting** (done in the repository). A person answers a repeating meeting for all its dates, or for one date only; the date's own answer counts instead of the series answer, and "All dates" takes it back. Both "Decline this one" and "Accept only this one" exist (any answer can be for one date).
 
-- [ ] Core: `meeting_response` gets an optional occurrence date (migration; a series answer has none, one live answer per person, meeting and date; the id is derived from those three). A date's own answer wins over the series answer for that date.
-- [ ] Core: `respond_to_meeting` takes an optional date; `list_meetings` gives each occurrence its own answer (`my_status`, `responses`) and the organizer's counts follow it.
-- [ ] Server: sync rules accept the dated answers (only for a meeting the person is asked to); free/busy and the presence check (in a meeting right now) skip a date the person declined.
-- [ ] App: the Meetings page offers "Decline this one" next to the series answer for repeating meetings, and shows which date is overridden.
-- [ ] Tests (core, sync rules, free/busy) and the click prototype.
+- [x] Core: `meeting_response.occurrence_at` (migration 0025; a series answer has none; one live answer per person, meeting and date; the id is derived from those). `respond_to_meeting(meeting, status, occurrence_at)` accepts only a real date of the meeting; `clear_date_answer` takes it back. `list_meetings` gives each date its own answers (`responses`, `my_status`, plus `series_status` and `my_date_answer`), so counts, presence, the "track it?" prompt and the add-on timeline follow the date.
+- [x] Server: sync rules accept the dated answers (only a number for the date); free/busy skips a date the person declined (the date's answer wins over the series').
+- [x] App: Meetings → for repeating meetings the answer has "All dates / This date only"; with a date answer the series answer is shown beside it.
+- [x] Tests (core, sync rules + free/busy) and the click prototype. Open: the organizer cannot answer; `.ics` export does not carry per-date answers.
 
 **Roles made of permissions** (done in the repository): the four fixed roles are now defaults of a permission set (view, edit, delete per resource, with own/department/everyone reach for views); admins change them and create roles of their own, with the rule that nobody grants what they do not hold. Open: the click prototype and a per-role table of what the desktop hides for the people with only some permissions (the server already refuses everything).
 

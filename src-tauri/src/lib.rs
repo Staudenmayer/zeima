@@ -172,6 +172,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands_work::meeting_update,
             commands_work::meeting_cancel,
             commands_work::meeting_respond,
+            commands_work::meeting_respond_clear,
             commands_work::meeting_export_ics,
             commands_work::team_summary,
             commands_work::team_entries,

@@ -221,7 +221,9 @@ export const commands = {
 	meetingCreate: (input: MeetingInput) => typedError<Meeting, CmdError>(__TAURI_INVOKE("meeting_create", { input })),
 	meetingUpdate: (id: string, input: MeetingInput) => typedError<Meeting, CmdError>(__TAURI_INVOKE("meeting_update", { id, input })),
 	meetingCancel: (id: string) => typedError<Meeting, CmdError>(__TAURI_INVOKE("meeting_cancel", { id })),
-	meetingRespond: (id: string, status: RsvpStatus) => typedError<MeetingResponse, CmdError>(__TAURI_INVOKE("meeting_respond", { id, status })),
+	meetingRespond: (id: string, status: RsvpStatus, occurrenceAt: number | null) => typedError<MeetingResponse, CmdError>(__TAURI_INVOKE("meeting_respond", { id, status, occurrenceAt })),
+	/**  Takes back the answer for one date, so the answer to the series counts again. */
+	meetingRespondClear: (id: string, occurrenceAt: number | null) => typedError<null, CmdError>(__TAURI_INVOKE("meeting_respond_clear", { id, occurrenceAt })),
 	/**  Saves the meeting as an `.ics` file the person chooses (for any calendar program). */
 	meetingExportIcs: (id: string) => typedError<string | null, CmdError>(__TAURI_INVOKE("meeting_export_ics", { id })),
 	/**
@@ -899,9 +901,17 @@ export type MeetingOccurrence = {
 	meeting: Meeting,
 	startAt: number,
 	endAt: number,
+	/**
+	 *  The answers for this date: each person's own for the date if they gave one,
+	 *  else their answer to the series.
+	 */
 	responses: MeetingResponse[],
-	/**  The person's own answer, if they gave one. */
+	/**  The person's answer for this date (their date's own, else the series'). */
 	myStatus: RsvpStatus | null,
+	/**  The person's answer to the whole series, whatever they said for this date. */
+	seriesStatus: RsvpStatus | null,
+	/**  Whether the person answered this date on its own. */
+	myDateAnswer: boolean,
 };
 
 export type MeetingResponse = {
@@ -910,6 +920,11 @@ export type MeetingResponse = {
 	userId: string,
 	meetingId: string,
 	status: RsvpStatus,
+	/**
+	 *  Set when the answer is for one date of a repeating meeting (the start of
+	 *  that date, unix ms); empty for an answer to the whole series.
+	 */
+	occurrenceAt: number | null,
 };
 
 /**  Ask the main window to open a route (e.g. from the tray). */

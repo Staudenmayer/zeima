@@ -47,6 +47,8 @@ import type { Busy, PersonDay } from '@/lib/busy'
 import { call, errorMessage } from '@/lib/ipc'
 import { HOUR, addDays, dayRange, daysBetween, fromInputs, getTimeZone, startOfDay, toDateInput, toTimeInput, weekDays } from '@/lib/time'
 import UserAvatar from '@/components/time/UserAvatar.vue'
+import MeetingPopover from '@/components/time/MeetingPopover.vue'
+import MeetingDetailsDialog from '@/components/time/MeetingDetailsDialog.vue'
 import TableToolbar from '@/components/time/TableToolbar.vue'
 import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
@@ -319,6 +321,31 @@ function createAt(at: number) {
   entryDialogOpen.value = true
 }
 
+/** A meeting opens its details (who takes part, what they answered); other events are tracked straight away. */
+const meetingItem = ref<AddonTimelineItem | null>(null)
+const meetingOpen = ref(false)
+const meetingAnchor = shallowRef<Anchor | null>(null)
+function openItem(item: AddonTimelineItem, anchor: Anchor) {
+  if (item.addonId !== 'zeima.meetings') return track(item)
+  // A second click on the same meeting closes it.
+  if (meetingOpen.value && meetingItem.value?.id === item.id) {
+    meetingOpen.value = false
+    return
+  }
+  popoverOpen.value = false
+  meetingItem.value = item
+  meetingAnchor.value = anchor
+  meetingOpen.value = true
+}
+// In the list a meeting opens in a dialog (as on the Meetings page); in the calendar views in a popover next to the click.
+const meetingDialogOpen = ref(false)
+function openItemInDialog(item: AddonTimelineItem) {
+  if (item.addonId !== 'zeima.meetings') return track(item)
+  meetingOpen.value = false
+  meetingItem.value = item
+  meetingDialogOpen.value = true
+}
+
 /** "Track this event": a new entry with the item's times and values. */
 function track(item: AddonTimelineItem) {
   editing.value = null
@@ -350,6 +377,7 @@ const popoverAnchor = shallowRef<Anchor | null>(null)
 const dragTimes = ref<{ id: string; startAt: number; endAt: number | null } | null>(null)
 /** A click on a block opens its popover; a second click closes it. */
 function openPopover(e: TimeEntry, anchor: Anchor) {
+  meetingOpen.value = false
   if (popoverOpen.value && popoverId.value === e.id) {
     popoverOpen.value = false
     return
@@ -557,7 +585,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
     :others="shownOthers"
     @edit="openPopover"
     @create="createAt"
-    @track="track"
+    @track="openItem"
   />
 
   <EntryCalendar
@@ -573,7 +601,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
     @create="openNew"
     @resize="resizeEntry"
     @preview="dragTimes = $event"
-    @track="track"
+    @track="openItem"
   />
 
   <EmptyState v-else-if="groups.every((g) => g.entries.length === 0 && g.events.length === 0 && g.others.length === 0 && g.busy.length === 0)" :icon="Clock" :text="hasFilter ? $t('timesheet.noMatch') : $t('timesheet.empty')">
@@ -633,7 +661,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
           class="group cursor-pointer border-b border-dashed text-muted-foreground last:border-b-0 hover:bg-muted/30"
           :class="isAbsence(item) ? 'bg-[oklch(0.95_0.045_350)] dark:bg-[oklch(0.3_0.07_350)]' : ''"
           :title="isAbsence(item) ? undefined : $t('timesheet.trackEvent')"
-          @click="isAbsence(item) ? router.push('/absences') : track(item)"
+          @click="isAbsence(item) ? router.push('/absences') : openItemInDialog(item)"
         >
           <td class="w-8 py-1.5 pr-0 pl-3" />
           <td v-if="withPeople" class="px-3 py-1.5">{{ $t('timesheet.me') }}</td>
@@ -851,4 +879,6 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
       </form>
     </DialogContent>
   </Dialog>
+  <MeetingDetailsDialog v-model:open="meetingDialogOpen" :item="meetingItem" @track="track" />
+  <MeetingPopover v-model:open="meetingOpen" :item="meetingItem" :reference="meetingAnchor" @track="track" />
 </template>

@@ -104,6 +104,9 @@ async function checkMeetingResponse(db: Db, orgId: string, me: string, merged: R
   const meetingId = plain(merged.meetingId)
   const workspace = await orgWorkspaceId(db, orgId)
   if (typeof meetingId !== 'string' || !workspace) return { status: 'rejected', reason: 'forbidden' }
+  // An answer for one date of a repeating meeting names that date (unix ms); without one it is for the series.
+  const date = plain(merged.occurrenceAt)
+  if (date !== undefined && date !== null && !Number.isFinite(date)) return { status: 'rejected', reason: 'forbidden' }
   const [row] = await db
     .select({ fields: schema.syncRow.fields })
     .from(schema.syncRow)

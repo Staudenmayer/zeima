@@ -27,21 +27,25 @@ export async function freeBusy(db: Db, workspaceId: string, userIds: readonly st
     .from(schema.syncRow)
     .where(eq(schema.syncRow.workspaceId, workspaceId))
   const live = rows.filter((r) => r.deleted === null)
-  const declined = new Set<string>() // `${meetingId}|${userId}`
+  // What each person answered: to the whole series (`meeting|user`) and to single dates (`meeting|user|start`).
+  const answers = new Map<string, unknown>()
   for (const r of live) {
     if (r.table !== 'meeting_response') continue
     const f = r.fields as Fields
-    if (value(f, 'status') === 'declined') declined.add(`${String(value(f, 'meetingId'))}|${String(value(f, 'userId'))}`)
+    const at = value(f, 'occurrenceAt')
+    answers.set(`${String(value(f, 'meetingId'))}|${String(value(f, 'userId'))}${typeof at === 'number' ? `|${at}` : ''}`, value(f, 'status'))
   }
+  /** Declined for this date: the date's own answer counts, else the series'. */
+  const declinedAt = (meetingId: string, user: string, start: number) => (answers.get(`${meetingId}|${user}|${start}`) ?? answers.get(`${meetingId}|${user}`)) === 'declined'
   for (const r of live) {
     const f = r.fields as Fields
     if (r.table === 'meeting' && value(f, 'cancelled') !== true) {
       const organizer = String(value(f, 'userId'))
       const attendees = Array.isArray(value(f, 'attendeeIds')) ? (value(f, 'attendeeIds') as string[]) : []
-      const busyFor = [organizer, ...attendees].filter((u) => wanted.has(u) && !declined.has(`${r.rowId}|${u}`))
-      if (busyFor.length === 0) continue
+      const people = [organizer, ...attendees].filter((u) => wanted.has(u))
+      if (people.length === 0) continue
       const times = occurrences(Number(value(f, 'startAt')), Number(value(f, 'endAt')), String(value(f, 'tz') ?? 'UTC'), (value(f, 'rrule') as string | null) ?? null, from, to)
-      for (const u of busyFor) for (const [s, e] of times) out[u]!.push({ from: s, to: e, kind: 'meeting' })
+      for (const u of people) for (const [s, e] of times) if (!declinedAt(r.rowId, u, s)) out[u]!.push({ from: s, to: e, kind: 'meeting' })
     } else if (r.table === 'absence' && value(f, 'status') === 'approved') {
       const user = String(value(f, 'userId'))
       if (!wanted.has(user)) continue

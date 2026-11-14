@@ -701,13 +701,13 @@ async fn meetings_are_called_answered_and_repeat() {
 
     // Only those asked answer; the organizer cannot.
     assert!(ada
-        .respond_to_meeting(&meeting.id, RsvpStatus::Accepted)
+        .respond_to_meeting(&meeting.id, RsvpStatus::Accepted, None)
         .await
         .is_err());
-    ben.respond_to_meeting(&meeting.id, RsvpStatus::Tentative)
+    ben.respond_to_meeting(&meeting.id, RsvpStatus::Tentative, None)
         .await
         .unwrap();
-    ben.respond_to_meeting(&meeting.id, RsvpStatus::Accepted)
+    ben.respond_to_meeting(&meeting.id, RsvpStatus::Accepted, None)
         .await
         .unwrap();
     // An answer that came with another id (seeded or synced) is changed, not duplicated.
@@ -716,10 +716,10 @@ async fn meetings_are_called_answered_and_repeat() {
         .execute(ben.pool())
         .await
         .unwrap();
-    ben.respond_to_meeting(&meeting.id, RsvpStatus::Declined)
+    ben.respond_to_meeting(&meeting.id, RsvpStatus::Declined, None)
         .await
         .unwrap();
-    ben.respond_to_meeting(&meeting.id, RsvpStatus::Accepted)
+    ben.respond_to_meeting(&meeting.id, RsvpStatus::Accepted, None)
         .await
         .unwrap();
     let seen = ada.list_meetings(from, from).await.unwrap_or_default();
@@ -733,6 +733,44 @@ async fn meetings_are_called_answered_and_repeat() {
         ben.list_meetings(from, to).await.unwrap()[0].my_status,
         Some(RsvpStatus::Accepted)
     );
+
+    // One date answered on its own: that date counts, the series answer stays for the others.
+    let second = ben.list_meetings(from, to).await.unwrap()[1].start_at;
+    ben.respond_to_meeting(&meeting.id, RsvpStatus::Declined, Some(second))
+        .await
+        .unwrap();
+    let after = ben.list_meetings(from, to).await.unwrap();
+    assert_eq!(
+        after.iter().map(|o| o.my_status).collect::<Vec<_>>(),
+        vec![
+            Some(RsvpStatus::Accepted),
+            Some(RsvpStatus::Declined),
+            Some(RsvpStatus::Accepted)
+        ]
+    );
+    assert_eq!(
+        (
+            after[1].series_status,
+            after[1].my_date_answer,
+            after[0].my_date_answer
+        ),
+        (Some(RsvpStatus::Accepted), true, false)
+    );
+    let seen_by_organizer = ada.list_meetings(from, to).await.unwrap();
+    assert_eq!(seen_by_organizer[1].responses.len(), 1);
+    assert_eq!(seen_by_organizer[1].responses[0].status, RsvpStatus::Declined);
+    assert_eq!(seen_by_organizer[0].responses[0].status, RsvpStatus::Accepted);
+    // Only a real date of the meeting can be answered; the organizer answers none.
+    assert!(ben
+        .respond_to_meeting(&meeting.id, RsvpStatus::Declined, Some(second + 1))
+        .await
+        .is_err());
+    // Taking the date's answer back lets the series answer count again.
+    ben.clear_date_answer(&meeting.id, second).await.unwrap();
+    let back = ben.list_meetings(from, to).await.unwrap();
+    assert!(back
+        .iter()
+        .all(|o| o.my_status == Some(RsvpStatus::Accepted) && !o.my_date_answer));
 
     // Only the organizer changes or cancels.
     assert!(ben

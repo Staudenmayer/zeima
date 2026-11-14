@@ -597,10 +597,29 @@ pub async fn meeting_respond(
     state: State<'_, AppState>,
     id: String,
     status: zeima_core::RsvpStatus,
+    // The start of one date of a repeating meeting (unix ms): the answer is for that date only.
+    occurrence_at: Option<f64>,
 ) -> CmdResult<zeima_core::MeetingResponse> {
-    let response = state.data().respond_to_meeting(&id, status).await?;
+    let response = state
+        .data()
+        .respond_to_meeting(&id, status, occurrence_at.map(|ms| ms as i64))
+        .await?;
     changed(&app, &[DataKind::Timeline]).await;
     Ok(response)
+}
+
+/// Takes back the answer for one date, so the answer to the series counts again.
+#[tauri::command]
+#[specta::specta]
+pub async fn meeting_respond_clear(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    occurrence_at: f64,
+) -> CmdResult<()> {
+    state.data().clear_date_answer(&id, occurrence_at as i64).await?;
+    changed(&app, &[DataKind::Timeline]).await;
+    Ok(())
 }
 
 /// Saves the meeting as an `.ics` file the person chooses (for any calendar program).

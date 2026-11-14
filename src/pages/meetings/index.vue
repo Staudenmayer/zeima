@@ -3,11 +3,13 @@ import TableToolbar from '@/components/time/TableToolbar.vue'
 import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
 import { passes, useTableSearch } from '@/composables/useTableSearch'
 import UserAvatar from '@/components/time/UserAvatar.vue'
+import MeetingPeople from '@/components/time/MeetingPeople.vue'
+import MeetingDetailsDialog from '@/components/time/MeetingDetailsDialog.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { Ban, CalendarPlus, CalendarX2, DoorOpen, Download, ExternalLink, MapPin, Pencil, Plus } from '@lucide/vue'
-import { commands, type Meeting, type MeetingOccurrence, type RsvpStatus } from '@/bindings'
+import { commands, type AddonTimelineItem, type Meeting, type MeetingOccurrence, type RsvpStatus } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
@@ -82,7 +84,6 @@ const counts = (o: MeetingOccurrence) => {
   const by = (s: RsvpStatus) => o.responses.filter((r) => r.status === s).length
   return { accepted: by('accepted'), tentative: by('tentative'), declined: by('declined'), waiting: o.meeting.attendeeIds.length - o.responses.length }
 }
-const names = (o: MeetingOccurrence, s: RsvpStatus) => o.responses.filter((r) => r.status === s).map((r) => org.nameOf(r.userId) || '·').join(', ')
 
 async function run(action: () => Promise<unknown>, done?: string) {
   try {
@@ -93,8 +94,47 @@ async function run(action: () => Promise<unknown>, done?: string) {
     toast.error(errorMessage(err))
   }
 }
-const respond = (o: MeetingOccurrence, status: RsvpStatus) => run(() => call(commands.meetingRespond(o.meeting.id, status)))
+// A repeating meeting is answered for all its dates, or for one date only (that date's answer counts instead).
+const dateOnly = ref(new Map<string, boolean>())
+const rowKey = (o: MeetingOccurrence) => `${o.meeting.id}/${o.startAt}`
+const isDateOnly = (o: MeetingOccurrence) => dateOnly.value.get(rowKey(o)) ?? o.myDateAnswer
+const respond = (o: MeetingOccurrence, status: RsvpStatus) =>
+  run(() => call(commands.meetingRespond(o.meeting.id, status, o.meeting.rrule && isDateOnly(o) ? o.startAt : null)))
+function chooseScope(o: MeetingOccurrence, only: boolean) {
+  dateOnly.value = new Map(dateOnly.value).set(rowKey(o), only)
+  // Back to all dates: the answer for this date is taken back, so the series answer counts again.
+  if (!only && o.myDateAnswer) void run(() => call(commands.meetingRespondClear(o.meeting.id, o.startAt)))
+}
 
+// A row opens the meeting: when, where, who takes part and what each answered.
+const detailsOpen = ref(false)
+const detailsItem = ref<AddonTimelineItem | null>(null)
+function openDetails(o: MeetingOccurrence) {
+  detailsItem.value = {
+    addonId: 'zeima.meetings',
+    id: `${o.meeting.id}@${o.startAt}`,
+    title: o.meeting.title,
+    startAt: o.startAt,
+    endAt: o.endAt,
+    allDay: false,
+    detail: o.meeting.location,
+    color: null,
+    activityId: o.meeting.activityId,
+    projectId: o.meeting.projectId,
+    tagIds: o.meeting.tagIds,
+    billable: o.meeting.billable,
+    costCenterId: o.meeting.costCenterId,
+    note: o.meeting.title,
+  }
+  detailsOpen.value = true
+}
+
+/** Whether the opened meeting is the person's own (and not called off), so they can change it. */
+const detailsMine = computed(() => {
+  const id = detailsItem.value?.id.split('@')[0]
+  const m = items.value.find((o) => o.meeting.id === id)?.meeting
+  return !!m && m.userId === me.value && !m.cancelled
+})
 const dialogOpen = ref(false)
 const roomsOpen = ref(false)
 const editing = ref<Meeting | null>(null)
@@ -154,8 +194,8 @@ const { sort, apply: sortOccurrences } = useSort<MeetingOccurrence>(null, {
             v-for="o in sortOccurrences(d.list)"
             :key="`${o.meeting.id}@${o.startAt}`"
             class="group border-b last:border-b-0 hover:bg-muted/30"
-            :class="[o.meeting.cancelled ? 'opacity-60' : '', o.meeting.userId === me && !o.meeting.cancelled ? 'cursor-pointer' : '']"
-            @click="o.meeting.userId === me && !o.meeting.cancelled && openDialog(o.meeting)"
+            :class="[o.meeting.cancelled ? 'opacity-60' : '', 'cursor-pointer']"
+            @click="openDetails(o)"
           >
             <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">{{ when(o) }}</td>
             <td class="max-w-72 px-3 py-1.5">
@@ -173,15 +213,23 @@ const { sort, apply: sortOccurrences } = useSort<MeetingOccurrence>(null, {
               <span v-if="!o.meeting.location && !o.meeting.onlineUrl">–</span>
             </td>
             <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">{{ (o.meeting.projectId && projects.byId.get(o.meeting.projectId)?.name) || '–' }}</td>
-            <td
-              class="whitespace-nowrap px-3 py-1.5 text-muted-foreground"
-              :title="[names(o, 'accepted') && `✓ ${names(o, 'accepted')}`, names(o, 'tentative') && `? ${names(o, 'tentative')}`, names(o, 'declined') && `✗ ${names(o, 'declined')}`].filter(Boolean).join('\n')"
-            >{{ o.meeting.attendeeIds.length ? $t('meetings.counts', counts(o)) : '–' }}</td>
+            <td class="whitespace-nowrap px-3 py-1.5 text-muted-foreground">
+              <template v-if="o.meeting.attendeeIds.length">
+                <MeetingPeople :occurrence="o" />
+                <p class="mt-0.5 text-xs">{{ $t('meetings.counts', counts(o)) }}</p>
+              </template>
+              <span v-else>–</span>
+            </td>
             <td class="whitespace-nowrap px-3 py-1.5" @click.stop>
               <div v-if="o.meeting.userId !== me && !o.meeting.cancelled" class="flex gap-1">
                 <Button size="sm" class="h-7" :variant="o.myStatus === 'accepted' ? 'default' : 'outline'" @click="respond(o, 'accepted')">{{ $t('meetings.accept') }}</Button>
                 <Button size="sm" class="h-7" :variant="o.myStatus === 'tentative' ? 'default' : 'outline'" @click="respond(o, 'tentative')">{{ $t('meetings.maybe') }}</Button>
                 <Button size="sm" class="h-7" :variant="o.myStatus === 'declined' ? 'destructive' : 'outline'" @click="respond(o, 'declined')">{{ $t('meetings.decline') }}</Button>
+              </div>
+              <div v-if="o.meeting.userId !== me && !o.meeting.cancelled && o.meeting.rrule" class="mt-1 flex items-center gap-1 text-xs">
+                <button type="button" class="rounded px-1.5 py-0.5" :class="!isDateOnly(o) ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60'" @click="chooseScope(o, false)">{{ $t('meetings.allDates') }}</button>
+                <button type="button" class="rounded px-1.5 py-0.5" :class="isDateOnly(o) ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/60'" @click="chooseScope(o, true)">{{ $t('meetings.thisDate') }}</button>
+                <span v-if="o.myDateAnswer && o.seriesStatus" class="text-muted-foreground">· {{ $t('meetings.seriesAnswer', { answer: $t(`meetings.${o.seriesStatus === 'accepted' ? 'accept' : o.seriesStatus === 'tentative' ? 'maybe' : 'decline'}`) }) }}</span>
               </div>
               <span v-else class="text-muted-foreground">–</span>
             </td>
@@ -202,6 +250,7 @@ const { sort, apply: sortOccurrences } = useSort<MeetingOccurrence>(null, {
   </div>
 
   <MeetingDialog v-model:open="dialogOpen" :meeting="editing" @saved="load" />
+  <MeetingDetailsDialog v-model:open="detailsOpen" :item="detailsItem" :can-track="false" :can-edit="detailsItem !== null && detailsMine" @edit="openDialog" @answered="load" />
   <RoomsDialog v-model:open="roomsOpen" />
   <ConfirmDialog
     v-model:open="cancelOpen"

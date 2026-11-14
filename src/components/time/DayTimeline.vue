@@ -39,7 +39,7 @@ const emit = defineEmits<{
   /** Double-click on an empty spot: the full hour under the pointer. */
   create: [at: number]
   /** Click on a timed timeline item: create an entry from it. */
-  track: [item: AddonTimelineItem]
+  track: [item: AddonTimelineItem, anchor: Anchor]
 }>()
 
 const { t } = useI18n()
@@ -195,6 +195,12 @@ function onBlockClick(entry: TimeEntry, event: MouseEvent) {
   emit('edit', entry, pointAnchor(el, pointer ? event.clientY : el.getBoundingClientRect().top, pointer ? event.clientX : undefined))
 }
 
+/** A click on a timeline item (a meeting, an event): opens it where it was clicked, like an entry. */
+function clickItem(item: AddonTimelineItem, event: MouseEvent) {
+  const el = event.currentTarget as HTMLElement
+  const pointer = event.detail !== 0
+  emit('track', item, pointAnchor(el, pointer ? event.clientY : el.getBoundingClientRect().top, pointer ? event.clientX : undefined))
+}
 function onTrackDblClick(event: MouseEvent) {
   const el = event.currentTarget as HTMLElement
   if (event.target !== el) return
@@ -262,7 +268,7 @@ function onTrackDblClick(event: MouseEvent) {
                 :style="ev.style"
                 :title="eventTooltip(ev.item)"
                 :aria-label="`${$t('timesheet.trackEvent')}: ${ev.item.title}`"
-                @click="emit('track', ev.item)"
+                @click="clickItem(ev.item, $event)"
               >
                 <span class="truncate font-medium">{{ ev.item.title }}</span>
                 <span v-if="ev.item.detail" class="truncate text-muted-foreground">{{ ev.item.detail }}</span>

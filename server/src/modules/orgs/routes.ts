@@ -12,7 +12,7 @@ import { SECURITY } from '../../plugins/auth.ts'
 import { CATALOG, cleanPermissions, covers, isBuiltinRole, type Permissions, SCOPES } from '../../plugins/permissions.ts'
 import { type Actor, authorize, can, scopeOf } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
-import { PRESENCE_STATES } from '../../plugins/presence.ts'
+import { PRESENCE_STATES, type PresenceState } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { reconcileOrganization } from './reconcile.ts'
 import { forgetRoles, loadRoles, roleOf } from './roles.ts'
@@ -1099,8 +1099,9 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request, reply) => {
       const { orgId } = request.params
       const actor = actorIn({ user: request.user! }, orgId)
-      const { state: reported, projectId } = request.body
-      const state = reported === 'tracking' ? 'online' : reported
+      const { projectId } = request.body
+      const reported: string = request.body.state
+      const state = (reported === 'tracking' ? 'online' : reported) as PresenceState | 'offline'
       const changed =
         state === 'offline'
           ? app.presence.remove(actor.user.id, orgId).length > 0
