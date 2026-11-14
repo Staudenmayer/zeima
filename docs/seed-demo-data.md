@@ -87,6 +87,7 @@ What it creates:
   `ada` (admin), `max` (manager), `grace`, `linus`, `margaret`, `alan`,
   `katherine` (members). Departments: Engineering (ada, max, grace, linus),
   Operations (margaret, alan), Sales (katherine).
+- **Job descriptions** for the directory, set by each person (e.g. "Senior backend developer").
 - **Shared data** (by the admin): activities (the organization's existing ones
   are reused by name, only missing ones are added), 4 cost centers, 5 tags,
   6 projects (one visible to its members only), 3 absence types.

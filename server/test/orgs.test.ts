@@ -415,6 +415,39 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     })
   })
 
+  describe('the directory of coworkers', () => {
+    it('shows everyone to everyone, with department and job title, and lets people word their own', async () => {
+      await reset()
+      const g = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'dev' })).json()
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MEMBER}`, ADMIN, 'admin')
+      const title = (uid: string, role: string, target: string, jobTitle: string | null) => call('PUT', `/v1/orgs/${ORG}/members/${target}/job-title`, uid, role, { jobTitle })
+
+      // Everyone may change their own; others need the right to manage members.
+      expect((await title(MEMBER, 'member', MEMBER, '  Backend developer ')).statusCode).toBe(204)
+      expect((await title(MEMBER, 'member', MANAGER, 'Boss')).statusCode).toBe(403)
+      expect((await title(MANAGER, 'manager', MEMBER, 'Boss')).statusCode).toBe(403)
+      expect((await title(ADMIN, 'admin', MANAGER, 'Team lead')).statusCode).toBe(204)
+      expect((await title(ADMIN, 'admin', id(77), 'Ghost')).statusCode).toBe(404)
+      expect((await title(MEMBER, 'member', MEMBER, 'x'.repeat(201))).statusCode).toBe(400)
+
+      // A plain member sees the whole company, not only themselves.
+      const res = await call('GET', `/v1/orgs/${ORG}/directory`, MEMBER, 'member')
+      expect(res.statusCode).toBe(200)
+      const rows = res.json() as { id: string; name: string; email: string; departments: string[]; jobTitle: string | null }[]
+      expect(rows.length).toBeGreaterThanOrEqual(4)
+      expect(rows.find((r) => r.id === MEMBER)).toMatchObject({ name: 'Max', departments: ['dev'], jobTitle: 'Backend developer' })
+      expect(rows.find((r) => r.id === MANAGER)).toMatchObject({ departments: [], jobTitle: 'Team lead' })
+      expect(rows.every((r) => typeof r.email === 'string')).toBe(true)
+
+      // Clearing it, and people from outside, and deactivated accounts.
+      expect((await title(MEMBER, 'member', MEMBER, '')).statusCode).toBe(204)
+      expect(((await call('GET', `/v1/orgs/${ORG}/directory`, OWNER, 'owner')).json() as { id: string; jobTitle: string | null }[]).find((r) => r.id === MEMBER)?.jobTitle).toBeNull()
+      expect((await call('GET', `/v1/orgs/${ORG}/directory`, OTHER, null)).statusCode).toBe(403)
+      await db.db.update(schema.kcUser).set({ active: false }).where(eq(schema.kcUser.id, MEMBER))
+      expect(((await call('GET', `/v1/orgs/${ORG}/directory`, OWNER, 'owner')).json() as { id: string }[]).some((r) => r.id === MEMBER)).toBe(false)
+    })
+  })
+
   describe('presence', () => {
     /** A connected device that records what the server sends it. */
     const connect = (userId: string) => {

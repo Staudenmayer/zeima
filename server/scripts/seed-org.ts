@@ -156,6 +156,32 @@ async function push(who: string, table: string, rows: { id: string; fields: Reco
   }
 }
 
+// ---- what each person does (their own words), for the directory
+const JOBS: Record<string, string> = {
+  ada: 'Head of engineering',
+  max: 'Engineering manager',
+  grace: 'Senior backend developer',
+  linus: 'Frontend developer',
+  margaret: 'Operations lead',
+  alan: 'Site reliability engineer',
+  katherine: 'Account executive',
+}
+for (const p of PEOPLE) {
+  const s = sessions.get(p.key)!
+  const send = () =>
+    fetch(`${discovery.apiUrl}/v1/orgs/${ORG_ID}/members/${ids.get(p.key)}/job-title`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${s.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ jobTitle: JOBS[p.key] }),
+    })
+  let res = await send()
+  while (res.status === 429) {
+    await sleep(10_000)
+    res = await send()
+  }
+  if (res.status !== 204) console.warn(`job title of ${p.key}: ${res.status} (is the API up to date?)`)
+}
+
 // ---- the organization's data, by the admin
 // The organization may have activities of its own already (names are unique):
 // use those, and only add what is missing.

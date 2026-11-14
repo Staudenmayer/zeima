@@ -544,6 +544,75 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
   )
 
+  const DirectoryEntry = Type.Object({
+    id: Type.String(),
+    name: Nullable(Type.String()),
+    email: Nullable(Type.String()),
+    departments: Type.Array(Type.String(), { description: 'Department paths without the prefix, e.g. `dev/backend`' }),
+    jobTitle: Nullable(Type.String()),
+  })
+
+  app.get(
+    '/orgs/:orgId/directory',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'The coworkers: name, email, departments and what they do',
+        description: 'Every member may ask. Accounts that were deactivated are left out.',
+        security: SECURITY,
+        params: OrgParams,
+        response: { 200: Type.Array(DirectoryEntry), ...problems(401, 403, 503) },
+      },
+    },
+    async (request) => {
+      const { orgId } = request.params
+      actorIn({ user: request.user! }, orgId)
+      const db = database()
+      const members = (await listMembers(db, orgId)).filter((m) => m.active)
+      const titles = await db
+        .select({ userId: schema.kcOrgMember.userId, jobTitle: schema.kcOrgMember.jobTitle })
+        .from(schema.kcOrgMember)
+        .where(eq(schema.kcOrgMember.orgId, orgId))
+      const title = new Map(titles.map((t) => [t.userId, t.jobTitle]))
+      const groups = await db
+        .select({ userId: schema.kcGroupMember.userId, path: schema.kcGroup.path })
+        .from(schema.kcGroupMember)
+        .innerJoin(schema.kcGroup, eq(schema.kcGroup.id, schema.kcGroupMember.groupId))
+        .where(eq(schema.kcGroup.orgId, orgId))
+      const head = `/orgs/${orgId}/groups/`
+      const departments = new Map<string, string[]>()
+      for (const g of groups) {
+        if (!g.path.startsWith(head)) continue
+        departments.set(g.userId, [...(departments.get(g.userId) ?? []), g.path.slice(head.length)].sort())
+      }
+      return members.map((m) => ({ id: m.id, name: m.name, email: m.email, departments: departments.get(m.id) ?? [], jobTitle: title.get(m.id) ?? null }))
+    },
+  )
+
+  app.put(
+    '/orgs/:orgId/members/:userId/job-title',
+    {
+      schema: {
+        tags: ['organizations'],
+        summary: 'Sets what a member does (their own, or anyone\'s for those who manage members)',
+        security: SECURITY,
+        params: MemberParams,
+        body: Type.Object({ jobTitle: Nullable(Type.String({ maxLength: 200 })) }),
+        response: { 204: Type.Null(), ...problems(401, 403, 404, 503) },
+      },
+    },
+    async (request, reply) => {
+      const { orgId, userId } = request.params
+      const actor = actorIn({ user: request.user! }, orgId)
+      const db = database()
+      if (userId !== actor.user.id) authorize(actor, 'member.manage', { orgId })
+      if (!(await memberOf(db, orgId, userId))) throw new HttpProblem(404, 'not_found', 'not a member of this organization')
+      const jobTitle = request.body.jobTitle?.trim() || null
+      await db.update(schema.kcOrgMember).set({ jobTitle }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
+      return reply.code(204).send(null)
+    },
+  )
+
   // --------------------------------------------------------------- presence
   const PresenceItem = Type.Object({
     userId: Type.String(),

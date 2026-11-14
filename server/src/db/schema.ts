@@ -97,6 +97,8 @@ export const kcOrgMember = pgTable(
       .notNull()
       .references(() => kcUser.id, { onDelete: 'cascade' }),
     role: text('role').notNull(),
+    /** What the person does in the organization, shown in the directory (their own words). */
+    jobTitle: text('job_title'),
   },
   (t) => [
     primaryKey({ columns: [t.orgId, t.userId] }),

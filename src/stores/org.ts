@@ -60,6 +60,15 @@ export const CAN = {
   delete: (r: OrgRole) => r === 'owner',
 }
 
+export interface DirectoryEntry {
+  id: string
+  name: string | null
+  email: string | null
+  /** Department paths, e.g. `dev/backend`. */
+  departments: string[]
+  jobTitle: string | null
+}
+
 /** The organization the signed-in person administers: members, invitations, departments. */
 export const useOrgStore = defineStore('org', () => {
   const orgs = ref<OrgSummary[]>([])
@@ -74,6 +83,8 @@ export const useOrgStore = defineStore('org', () => {
   /** Names of everyone in the organization (every member may read them). */
   const policies = ref<OrgPolicy[]>([])
   const people = ref<{ id: string; name: string | null }[]>([])
+  /** The coworkers: name, email, departments, job title (every member may read them). */
+  const directory = ref<DirectoryEntry[]>([])
   const loading = ref(false)
 
   const role = computed<OrgRole | null>(() => orgs.value.find((o) => o.id === activeId.value)?.role ?? null)
@@ -139,7 +150,18 @@ export const useOrgStore = defineStore('org', () => {
   async function loadGlance(orgId: string) {
     activeId.value = orgId
     people.value = await api<{ id: string; name: string | null }[]>('GET', `${base()}/people`).catch(() => [])
+    await loadDirectory().catch(() => {})
     await loadPresence()
+  }
+
+  async function loadDirectory() {
+    if (activeId.value) directory.value = await api<DirectoryEntry[]>('GET', `${base()}/directory`)
+  }
+
+  /** Sets what a person does; people word their own, those who manage members anyone's. */
+  async function setJobTitle(userId: string, jobTitle: string | null) {
+    await api('PUT', `${base()}/members/${userId}/job-title`, { jobTitle })
+    await loadDirectory()
   }
 
   async function loadPresence() {
@@ -203,7 +225,7 @@ export const useOrgStore = defineStore('org', () => {
 
   return {
     orgs, activeId, info, members, invitations, departments, audit, auditDone, loading, role,
-    loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
+    directory, loadDirectory, setJobTitle, loadGlance, policies, loadPolicies, savePolicy, deletePolicy, people, nameOf, presence, loadPresence, loadOrgs, load, loadMoreAudit, create, invite, withdraw, updateMember, removeMember,
     createDepartment, deleteDepartment, setDepartmentMember, deleteOrganization,
   }
 })

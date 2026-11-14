@@ -25,6 +25,18 @@ const shown = () =>
   org.presence.filter((p) => selected.value.length === 0 || selected.value.some((path) => inDepartment(path, p.userId)))
 const toggleDepartment = (path: string) =>
   (selected.value = selected.value.includes(path) ? selected.value.filter((x) => x !== path) : [...selected.value, path])
+
+/** The department a person is listed under: their first one (alphabetically), or none. */
+const departmentOf = (userId: string) => org.directory.find((e) => e.id === userId)?.departments[0] ?? null
+/** The online people by department, the departments in order, people without one last; names in order within. */
+const groups = computed(() => {
+  const name = (id: string) => org.nameOf(id) || t('team.someone')
+  const by = new Map<string | null, typeof org.presence>()
+  for (const p of shown()) by.set(departmentOf(p.userId), [...(by.get(departmentOf(p.userId)) ?? []), p])
+  return [...by.entries()]
+    .sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)))
+    .map(([department, list]) => ({ department, list: [...list].sort((x, y) => name(x.userId).localeCompare(name(y.userId))) }))
+})
 const filterLabel = computed(() => {
   const picked = topLevel.value.filter((g) => selected.value.includes(g.path))
   return picked.length === 0 ? t('org.allDepartments') : picked.length === 1 ? picked[0]!.name : t('org.nDepartments', { n: picked.length })
@@ -71,13 +83,18 @@ watch(() => workspaces.active?.id, load)
     </CardHeader>
     <CardContent>
       <p v-if="shown().length === 0" class="text-sm text-muted-foreground">{{ $t('org.nobodyOnline') }}</p>
-      <ul v-else class="grid gap-1.5 text-sm sm:grid-cols-2">
-        <li v-for="p in shown()" :key="p.userId" class="flex items-center gap-2">
-          <span class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: COLORS[p.state] }" />
-          <span class="truncate">{{ org.nameOf(p.userId) || $t('team.someone') }}</span>
-          <span v-if="p.projectId" class="truncate text-xs text-muted-foreground">{{ projects.byId.get(p.projectId)?.name }}</span>
-        </li>
-      </ul>
+      <div v-else class="grid gap-3">
+        <section v-for="g in groups" :key="g.department ?? ''">
+          <h3 v-if="groups.length > 1 || g.department" class="mb-1 text-xs font-medium text-muted-foreground">{{ g.department ?? $t('directory.noDepartment') }}</h3>
+          <ul class="grid gap-1.5 text-sm sm:grid-cols-2">
+            <li v-for="p in g.list" :key="p.userId" class="flex items-center gap-2">
+              <span class="size-2.5 shrink-0 rounded-full" :style="{ backgroundColor: COLORS[p.state] }" />
+              <RouterLink :to="{ path: '/directory', query: { user: p.userId } }" class="truncate hover:underline" :title="$t('directory.open')">{{ org.nameOf(p.userId) || $t('team.someone') }}</RouterLink>
+              <span v-if="p.projectId" class="truncate text-xs text-muted-foreground">{{ projects.byId.get(p.projectId)?.name }}</span>
+            </li>
+          </ul>
+        </section>
+      </div>
     </CardContent>
   </Card>
 </template>

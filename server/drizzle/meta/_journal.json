@@ -57,6 +57,13 @@
       "when": 1794643356383,
       "tag": "0007_workspace_one_per_org",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794669697120,
+      "tag": "0008_member_job_title",
+      "breakpoints": true
     }
   ]
 }
