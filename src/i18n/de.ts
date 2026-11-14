@@ -881,6 +881,8 @@ const de: typeof en = {
     rolesHint: 'Eine Rolle ist eine Sammlung von Rechten: was Personen mit dieser Rolle sehen, bearbeiten und löschen dürfen. Rollen vergibst du in der Mitgliederliste. Niemand kann mehr vergeben, als er selbst hat.',
     roleHint: 'Hake an, was die Rolle darf. Wo ein Recht nur manche Personen betrifft, wähle wie weit.',
     roleLocked: 'Die Rolle Eigentümer kann nicht geändert werden: Eigentümer dürfen alles.',
+    roleNoAssign: 'Deine Rolle erlaubt es nicht, Rollen zu vergeben.',
+    roleHoldsMore: 'Diese Person hat Rechte, die du selbst nicht hast; du kannst ihre Rolle nicht ändern.',
     roleOwn: 'Das ist deine eigene Rolle; bitte andere Administratoren oder Eigentümer, sie zu ändern.',
     roleDeleteConfirm: 'Die Rolle {name} löschen? Wer sie hat, wird Mitglied.',
     permCount: 'Rechte',

@@ -879,6 +879,8 @@ export default {
     rolesHint: 'A role is a set of permissions: what people who have it may view, edit and delete. Give roles to people in the member list. Nobody can give more than they hold themselves.',
     roleHint: 'Tick what the role may do. Where a permission reaches only some people, choose how far.',
     roleLocked: 'The owner role cannot be changed: owners may do everything.',
+    roleNoAssign: 'Your role does not allow giving roles.',
+    roleHoldsMore: 'This person has permissions you do not have yourself, so you cannot change their role.',
     roleOwn: 'This is your own role; ask another admin or an owner to change it.',
     roleDeleteConfirm: 'Delete the role {name}? The people who have it become members.',
     permCount: 'Permissions',

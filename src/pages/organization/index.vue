@@ -148,7 +148,11 @@ function askRemove(m: Member) {
 const label = (m: Member) => m.name || m.email || m.id
 
 /** Whether the signed-in person may change this member's role. */
-const canEditRole = (m: Member) => canAssign.value && m.id !== account.status.user?.id
+const canEditRole = (m: Member) =>
+  canAssign.value && m.id !== account.status.user?.id && givableRoles.value.some((r) => r.key === m.role)
+/** Why a role cannot be changed, for the tooltip of the badge that stands in for the list. */
+const whyNotRole = (m: Member) =>
+  m.id === account.status.user?.id ? t('org.roleOwn') : !canAssign.value ? t('org.roleNoAssign') : t('org.roleHoldsMore')
 const canTouch = (m: Member) => (canManage.value || org.can('member.remove')) && (m.role !== 'owner' || isOwner.value) && m.id !== account.status.user?.id
 
 // -------------------------------------------------------------- departments
@@ -414,7 +418,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(() => org.audit, {
                       <SelectItem v-for="role in givableRoles" :key="role.key" :value="role.key">{{ org.roleName(role.key) }}</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Badge v-else variant="secondary">{{ org.roleName(r.role) }}</Badge>
+                  <Badge v-else variant="secondary" :title="r.member ? whyNotRole(r.member) : undefined">{{ org.roleName(r.role) }}</Badge>
                 </td>
                 <td class="px-3 py-1.5">
                   <span v-if="r.departments.length" class="flex flex-wrap gap-1"><Badge v-for="d in r.departments" :key="d" variant="secondary">{{ d }}</Badge></span>
