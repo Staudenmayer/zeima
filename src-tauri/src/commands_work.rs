@@ -12,7 +12,8 @@ use zeima_core::model::{
 };
 use zeima_core::worktime::{WorkDay, WorkSchedule};
 use zeima_core::{
-    AwayItem, AwayResolution, Balance, HolidayView, ProfileSummary, VacationSummary, WorkScheduleInput,
+    AwayItem, AwayResolution, Balance, HolidayView, ProfileSummary, TimesheetSubmission, VacationSummary,
+    WorkScheduleInput,
 };
 
 use crate::activity::Activity;
@@ -322,4 +323,50 @@ pub fn prompt_hide(app: AppHandle) {
 #[specta::specta]
 pub fn activity_source(activity: State<'_, Activity>) -> String {
     activity.source.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+// --------------------------------------------------------------------------
+// Timesheet approval (shared workspaces)
+// --------------------------------------------------------------------------
+
+#[tauri::command]
+#[specta::specta]
+pub async fn submissions_list(state: State<'_, AppState>) -> CmdResult<Vec<TimesheetSubmission>> {
+    Ok(state.data().list_submissions().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn submission_submit(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    from: NaiveDate,
+    to: NaiveDate,
+    note: String,
+) -> CmdResult<TimesheetSubmission> {
+    let submission = state.data().submit_timesheet(from, to, &note).await?;
+    work_changed(&app).await;
+    Ok(submission)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn submission_decide(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    approve: bool,
+    note: String,
+) -> CmdResult<TimesheetSubmission> {
+    let submission = state.data().decide_submission(&id, approve, &note).await?;
+    work_changed(&app).await;
+    Ok(submission)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn submission_withdraw(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state.data().withdraw_submission(&id).await?;
+    work_changed(&app).await;
+    Ok(())
 }

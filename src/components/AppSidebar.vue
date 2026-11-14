@@ -10,6 +10,7 @@ import {
   Clock,
   FolderKanban,
   Building2,
+  ClipboardCheck,
   Landmark,
   LayoutDashboard,
   Palmtree,
@@ -57,6 +58,7 @@ const tracking = computed(() => [
   { title: t('nav.costCenters'), url: '/cost-centers', icon: Landmark },
   { title: t('nav.reports'), url: '/reports', icon: BarChart3 },
   { title: t('nav.absences'), url: '/absences', icon: Palmtree },
+  ...(workspaces.inOrg ? [{ title: t('nav.approvals'), url: '/approvals', icon: ClipboardCheck }] : []),
 ])
 
 const system = computed(() => [
