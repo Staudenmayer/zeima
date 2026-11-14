@@ -3,16 +3,29 @@
 ## Cutting a release
 
 ```sh
-node scripts/version.mjs set 1.2.3          # app version in every file
-git commit -am "chore: release 1.2.3"
-git tag v1.2.3 && git push --follow-tags
+scripts/release.sh 1.2.3            # or 1.2.3-rc.1 for a pre-release
+scripts/release.sh 1.2.3 --dry-run  # run every check, change nothing
 ```
+
+The script checks first and stops on any problem: you are on `main`, the tree
+is clean and pushed, the tag is free, CI passed for this commit, the updater
+signing key secret (`TAURI_SIGNING_PRIVATE_KEY`) is set, and the local test
+suites pass (Rust fmt, clippy and tests; app and server type check, lint and
+tests; no generated file changed). Missing licence keys
+(`ZEIMA_ENTITLEMENT_KEYS`) and missing macOS signing secrets are warnings. It
+then asks, sets the version in every file (`node scripts/version.mjs set`),
+commits, tags `v1.2.3` and pushes. Options: `--skip-tests`, `--skip-ci`, `--yes`
+(no question) and `--watch` (follow the release build and list the attached
+files when it ends).
 
 The tag starts `.github/workflows/release.yml`: it checks that the tag matches
 the app version, builds the installers for Linux, Windows and macOS (Apple
 silicon), attaches them and the example addons to a GitHub release, and
 publishes `latest.json` for the updater. Tags with a suffix (`v1.2.3-rc.1`)
-are marked as pre-releases. `scripts/release.sh` does the steps above.
+are marked as pre-releases.
+
+By hand (what the script does): `node scripts/version.mjs set 1.2.3`,
+`git commit -am "chore: release 1.2.3"`, `git tag v1.2.3 && git push --follow-tags`.
 
 ## The auto-updater
 
