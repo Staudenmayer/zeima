@@ -11,6 +11,7 @@
         </div>
       </header>
       <main :class="route.meta.fill ? 'flex min-h-0 flex-1 flex-col overflow-y-auto p-6' : 'p-6'">
+        <SectionTabs />
         <slot />
       </main>
       <SetupWizard />
@@ -26,6 +27,7 @@ import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import AppSidebar from '@/components/AppSidebar.vue'
 import OnlineSidebar from '@/components/time/OnlineSidebar.vue'
+import SectionTabs from '@/components/SectionTabs.vue'
 import SetupWizard from '@/components/time/SetupWizard.vue'
 import TimerPill from '@/components/time/TimerPill.vue'
 import { Separator } from '@/components/ui/separator'

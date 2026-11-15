@@ -6,24 +6,15 @@ import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
 import { useAccountStore } from '@/stores/account'
 import { useApprovalsStore } from '@/stores/approvals'
+import { useNav } from '@/composables/useNav'
 import { useWorkspaceStore } from '@/stores/workspace'
 import {
-  BarChart3,
-  Clock,
-  FolderKanban,
   Building2,
   Check,
   ChevronsUpDown,
   User,
-  Users,
-  MapPinned,
-  Landmark,
-  LayoutDashboard,
-  Palmtree,
   Puzzle,
   Settings,
-  Shapes,
-  Tags,
 } from '@lucide/vue'
 import LogoMark from '@/components/LogoMark.vue'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -65,22 +56,7 @@ watch(
   { immediate: true },
 )
 
-const tracking = computed(() => [
-  { title: t('nav.dashboard'), url: '/', icon: LayoutDashboard },
-  { title: t('nav.timesheet'), url: '/timesheet', icon: Clock },
-  { title: t('nav.activities'), url: '/activities', icon: Shapes },
-  // What a role may not view is not shown (the pages say so, should it be opened anyway).
-  ...(workspaces.can('project.read') ? [{ title: t('nav.projects'), url: '/projects', icon: FolderKanban }] : []),
-  { title: t('nav.tags'), url: '/tags', icon: Tags },
-  ...(workspaces.can('cost_center.read') ? [{ title: t('nav.costCenters'), url: '/cost-centers', icon: Landmark }] : []),
-  { title: t('nav.reports'), url: '/reports', icon: BarChart3 },
-  { title: approvals.waiting && workspaces.inOrg && workspaces.can('absence.approve') ? `${t('nav.absences')} (${approvals.waiting})` : t('nav.absences'), url: '/absences', icon: Palmtree },
-  ...(workspaces.inOrg ? [{ title: t('nav.locations'), url: '/locations', icon: MapPinned }] : []),
-  // Those who may see other people's time (their department's or all); for the rest the page would show only themselves.
-  ...(workspaces.inOrg && ['group', 'org'].includes(workspaces.scopeOf('entry.read') ?? '')
-    ? [{ title: t('nav.team'), url: '/team', icon: Users }]
-    : []),
-])
+const { items: tracking } = useNav()
 
 const system = computed(() => [
   ...(account.status.signedIn ? [{ title: t('nav.organization'), url: '/organization', icon: Building2 }] : []),

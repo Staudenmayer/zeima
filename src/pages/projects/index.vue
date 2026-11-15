@@ -4,7 +4,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { computed, ref } from 'vue'
 import { toast } from 'vue-sonner'
 import { useI18n } from 'vue-i18n'
-import { FolderKanban, Pencil, Plus, Trash2 } from '@lucide/vue'
+import { Archive, ArchiveRestore, FolderKanban, Pencil, Plus, Trash2 } from '@lucide/vue'
 import type { Project } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,7 +15,7 @@ import PageHeader from '@/components/time/PageHeader.vue'
 import ProjectDialog from '@/components/time/ProjectDialog.vue'
 import ProjectDot from '@/components/time/ProjectDot.vue'
 import { errorMessage } from '@/lib/ipc'
-import { useProjectsStore } from '@/stores/projects'
+import { projectToInput, useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useTagsStore } from '@/stores/tags'
 import SortHead from '@/components/time/SortHead.vue'
@@ -42,6 +42,15 @@ const editing = ref<Project | null>(null)
 function open(project: Project | null) {
   editing.value = project
   dialogOpen.value = true
+}
+
+const canEdit = (p: Project) => workspaces.can('project.write') || p.managerId === account.status.user?.id
+async function setArchived(p: Project, value: boolean) {
+  try {
+    await projects.update(p.id, { ...projectToInput(p), status: value ? 'archived' : 'active' })
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
 }
 
 const deleting = ref<Project | null>(null)
@@ -88,10 +97,6 @@ const { sort, sorted: sortedList } = useSort(filtered, {
 
 <template>
   <PageHeader :title="$t('nav.projects')">
-    <label class="flex items-center gap-2 text-sm">
-      <Switch v-model="showArchived" />
-      {{ $t('projects.showArchived') }}
-    </label>
     <Button v-if="workspaces.can('project.write')" @click="open(null)"><Plus /> {{ $t('projects.new') }}</Button>
   </PageHeader>
 
@@ -105,6 +110,10 @@ const { sort, sorted: sortedList } = useSort(filtered, {
   <TableToolbar v-model="search" :active="narrowed" @clear="clearFilters">
     <MultiFilter v-if="clientOptions.length" v-model="clients" :label="$t('projects.client')" :options="clientOptions" />
     <MultiFilter v-model="statuses" :label="$t('projects.status')" :options="statusOptions" />
+    <label class="flex items-center gap-2 text-sm">
+      <Switch v-model="showArchived" />
+      {{ $t('projects.showArchived') }}
+    </label>
   </TableToolbar>
   <p v-if="filtered.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
   <div v-else class="overflow-x-auto rounded-lg border">
@@ -120,7 +129,7 @@ const { sort, sorted: sortedList } = useSort(filtered, {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="p in sortedList" :key="p.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="(workspaces.can('project.write') || p.managerId === account.status.user?.id) && open(p)">
+        <tr v-for="p in sortedList" :key="p.id" class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30" @click="canEdit(p) && open(p)">
           <td class="px-3 py-1.5">
             <div class="flex items-center gap-2">
               <ProjectDot :project="p" show-alias />
@@ -138,7 +147,8 @@ const { sort, sorted: sortedList } = useSort(filtered, {
           </td>
           <td class="px-1 py-0.5" @click.stop>
             <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-              <Button v-if="workspaces.can('project.write') || p.managerId === account.status.user?.id" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(p)"><Pencil /></Button>
+              <Button v-if="canEdit(p)" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(p)"><Pencil /></Button>
+              <Button v-if="canEdit(p)" size="icon" variant="ghost" class="size-7" :title="p.status === 'archived' ? $t('projects.unarchive') : $t('projects.archive')" @click="setArchived(p, p.status !== 'archived')"><component :is="p.status === 'archived' ? ArchiveRestore : Archive" /></Button>
               <Button v-if="workspaces.can('project.delete')" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(p)"><Trash2 /></Button>
             </div>
           </td>

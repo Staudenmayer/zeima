@@ -2,6 +2,8 @@
 export default {
   app: { name: 'Zeima', personal: 'Personal workspace', local: 'Local only', localUser: 'Local User', switchWorkspace: 'Switch workspace' },
   nav: {
+    catalog: 'Catalog',
+    section: 'Section',
     dashboard: 'Dashboard',
     timesheet: 'Timesheet',
     activities: 'Activities',
@@ -175,6 +177,8 @@ export default {
     status: 'Status',
     statuses: { active: 'Active', paused: 'Paused', archived: 'Archived' },
     showArchived: 'Show archived',
+    archive: 'Archive',
+    unarchive: 'Restore',
     deleteConfirm: 'Delete project "{name}"? Projects with time entries can only be archived.',
     projectTags: 'Project tags',
     projectTagsHint: 'Only usable on entries of this project.',
@@ -192,6 +196,7 @@ export default {
     archived: 'Archived',
     archive: 'Archive',
     unarchive: 'Restore',
+    showArchived: 'Show archived',
     archivedSection: 'Archived',
     suggested: 'Suggestions',
     suggestions: 'Meeting, Development, Review, Planning, Support, Documentation, Admin',

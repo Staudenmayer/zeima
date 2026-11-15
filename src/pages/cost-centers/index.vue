@@ -157,8 +157,8 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
     <Button v-if="workspaces.can('cost_center.write')" variant="outline" @click="open(null)"><Plus /> {{ $t('costCenters.new') }}</Button>
   </EmptyState>
 
-  <div v-else class="grid gap-6">
-    <section class="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3">
+  <div v-else>
+    <section class="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3">
       <div class="min-w-56 flex-1">
         <h2 class="text-sm font-medium">{{ $t('costCenters.myDefault') }}</h2>
         <p class="text-sm text-muted-foreground">
@@ -175,10 +175,10 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
       </div>
     </section>
 
-    <TableToolbar v-model="search" class="-mb-3" :active="narrowed" @clear="clearFilters">
+    <TableToolbar v-model="search" :active="narrowed" @clear="clearFilters">
       <MultiFilter v-model="states" :label="$t('costCenters.status')" :options="stateOptions" />
     </TableToolbar>
-    <p v-if="ordered.length === 0" class="-mt-3 py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+    <p v-if="ordered.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
     <div v-else class="overflow-x-auto rounded-lg border">
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
@@ -216,7 +216,7 @@ const pageNo = computed(() => Math.min(page.value, pageCount.value - 1))
       </table>
     </div>
 
-    <div v-if="pageCount > 1" class="-mt-2 flex items-center justify-between gap-3 text-sm">
+    <div v-if="pageCount > 1" class="mt-3 flex items-center justify-between gap-3 text-sm">
       <span class="tabular-nums text-muted-foreground">
         {{ $t('costCenters.pageOf', { page: pageNo + 1, pages: pageCount, count: ordered.length }) }}
       </span>

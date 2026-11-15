@@ -4,6 +4,8 @@ import type en from './en'
 const de: typeof en = {
   app: { name: 'Zeima', personal: 'Persönlicher Bereich', local: 'Nur lokal', localUser: 'Lokaler Benutzer', switchWorkspace: 'Arbeitsbereich wechseln' },
   nav: {
+    catalog: 'Katalog',
+    section: 'Bereich',
     dashboard: 'Übersicht',
     timesheet: 'Zeiterfassung',
     activities: 'Tätigkeiten',
@@ -177,6 +179,8 @@ const de: typeof en = {
     status: 'Status',
     statuses: { active: 'Aktiv', paused: 'Pausiert', archived: 'Archiviert' },
     showArchived: 'Archivierte anzeigen',
+    archive: 'Archivieren',
+    unarchive: 'Wiederherstellen',
     deleteConfirm: 'Projekt „{name}“ löschen? Projekte mit Zeiteinträgen können nur archiviert werden.',
     projectTags: 'Projekt-Tags',
     projectTagsHint: 'Nur für Einträge dieses Projekts verwendbar.',
@@ -194,6 +198,7 @@ const de: typeof en = {
     archived: 'Archiviert',
     archive: 'Archivieren',
     unarchive: 'Wiederherstellen',
+    showArchived: 'Archivierte anzeigen',
     archivedSection: 'Archiviert',
     suggested: 'Vorschläge',
     suggestions: 'Meeting, Entwicklung, Review, Planung, Support, Dokumentation, Verwaltung',

@@ -7,7 +7,9 @@ import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import { Archive, ArchiveRestore, Pencil, Plus, Shapes, Trash2 } from '@lucide/vue'
 import type { Activity } from '@/bindings'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
 import ActivityDialog from '@/components/time/ActivityDialog.vue'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
@@ -25,7 +27,7 @@ const workspaces = useWorkspaceStore()
 const { t } = useI18n()
 const activities = useActivitiesStore()
 
-const archived = computed(() => activities.all.filter((a) => a.archived))
+const showArchived = ref(false)
 
 /** Common activities not created yet, offered as one-click starters. */
 const suggestions = computed(() => {
@@ -75,8 +77,7 @@ async function confirmDelete() {
 }
 
 const { search, matches, searching } = useTableSearch<Activity>([], (a) => [a.name])
-const shown = computed(() => activities.active.filter(matches))
-const shownArchived = computed(() => archived.value.filter(matches))
+const shown = computed(() => (showArchived.value ? activities.all : activities.active).filter(matches))
 const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a.name })
 </script>
 
@@ -85,14 +86,19 @@ const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a
     <Button v-if="workspaces.can('policy.write')" @click="open(null)"><Plus /> {{ $t('activities.new') }}</Button>
   </PageHeader>
 
-  <EmptyState v-if="activities.active.length === 0" :icon="Shapes" :text="$t('activities.empty')">
+  <EmptyState v-if="activities.all.length === 0" :icon="Shapes" :text="$t('activities.empty')">
     <Button v-if="workspaces.can('policy.write')" variant="outline" @click="open(null)"><Plus /> {{ $t('activities.new') }}</Button>
   </EmptyState>
 
-  <div class="grid gap-6">
-    <TableToolbar v-if="activities.active.length || archived.length" v-model="search" class="-mb-3" :active="searching" @clear="search = ''" />
-    <p v-if="searching && shown.length === 0 && shownArchived.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
-    <div v-if="shown.length" class="overflow-x-auto rounded-lg border">
+  <template v-else>
+    <TableToolbar v-model="search" :active="searching" @clear="search = ''">
+      <label class="flex items-center gap-2 text-sm">
+        <Switch v-model="showArchived" />
+        {{ $t('activities.showArchived') }}
+      </label>
+    </TableToolbar>
+    <p v-if="shown.length === 0" class="py-6 text-center text-sm text-muted-foreground">{{ $t('table.noMatch') }}</p>
+    <div v-else class="overflow-x-auto rounded-lg border">
       <table class="w-full text-sm">
         <thead class="text-left text-xs text-muted-foreground">
           <tr class="border-b">
@@ -105,14 +111,14 @@ const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a
             v-for="activity in sortActivities(shown)"
             :key="activity.id"
             class="group border-b last:border-b-0 hover:bg-muted/30"
-            :class="workspaces.can('policy.write') ? 'cursor-pointer' : ''"
+            :class="[workspaces.can('policy.write') ? 'cursor-pointer' : '', activity.archived ? 'text-muted-foreground' : '']"
             @click="workspaces.can('policy.write') && open(activity)"
           >
-            <td class="px-3 py-1.5"><span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm" :style="{ backgroundColor: activity.color }" />{{ activity.name }}</span></td>
+            <td class="px-3 py-1.5"><span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm" :class="activity.archived ? 'opacity-60' : ''" :style="{ backgroundColor: activity.color }" />{{ activity.name }}<Badge v-if="activity.archived" variant="outline">{{ $t('activities.archived') }}</Badge></span></td>
             <td class="px-1 py-0.5" @click.stop>
               <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                 <Button v-if="workspaces.can('policy.write')" size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="open(activity)"><Pencil /></Button>
-                <Button v-if="workspaces.can('policy.write')" size="icon" variant="ghost" class="size-7" :title="$t('activities.archive')" @click="setArchived(activity, true)"><Archive /></Button>
+                <Button v-if="workspaces.can('policy.write')" size="icon" variant="ghost" class="size-7" :title="activity.archived ? $t('activities.unarchive') : $t('activities.archive')" @click="setArchived(activity, !activity.archived)"><component :is="activity.archived ? ArchiveRestore : Archive" /></Button>
                 <Button v-if="workspaces.can('policy.delete')" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
               </div>
             </td>
@@ -121,7 +127,7 @@ const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a
       </table>
     </div>
 
-    <section v-if="suggestions.length">
+    <section v-if="suggestions.length" class="mt-6">
       <h2 class="mb-2 text-sm font-medium">{{ $t('activities.suggested') }}</h2>
       <div class="flex flex-wrap gap-2">
         <Button v-if="workspaces.can('policy.write')" v-for="name in suggestions" :key="name" size="sm" variant="outline" @click="addSuggestion(name)">
@@ -130,31 +136,7 @@ const { sort, apply: sortActivities } = useSort<Activity>(null, { name: (a) => a
       </div>
     </section>
 
-    <section v-if="shownArchived.length">
-      <h2 class="mb-2 text-sm font-medium text-muted-foreground">{{ $t('activities.archivedSection') }}</h2>
-      <div class="overflow-x-auto rounded-lg border">
-        <table class="w-full text-sm">
-          <thead class="text-left text-xs text-muted-foreground">
-            <tr class="border-b">
-              <SortHead :sort="sort" column="name" class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</SortHead>
-              <th class="w-20 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="activity in sortActivities(shownArchived)" :key="activity.id" class="group border-b text-muted-foreground last:border-b-0 hover:bg-muted/30">
-              <td class="px-3 py-1.5"><span class="flex items-center gap-2"><span class="size-3 shrink-0 rounded-sm opacity-60" :style="{ backgroundColor: activity.color }" />{{ activity.name }}</span></td>
-              <td class="px-1 py-0.5" @click.stop>
-                <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                  <Button v-if="workspaces.can('policy.write')" size="icon" variant="ghost" class="size-7" :title="$t('activities.unarchive')" @click="setArchived(activity, false)"><ArchiveRestore /></Button>
-                  <Button v-if="workspaces.can('policy.delete')" size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="askDelete(activity)"><Trash2 /></Button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-  </div>
+  </template>
 
   <ActivityDialog v-model:open="dialogOpen" :activity="editing" />
   <ConfirmDialog
