@@ -56,60 +56,67 @@ async function save() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent :aria-describedby="undefined" class="sm:max-w-lg">
+    <DialogContent :aria-describedby="undefined" class="h-[min(40rem,94vh)] grid-rows-[auto_1fr] overflow-y-auto sm:max-w-5xl">
       <DialogHeader>
         <DialogTitle>{{ entry ? $t('timesheet.editEntry') : $t('timesheet.addEntry') }}</DialogTitle>
       </DialogHeader>
-      <form class="grid gap-4" @submit.prevent="save">
-        <div v-if="!entry && workspaces.inOrg" role="group" :aria-label="$t('timesheet.whatToAdd')" class="inline-flex gap-0.5 justify-self-start rounded-lg bg-muted p-0.5">
+      <form class="flex flex-col gap-4" @submit.prevent="save">
+        <div v-if="!entry && workspaces.inOrg" role="group" :aria-label="$t('timesheet.whatToAdd')" class="inline-flex gap-0.5 self-start justify-self-start rounded-lg bg-muted p-0.5">
           <Button type="button" size="sm" variant="outline" class="h-7" aria-pressed="true">{{ $t('timesheet.addKindEntry') }}</Button>
           <Button type="button" size="sm" variant="ghost" class="h-7" aria-pressed="false" @click="toMeeting">{{ $t('timesheet.addKindMeeting') }}</Button>
         </div>
-        <div class="grid gap-2">
-          <Label>{{ $t('entry.activity') }}</Label>
-          <ActivitySelect v-model="activityId" :invalid="activityMissing" />
-          <p v-if="activities.active.length === 0" class="text-xs text-muted-foreground">
-            {{ $t('activities.noneYet') }}
-            <RouterLink to="/activities" class="underline" @click="open = false">{{ $t('activities.manage') }}</RouterLink>
-          </p>
+        <!-- Fields in rows of two so both columns line up: activity / start, project / end, tags / note, cost center / billable. -->
+        <div class="grid grid-cols-2 items-start gap-x-8 gap-y-4">
+          <div class="grid gap-2">
+            <Label>{{ $t('entry.activity') }}</Label>
+            <ActivitySelect v-model="activityId" :invalid="activityMissing" />
+            <p v-if="activities.active.length === 0" class="text-xs text-muted-foreground">
+              {{ $t('activities.noneYet') }}
+              <RouterLink to="/activities" class="underline" @click="open = false">{{ $t('activities.manage') }}</RouterLink>
+            </p>
+          </div>
+          <!-- Start and end each have a date: entries may span several days. -->
+          <div class="grid gap-2">
+            <Label for="entry-date">{{ $t('entry.start') }}</Label>
+            <div class="grid grid-cols-[1fr_8rem] gap-2">
+              <DateInput id="entry-date" v-model="date" required />
+              <TimeInput id="entry-start" v-model="start" required :aria-label="$t('entry.start')" />
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <Label>{{ $t('entry.project') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
+            <ProjectSelect v-model="projectId" :include-archived="entry !== null" />
+          </div>
+          <div class="grid gap-2">
+            <Label for="entry-end-date">{{ $t('entry.end') }}</Label>
+            <div v-if="!running" class="grid grid-cols-[1fr_8rem] gap-2">
+              <DateInput id="entry-end-date" v-model="endDate" required />
+              <TimeInput id="entry-end" v-model="end" required :aria-label="$t('entry.end')" />
+            </div>
+            <div v-else class="flex h-9 items-center text-sm text-muted-foreground">{{ $t('timesheet.running') }}</div>
+          </div>
+          <div class="grid gap-2">
+            <Label>{{ $t('entry.tags') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
+            <TagPicker v-model="tagIds" :project-id="projectId" />
+          </div>
+          <div class="grid gap-2">
+            <Label for="entry-note">{{ $t('entry.note') }}</Label>
+            <Textarea id="entry-note" v-model="note" :placeholder="$t('entry.notePlaceholder')" rows="4" />
+          </div>
+          <div v-if="costCenters.all.length" class="grid gap-2">
+            <Label>{{ $t('costCenters.costCenter') }}</Label>
+            <CostCenterSelect
+              :model-value="costCenterId"
+              :empty-label="$t('costCenters.automatic')"
+              @update:model-value="setCostCenter"
+            />
+          </div>
+          <label class="flex items-center gap-2 text-sm" :class="costCenters.all.length ? 'h-9 self-end' : ''">
+            <Switch v-model="billable" />
+            {{ $t('entry.billable') }}
+          </label>
         </div>
-        <div class="grid gap-2">
-          <Label>{{ $t('entry.project') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
-          <ProjectSelect v-model="projectId" :include-archived="entry !== null" />
-        </div>
-        <!-- Start and end each have a date: entries may span several days. -->
-        <div class="grid grid-cols-[auto_1fr_8rem] items-center gap-x-3 gap-y-2">
-          <Label for="entry-date">{{ $t('entry.start') }}</Label>
-          <DateInput id="entry-date" v-model="date" required />
-          <TimeInput id="entry-start" v-model="start" required :aria-label="$t('entry.start')" />
-          <Label for="entry-end-date">{{ $t('entry.end') }}</Label>
-          <template v-if="!running">
-            <DateInput id="entry-end-date" v-model="endDate" required />
-            <TimeInput id="entry-end" v-model="end" required :aria-label="$t('entry.end')" />
-          </template>
-          <div v-else class="col-span-2 flex h-9 items-center text-sm text-muted-foreground">{{ $t('timesheet.running') }}</div>
-        </div>
-        <div class="grid gap-2">
-          <Label>{{ $t('entry.tags') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
-          <TagPicker v-model="tagIds" :project-id="projectId" />
-        </div>
-        <div class="grid gap-2">
-          <Label for="entry-note">{{ $t('entry.note') }}</Label>
-          <Textarea id="entry-note" v-model="note" :placeholder="$t('entry.notePlaceholder')" rows="2" />
-        </div>
-        <div v-if="costCenters.all.length" class="grid gap-2">
-          <Label>{{ $t('costCenters.costCenter') }}</Label>
-          <CostCenterSelect
-            :model-value="costCenterId"
-            :empty-label="$t('costCenters.automatic')"
-            @update:model-value="setCostCenter"
-          />
-        </div>
-        <label class="flex items-center gap-2 text-sm">
-          <Switch v-model="billable" />
-          {{ $t('entry.billable') }}
-        </label>
-        <DialogFooter>
+        <DialogFooter class="mt-auto">
           <Button type="button" variant="outline" @click="open = false">{{ $t('common.cancel') }}</Button>
           <Button type="submit" :disabled="saving">{{ $t('common.save') }}</Button>
         </DialogFooter>

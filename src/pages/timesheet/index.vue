@@ -444,6 +444,13 @@ function createAt(at: number) {
   entryDialogOpen.value = true
 }
 
+/** "Time entry" chosen in the new-meeting dialog: the entry dialog with the same times. */
+function meetingToEntry(times: { startAt: number; endAt: number }) {
+  editing.value = null
+  draft.value = { startAt: times.startAt, endAt: times.endAt, activityId: null, projectId: null, tagIds: [], note: '' }
+  entryDialogOpen.value = true
+}
+
 /** A new entry over the time span dragged in the calendar. */
 function createRange(startAt: number, endAt: number) {
   editing.value = null
@@ -1037,7 +1044,7 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
     @more="openEdit"
   />
   <EntryDialog v-model:open="entryDialogOpen" :entry="editing" :day="newEntryDay" :draft="draft" @meeting="openMeetingForm(null, $event)" />
-  <MeetingDialog v-model:open="mtgFormOpen" :meeting="mtgEditing" :draft="mtgDraft" :track-item="mtgItem" @saved="loadOccurrences" @track="track" />
+  <MeetingDialog v-model:open="mtgFormOpen" :meeting="mtgEditing" :draft="mtgDraft" :track-item="mtgItem" @saved="loadOccurrences" @track="track" @entry="meetingToEntry" />
   <ConfirmDialog v-model:open="confirmOpen" :title="$t('timesheet.deleteConfirm')" @confirm="confirmDelete" />
   <ConfirmDialog
     v-model:open="bulkDeleteOpen"

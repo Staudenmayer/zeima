@@ -27,7 +27,7 @@ import ProjectSelect from './ProjectSelect.vue'
 import TagPicker from './TagPicker.vue'
 
 const props = defineProps<{ meeting: Meeting | null; /** Times for a new meeting (from the timesheet's add dialog or a drag). */ draft?: { startAt: number; endAt: number } | null; /** The meeting as a timeline item: the dialog then offers to track it. */ trackItem?: AddonTimelineItem | null }>()
-const emit = defineEmits<{ saved: []; track: [item: AddonTimelineItem] }>()
+const emit = defineEmits<{ saved: []; track: [item: AddonTimelineItem]; /** "Time entry" was chosen on a new meeting: the times so far, for the entry dialog. */ entry: [times: { startAt: number; endAt: number }] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const { t } = useI18n()
@@ -200,6 +200,14 @@ const conflicts = computed(() =>
 )
 const clock = (ms: number) => toTimeInput(ms)
 
+/** A new meeting can become a time entry again: the switch hands the times over to the entry dialog. */
+function toEntry() {
+  const start = startAt.value
+  const end = endAt.value > start ? endAt.value : start + 3_600_000
+  open.value = false
+  emit('entry', { startAt: Number.isNaN(start) ? Date.now() : start, endAt: end })
+}
+
 async function save() {
   const f = form.value
   if (f.roomId && roomBooked.value.has(f.roomId)) {
@@ -243,14 +251,20 @@ async function save() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent :aria-describedby="undefined" :show-close-button="false" class="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+    <DialogContent :aria-describedby="undefined" :show-close-button="false" class="h-[min(40rem,94vh)] grid-rows-[auto_1fr] overflow-y-auto sm:max-w-5xl">
       <!-- Title, track and close on one line (the dialog's own close button is off so they line up). -->
       <DialogHeader class="flex-row items-center gap-1">
         <DialogTitle class="min-w-0 flex-1 truncate">{{ meeting ? $t('meetings.edit') : $t('meetings.new') }}</DialogTitle>
         <Button v-if="meeting && trackItem" type="button" size="icon" variant="ghost" class="size-7" :title="$t('timesheet.trackEvent')" :aria-label="$t('timesheet.trackEvent')" @click="(open = false, emit('track', trackItem))"><Play /></Button>
         <Button type="button" size="icon" variant="ghost" class="size-7" :title="$t('common.close')" :aria-label="$t('common.close')" @click="open = false"><X /></Button>
       </DialogHeader>
-      <form class="grid gap-4" @submit.prevent="save">
+      <form class="flex flex-col gap-4" @submit.prevent="save">
+        <div v-if="!meeting" role="group" :aria-label="$t('timesheet.whatToAdd')" class="inline-flex gap-0.5 self-start justify-self-start rounded-lg bg-muted p-0.5">
+          <Button type="button" size="sm" variant="ghost" class="h-7" aria-pressed="false" @click="toEntry">{{ $t('timesheet.addKindEntry') }}</Button>
+          <Button type="button" size="sm" variant="outline" class="h-7" aria-pressed="true">{{ $t('timesheet.addKindMeeting') }}</Button>
+        </div>
+        <div class="grid grid-cols-2 gap-x-8">
+          <div class="flex flex-col gap-4">
         <div class="grid gap-2"><Label for="m-title">{{ $t('meetings.title') }}</Label><Input id="m-title" v-model="form.title" required maxlength="200" autofocus /></div>
         <div class="grid grid-cols-3 gap-3">
           <div class="grid gap-2"><Label for="m-date">{{ $t('meetings.date') }}</Label><DateInput id="m-date" v-model="form.date" required /></div>
@@ -319,6 +333,8 @@ async function save() {
           <Input v-if="rooms.length && !form.roomId" v-model="form.location" class="col-span-2" maxlength="200" :placeholder="$t('meetings.otherPlacePlaceholder')" :aria-label="$t('meetings.location')" />
           <p v-else-if="form.roomId && roomBooked.has(form.roomId)" class="col-span-2 -mt-1 text-xs text-amber-600">{{ $t('meetings.roomTaken') }}</p>
         </div>
+          </div>
+          <div class="flex flex-col gap-4">
         <div class="grid grid-cols-2 gap-3">
           <div class="grid gap-2"><Label>{{ $t('meetings.activity') }}</Label><ActivitySelect v-model="form.activityId" /></div>
           <div class="grid gap-2"><Label>{{ $t('meetings.project') }}</Label><ProjectSelect v-model="form.projectId" /></div>
@@ -335,8 +351,10 @@ async function save() {
           <Switch v-model="form.billable" />
           {{ $t('entry.billable') }}
         </label>
-        <div class="grid gap-2"><Label for="m-note">{{ $t('meetings.note') }}</Label><Textarea id="m-note" v-model="form.note" rows="3" /></div>
-        <DialogFooter>
+        <div class="grid gap-2"><Label for="m-note">{{ $t('meetings.note') }}</Label><Textarea id="m-note" v-model="form.note" rows="6" /></div>
+          </div>
+        </div>
+        <DialogFooter class="mt-auto">
           <Button type="button" variant="outline" @click="open = false">{{ $t('common.cancel') }}</Button>
           <Button type="submit" :disabled="saving">{{ $t('common.save') }}</Button>
         </DialogFooter>
