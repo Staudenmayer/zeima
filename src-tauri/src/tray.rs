@@ -1,8 +1,12 @@
-//! Tray icon and menu. The icon shows the timer state (a green dot while
-//! tracking, an amber dot while paused) and the menu offers one-click
-//! switching between recently tracked activities.
+//! Tray icon and menu. The icon keeps its look; one badge in its corner tells
+//! two things at once: the badge's colour is the person's status (green
+//! online, yellow idle, gray offline, red in a meeting, blue local mode), the
+//! symbol in it the timer (a triangle while tracking, two bars while paused,
+//! none when idle). The menu's top lines say both in words, and the menu offers
+//! one-click switching between recently tracked activities.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
@@ -17,13 +21,84 @@ use crate::windows;
 
 const RECENT_LIMIT: u32 = 5;
 const GREEN: [u8; 3] = [0x22, 0xc5, 0x5e];
-const AMBER: [u8; 3] = [0xf5, 0x9e, 0x0b];
+
+/// What the icon's colour tells: where the person stands for the organizations (see `presence.rs`).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Presence {
+    /// Not signed in to a server: everything stays on this device. Blue.
+    Local = 0,
+    /// Signed in, but the server cannot be reached. Gray.
+    Offline = 1,
+    /// There. Green.
+    Online = 2,
+    /// Away from the machine or paused. Yellow.
+    Idle = 3,
+    /// In a meeting. Red.
+    Meeting = 4,
+}
+
+const PRESENCES: [Presence; 5] = [
+    Presence::Local,
+    Presence::Offline,
+    Presence::Online,
+    Presence::Idle,
+    Presence::Meeting,
+];
+static PRESENCE: AtomicU8 = AtomicU8::new(Presence::Local as u8);
+
+impl Presence {
+    fn from_u8(n: u8) -> Self {
+        PRESENCES
+            .into_iter()
+            .find(|p| *p as u8 == n)
+            .unwrap_or(Presence::Local)
+    }
+    fn label(self, lang: &str) -> &'static str {
+        let de = lang == "de";
+        match self {
+            Presence::Local if de => "Lokaler Modus",
+            Presence::Local => "Local mode",
+            Presence::Offline if de => "Offline",
+            Presence::Offline => "Offline",
+            Presence::Online if de => "Online",
+            Presence::Online => "Online",
+            Presence::Idle if de => "Abwesend",
+            Presence::Idle => "Idle",
+            Presence::Meeting if de => "Im Termin",
+            Presence::Meeting => "In a meeting",
+        }
+    }
+    fn color(self) -> [u8; 3] {
+        match self {
+            Presence::Local => [0x25, 0x63, 0xeb],
+            Presence::Offline => [0x9c, 0xa3, 0xaf],
+            Presence::Online => GREEN,
+            Presence::Idle => [0xea, 0xb3, 0x08],
+            Presence::Meeting => [0xef, 0x44, 0x44],
+        }
+    }
+}
+
+/// Called by the presence reporter when the person's status changes: recolours the icon.
+pub fn set_presence(app: &AppHandle, presence: Presence) {
+    if PRESENCE.swap(presence as u8, Ordering::Relaxed) != presence as u8 {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move { refresh(&app).await });
+    }
+}
 
 pub struct Tray {
     icon: TrayIcon,
-    idle: Image<'static>,
-    running: Image<'static>,
-    paused: Image<'static>,
+    /// The icon for each status and timer state.
+    images: HashMap<(Presence, u8), Image<'static>>,
+}
+
+fn status_key(status: Status) -> u8 {
+    match status {
+        Status::Idle => 0,
+        Status::Running => 1,
+        Status::Paused => 2,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -37,6 +112,7 @@ enum Status {
 struct View {
     status: Status,
     status_line: String,
+    presence: Presence,
     /// Short elapsed time ("1:23") shown next to the icon where supported.
     title: Option<String>,
     /// Menu id (`start:…`, see [`start_id`]) and label.
@@ -78,9 +154,17 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let base = app
         .default_window_icon()
         .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
-    let idle = Image::new_owned(base.rgba().to_vec(), base.width(), base.height());
-    let running = with_dot(&idle, GREEN);
-    let paused = with_dot(&idle, AMBER);
+    let plain = Image::new_owned(base.rgba().to_vec(), base.width(), base.height());
+    let mut images = HashMap::new();
+    for presence in PRESENCES {
+        for status in [Status::Idle, Status::Running, Status::Paused] {
+            images.insert(
+                (presence, status_key(status)),
+                with_badge(&plain, presence.color(), status),
+            );
+        }
+    }
+    let idle = images[&(Presence::from_u8(PRESENCE.load(Ordering::Relaxed)), 0)].clone();
 
     let lang = app.state::<AppState>().settings().language();
     let menu = build_menu(
@@ -88,6 +172,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         &View {
             status: Status::Idle,
             status_line: text(lang, "not_tracking").into(),
+            presence: Presence::from_u8(PRESENCE.load(Ordering::Relaxed)),
             title: None,
             recent: vec![],
             window_visible: windows::main_visible(app),
@@ -101,12 +186,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(on_menu_event)
         .build(app)?;
-    app.manage(Tray {
-        icon,
-        idle,
-        running,
-        paused,
-    });
+    app.manage(Tray { icon, images });
     Ok(())
 }
 
@@ -122,15 +202,15 @@ pub async fn refresh(app: &AppHandle) {
             return;
         }
     };
-    let icon = match view.status {
-        Status::Idle => &tray.idle,
-        Status::Running => &tray.running,
-        Status::Paused => &tray.paused,
-    };
-    let _ = tray.icon.set_icon(Some(icon.clone()));
-    let _ = tray
-        .icon
-        .set_tooltip(Some(format!("Zeima · {}", view.status_line)));
+    let presence = Presence::from_u8(PRESENCE.load(Ordering::Relaxed));
+    if let Some(icon) = tray.images.get(&(presence, status_key(view.status))) {
+        let _ = tray.icon.set_icon(Some(icon.clone()));
+    }
+    let _ = tray.icon.set_tooltip(Some(format!(
+        "Zeima · {} · {}",
+        view.presence.label(view.lang),
+        view.status_line
+    )));
     let _ = tray.icon.set_title(view.title.as_deref());
     match build_menu(app, &view) {
         Ok(menu) => {
@@ -218,6 +298,7 @@ async fn load_view(app: &AppHandle) -> zeima_core::Result<View> {
     Ok(View {
         status,
         status_line,
+        presence: Presence::from_u8(PRESENCE.load(Ordering::Relaxed)),
         title,
         recent,
         window_visible: windows::main_visible(app),
@@ -260,6 +341,13 @@ fn build_menu(app: &AppHandle, view: &View) -> tauri::Result<Menu<Wry>> {
         app,
         "status",
         &view.status_line,
+        false,
+        None::<&str>,
+    )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "presence",
+        view.presence.label(lang),
         false,
         None::<&str>,
     )?)?;
@@ -309,9 +397,10 @@ fn build_menu(app: &AppHandle, view: &View) -> tauri::Result<Menu<Wry>> {
     if !view.recent.is_empty() {
         menu.append(&PredefinedMenuItem::separator(app)?)?;
         for (id, label) in &view.recent {
+            // `id` is already `start:…` (see `start_id`).
             menu.append(&MenuItem::with_id(
                 app,
-                format!("start:{id}"),
+                id,
                 format!("▶ {label}"),
                 true,
                 None::<&str>,
@@ -398,17 +487,24 @@ pub fn format_elapsed(ms: i64) -> String {
 }
 
 /// Copy of `base` with a filled status dot (white ring) in the bottom-right.
-fn with_dot(base: &Image<'_>, color: [u8; 3]) -> Image<'static> {
+/// The badge in the icon's lower right corner: its colour is the person's status, the symbol the
+/// timer (a triangle while tracking, two bars while paused, none when idle), white on the colour.
+fn with_badge(base: &Image<'_>, color: [u8; 3], status: Status) -> Image<'static> {
     let (w, h) = (base.width() as i64, base.height() as i64);
     let mut rgba = base.rgba().to_vec();
-    let radius = (w.min(h) as f64 * 0.24).max(2.0);
-    let ring = radius * 1.25;
+    let radius = (w.min(h) as f64 * 0.2).max(2.5);
+    let ring = radius * 1.18;
     let (cx, cy) = (w as f64 - ring - 1.0, h as f64 - ring - 1.0);
     for y in 0..h {
         for x in 0..w {
-            let d = ((x as f64 + 0.5 - cx).powi(2) + (y as f64 + 0.5 - cy).powi(2)).sqrt();
+            let (dx, dy) = (x as f64 + 0.5 - cx, y as f64 + 0.5 - cy);
+            let d = (dx * dx + dy * dy).sqrt();
             let px = if d <= radius {
-                [color[0], color[1], color[2], 255]
+                if symbol_covers(status, dx / radius, dy / radius) {
+                    [255, 255, 255, 255]
+                } else {
+                    [color[0], color[1], color[2], 255]
+                }
             } else if d <= ring {
                 [255, 255, 255, 255]
             } else {
@@ -419,6 +515,17 @@ fn with_dot(base: &Image<'_>, color: [u8; 3]) -> Image<'static> {
         }
     }
     Image::new_owned(rgba, w as u32, h as u32)
+}
+
+/// Whether the timer's symbol covers the point (`x`, `y` in the badge, -1 to 1 from its centre).
+fn symbol_covers(status: Status, x: f64, y: f64) -> bool {
+    match status {
+        Status::Idle => false,
+        // A triangle pointing right.
+        Status::Running => (-0.35..=0.55).contains(&x) && y.abs() <= 0.6 * (0.55 - x) / 0.9,
+        // Two bars.
+        Status::Paused => y.abs() <= 0.5 && ((-0.45..=-0.12).contains(&x) || (0.12..=0.45).contains(&x)),
+    }
 }
 
 #[cfg(test)]
@@ -453,16 +560,38 @@ mod tests {
         let start = parse_start_id(&start_id(&bare)).unwrap();
         assert_eq!(start.project_id, None);
         assert!(start.tag_ids.is_empty());
+        // The id is used for the menu item as it is: one prefix, so a click parses back to the same start.
+        assert!(start_id(&full).starts_with("start:a1|"));
+        assert!(!start_id(&full).starts_with("start:start:"));
         assert!(parse_start_id("start:||").is_none());
         assert!(parse_start_id("stop").is_none());
     }
 
     #[test]
-    fn dot_is_drawn_in_the_corner() {
+    fn the_badge_is_drawn_in_the_corner_in_the_status_colour() {
         let base = Image::new_owned(vec![0; 32 * 32 * 4], 32, 32);
-        let dotted = with_dot(&base, GREEN);
-        let px = |x: usize, y: usize| &dotted.rgba()[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
+        let badge = with_badge(&base, GREEN, Status::Idle);
+        let px = |x: usize, y: usize| &badge.rgba()[(y * 32 + x) * 4..(y * 32 + x) * 4 + 4];
         assert_eq!(px(0, 0), &[0, 0, 0, 0]);
         assert_eq!(px(31 - 10, 31 - 10), &[GREEN[0], GREEN[1], GREEN[2], 255]);
+    }
+
+    #[test]
+    fn the_timer_is_a_white_symbol_in_the_badge() {
+        let base = Image::new_owned(vec![0; 32 * 32 * 4], 32, 32);
+        let white = |s| {
+            with_badge(&base, GREEN, s)
+                .rgba()
+                .chunks_exact(4)
+                .filter(|p| p == &[255, 255, 255, 255])
+                .count()
+        };
+        // The ring is white too, so a symbol means more white pixels than none.
+        assert!(white(Status::Running) > white(Status::Idle));
+        assert!(white(Status::Paused) > white(Status::Idle));
+        assert!(symbol_covers(Status::Running, 0.0, 0.0));
+        assert!(symbol_covers(Status::Paused, 0.3, 0.0));
+        assert!(!symbol_covers(Status::Paused, 0.0, 0.0));
+        assert!(!symbol_covers(Status::Idle, 0.0, 0.0));
     }
 }

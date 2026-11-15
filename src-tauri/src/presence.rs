@@ -12,6 +12,7 @@ use tauri::{AppHandle, Manager};
 use zeima_core::model::TimerState;
 
 use crate::state::AppState;
+use crate::tray::{self, Presence};
 
 /// How often to look; a report that has not changed is repeated about every minute.
 const CHECK_EVERY: Duration = Duration::from_secs(5);
@@ -60,6 +61,7 @@ async fn check(app: &AppHandle, last: &mut HashMap<String, (Report, Instant)>) {
     // Only while signed in; the server forgets those who stop reporting.
     if !matches!(crate::account::current_token(app).await, Ok(Some(_))) {
         last.clear();
+        tray::set_presence(app, Presence::Local);
         if let Some(activity) = app.try_state::<crate::activity::Activity>() {
             activity.set_policy_idle_minutes(0);
         }
@@ -91,7 +93,12 @@ async fn check(app: &AppHandle, last: &mut HashMap<String, (Report, Instant)>) {
     let idle = app
         .try_state::<crate::activity::Activity>()
         .is_some_and(|a| a.is_idle());
+    // What the tray icon shows: the status the organizations hear, or offline when none could be told.
+    let mut states: Vec<&'static str> = Vec::new();
+    let mut failed = 0;
+    let mut orgs = 0;
     for w in workspaces.into_iter().filter(|w| w.kind == "org") {
+        orgs += 1;
         let Some(org_id) = w.org_id.clone() else { continue };
         let scope = state.core.scoped(&w.id, &user);
         let timer = scope.timer_state().await.ok();
@@ -125,6 +132,7 @@ async fn check(app: &AppHandle, last: &mut HashMap<String, (Report, Instant)>) {
             .get(&org_id)
             .is_none_or(|(sent, at)| *sent != report || at.elapsed() >= REPEAT_AFTER);
         if !due {
+            states.push(report.state);
             continue;
         }
         let body = serde_json::json!({ "state": report.state, "projectId": report.project_id });
@@ -136,9 +144,24 @@ async fn check(app: &AppHandle, last: &mut HashMap<String, (Report, Instant)>) {
         )
         .await;
         if sent.is_ok() {
+            states.push(report.state);
             last.insert(org_id, (report, Instant::now()));
+        } else {
+            failed += 1;
         }
     }
+    let shown = if orgs == 0 {
+        Presence::Local
+    } else if states.is_empty() && failed > 0 {
+        Presence::Offline
+    } else if states.contains(&"in_meeting") {
+        Presence::Meeting
+    } else if states.iter().any(|s| *s == "online" || *s == "traveling") {
+        Presence::Online
+    } else {
+        Presence::Idle
+    };
+    tray::set_presence(app, shown);
 }
 
 /// Lets something that changes what colleagues should see (the day's work

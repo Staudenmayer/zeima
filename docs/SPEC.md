@@ -255,7 +255,8 @@ Cache these in a `daily_summary` table that is recomputed on change, for fast da
 
 ### 5.1 Tracking (Timeular-style)
 - **Tray**
-  - The icon shows state (idle / tracking / paused) and the elapsed time as the tooltip (Linux: menu title).
+  - The icon shows state (idle / tracking / paused: a green or amber dot in the corner) and the elapsed time as the tooltip (Linux: menu title).
+  - The icon's background **colour** (the white glyph stays) is the person's status, the one organizations hear (§5.10): green online, yellow idle or paused, red in a meeting, gray when signed in but the server cannot be reached, blue in local mode (not signed in to a server). It follows within a few seconds of a change.
   - Menu: current activity + stop, pause/resume, **5 most recent activity/project/tag combinations** for one-click switching, "Start tracking…" (opens the quick switch), "Open dashboard", Quit.
 - **Global shortcuts** (configurable)
   - `Ctrl+Shift+T`: toggle the main window
