@@ -144,11 +144,13 @@ jobs:
             addons/csv-export
             addons/recent-notes
             addons/ics-calendar
+            addons/day-digest
       - name: Build example addons
         run: |
           bash addons/build.sh csv-export
           bash addons/build.sh recent-notes
           bash addons/build.sh ics-calendar
+          bash addons/build.sh day-digest
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

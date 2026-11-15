@@ -2,10 +2,11 @@
 
 Addons add features to Zeima without changing the app: export formats, quick-switch options, reactions to tracked time, items in the timesheet calendar, and integrations with other services. An addon is a WebAssembly (WASM) module plus a manifest, `addon.toml`. Zeima runs it in a sandbox, so it can only use what the user granted when installing it.
 
-This guide walks through a complete export-format addon, then documents everything an addon can use. The two addons in [`addons/`](../addons) are working examples:
+This guide walks through a complete export-format addon, then documents everything an addon can use: the hooks it can react to, the host API it can call, the permissions it needs and the data types of the SDK. The addons in [`addons/`](../addons) are working examples:
 
 - [`csv-export`](../addons/csv-export): a report export format with settings.
 - [`recent-notes`](../addons/recent-notes): events, storage, quick-switch options and notifications.
+- [`day-digest`](../addons/day-digest): reads meetings, absences, work days and activities, uses the local date and time of a tick, and reacts to `meeting.changed` and `absence.changed`.
 
 [`ics-calendar`](../addons/ics-calendar) shows an ICS feed in the timesheet (network with a user-entered address, `schedule.tick`, `timeline.events`, storage). [`host-test`](../addons/host-test) is a test fixture for secrets, accounts and timeline items; it is short enough to read as an example too.
 
@@ -109,6 +110,62 @@ In Zeima, open **Addons → Install from file** and pick the zip. Zeima shows th
 
 While developing, you can pick the `addon.toml` itself instead of a zip; Zeima then reads the module named in `wasm` from the same folder. Install again after each build: an install with the same `id` replaces the old version and keeps its settings.
 
+## A second example: reading the day
+
+An addon can look at the person's day and react when it changes. This one (the core of [`day-digest`](../addons/day-digest)) sends one notification each morning with the day's meetings and target, and tells the person when a meeting is cancelled.
+
+`addon.toml`:
+
+```toml
+id = "com.example.day-digest"
+name = "Day digest"
+version = "1.0.0"
+author = "Example Ltd"
+min_app_version = "1.0.0"
+wasm = "day_digest.wasm"
+permissions = ["meetings:read", "work:read", "notify"]
+hooks = ["schedule.tick", "meeting.changed"]
+schedule_minutes = 15
+```
+
+`src/lib.rs`:
+
+```rust
+use extism_pdk::{plugin_fn, FnResult, Json};
+use zeima_addon_sdk::{host, DateRange, Event, Range, Tick};
+
+#[plugin_fn]
+pub fn on_schedule_tick(Json(tick): Json<Tick>) -> FnResult<()> {
+    // Once a day, from 08:00 (the tick knows the user's local date and time).
+    if tick.local_time.as_str() < "08:00"
+        || host::kv_get("last")?.as_deref() == Some(tick.local_date.as_str())
+    {
+        return Ok(());
+    }
+    let day = DateRange { from: tick.local_date.clone(), to: tick.local_date.clone() };
+    let target = host::list_work_days(day)?.first().map_or(0, |d| d.target_ms);
+    // The next 24 hours of meetings the person has not declined.
+    let meetings: Vec<_> = host::list_meetings(Range { from: tick.now, to: tick.now + 86_400_000 })?
+        .into_iter()
+        .filter(|m| !m.meeting.cancelled && m.my_status.as_deref() != Some("declined"))
+        .collect();
+    host::notify("Today", &format!("{} meetings, target {} min", meetings.len(), target / 60_000))?;
+    host::kv_set("last", &tick.local_date)
+}
+
+#[plugin_fn]
+pub fn on_event(Json(event): Json<Event>) -> FnResult<()> {
+    if event.kind == "meeting.changed" && event.change().as_deref() == Some("cancelled") {
+        if let Some(meeting) = event.meeting() {
+            host::notify("Meeting cancelled", &meeting.title)?;
+        }
+    }
+    Ok(())
+}
+```
+
+The install dialog lists the permissions in plain words ("Read your meetings and what you answered", "Read your work days"), so the person knows what the addon sees.
+
 ## The manifest
 
 | Field | Required | Meaning |
@@ -144,7 +201,9 @@ Each hook calls one exported function. Declare only the hooks you implement: Zei
 | `entry.updated` | `on_event` | `Event` with `entry` | – |
 | `entry.deleted` | `on_event` | `Event` with `entryId` | – |
 | `day.closed` | `on_event` | `Event` with `date` and `day` | – |
-| `schedule.tick` | `on_schedule_tick` | `Tick { now }` | – |
+| `meeting.changed` | `on_event` | `Event` with `change`, `meetingId` and, depending on the change, `meeting`, `status`, `occurrenceAt` | – |
+| `absence.changed` | `on_event` | `Event` with `change`, `absenceId` and, unless deleted, `absence` | – |
+| `schedule.tick` | `on_schedule_tick` | `Tick { now, timezone, localDate, localTime }` | – |
 | `report.export` | `export_report` | `ExportRequest` | `ExportResult { content }` |
 | `quickswitch.suggest` | `quickswitch_suggest` | `SuggestRequest { query }` | `Vec<Suggestion>` |
 | `timeline.events` | `timeline_events` | `TimelineRequest { range, timezone }` | `Vec<TimelineEvent>` |
@@ -154,6 +213,12 @@ All inputs and outputs are JSON with camelCase fields; the SDK types handle the 
 **Events.** `on_event` receives every event hook the addon declared; check `event.kind` (`"entry.stopped"` etc.). `Event::entry()`, `Event::entry_id()` and `Event::date()` read the common fields. `day.closed` arrives once per day after midnight, also for days the app missed (up to a week back), with `day` holding the work-time result: `netMs`, `targetMs`, `deltaMs`, `firstStart`, `lastEnd`, `holiday` and more. Starting the timer sends `entry.created` and `entry.started`; stopping or pausing sends `entry.updated` and `entry.stopped`.
 
 Events about entries the addon created itself (with `host::create_entry`) are not sent back to it, so an addon cannot trigger itself in a loop.
+
+**Meetings.** `meeting.changed` is sent when the person creates, changes, cancels or answers a meeting **on this device** (changes that arrive from other devices or from colleagues through sync do not send an event; read them with `host::list_meetings`). `Event::change()` tells which: `created`, `updated`, `cancelled`, `answered` (their own answer) or `answerCleared` (they took back the answer for one date). `Event::meeting_id()` is always there. `Event::meeting()` holds the meeting after the change for `created`, `updated` and `cancelled`; for `answered`, `Event::status()` is `accepted`, `tentative` or `declined`, and `Event::occurrence_at()` is the start of the date if the answer is for that date only (`None` for the whole series).
+
+**Absences.** `absence.changed` is sent when the person adds, changes, deletes or decides an absence on this device. `Event::change()` is `created`, `updated`, `deleted`, or `approved` / `rejected` when the person decides a colleague's request; `Event::absence_id()` is always there, `Event::absence()` the absence after the change (not for `deleted`).
+
+**Ticks.** `schedule.tick` runs every `schedule_minutes` (at least 1) while Zeima runs. The `Tick` carries the time in the user's zone, so an addon can act "from 08:00" or "once a day" without a time zone database: `timezone` (IANA), `localDate` (`2026-10-05`) and `localTime` (`08:30`, 24 hours), next to `now` (unix ms).
 
 **Exports.** `ExportRequest` holds what the user selected on the Reports page:
 
@@ -178,8 +243,12 @@ The SDK's `host` module calls back into Zeima. Each call fails, and the hook wit
 |---|---|---|
 | `host::list_entries(range)` | `entries:read` | Entries overlapping `range` |
 | `host::list_projects()` | `projects:read` | All projects, archived ones included |
+| `host::list_activities()` | `activities:read` | All activities, archived ones included |
 | `host::list_tags()` | `tags:read` | All tags |
 | `host::list_cost_centers()` | `cost-centers:read` | All cost centers |
+| `host::list_meetings(range)` | `meetings:read` | The person's meetings overlapping `range` (unix ms), one item per date, with the answers |
+| `host::list_absences(date_range)` | `absences:read` | The person's own absences overlapping the dates, with their approval status |
+| `host::list_work_days(date_range)` | `work:read` | Target, worked time, balance, holiday and warnings for each local day (at most 366 days) |
 | `host::create_entry(new_entry)` | `entries:write` | The created entry |
 | `host::notify(title, body)` | `notify` | – (the title is prefixed with your addon's name) |
 | `host::kv_get(key)` / `kv_set` / `kv_delete` / `kv_keys(prefix)` | none | The addon's own storage |
@@ -187,6 +256,12 @@ The SDK's `host` module calls back into Zeima. Each call fails, and the hook wit
 | `host::oauth_token(provider_id)` | `network` | An access token for a connected `[[oauth]]` account, or `None` |
 
 **Times and time zones.** Times are unix milliseconds (UTC). Addons have no time zone database, so entries from `list_entries` and in exports also carry `localStart` and `localEnd` in the user's zone, like `2026-10-05T09:30`.
+
+**Meetings, absences and work days.** These read what the person sees in the timesheet, the absence list and the balance:
+
+- `list_meetings(Range { from, to })` returns `MeetingOccurrence`s: one per date a meeting happens, with the `meeting` (title, place, online link, activity, project, tags, attendees, repeat rule, `cancelled`), the `startAt` / `endAt` of that date, the `responses` of everyone (`accepted`, `tentative`, `declined`, per series or per date), the person's own `myStatus` for this date, their `seriesStatus`, `myDateAnswer` (they answered this date on its own) and `isOrganizer`. A person counts as taking part if they organize it or did not decline it. Meetings exist only in an organization's workspace; in a personal workspace the list is empty.
+- `list_absences(DateRange { from, to })` takes local dates (`2026-10-05`, both inclusive) and returns the person's own `Absence`s: `typeId`, `typeName` and `typeKey` (`vacation`, `sick`, … or `None` for a custom type), `startDate`, `endDate`, `halfDay` (`am` / `pm`), `status` (`requested`, `approved`, `rejected`), `note` and the decision (`decidedBy`, `decisionNote`). Requests that wait for a decision and rejected ones are included: look at `status`.
+- `list_work_days(DateRange { from, to })` returns a `WorkDay` per date: `targetMs`, `workedMs`, `netMs` (after break deductions), `deltaMs`, `adjustmentMs`, `breakTakenMs`, `breakRequiredMs`, `breakDeductedMs`, `firstStart`, `lastEnd`, `holiday` (a name if it is a public holiday), `absenceTypeIds` and `warnings` (`exceedsDailyMax`, `restTooShort`, `breakTooShort`, each as JSON with a `kind`). It is the same result `day.closed` sends.
 
 **Created entries** must be finished (`startAt` and `endAt`). They are validated like manual entries and recorded with source `addon`. `costCenterId: None` resolves the cost center like a manual entry would.
 
@@ -261,12 +336,16 @@ Values reach the addon as Extism config strings. Read them with `extism_pdk::con
 | `entries:read` | `host::list_entries` |
 | `entries:write` | `host::create_entry` |
 | `projects:read` | `host::list_projects` |
+| `activities:read` | `host::list_activities` |
 | `tags:read` | `host::list_tags` |
 | `cost-centers:read` | `host::list_cost_centers` |
+| `meetings:read` | `host::list_meetings`; the `meeting.changed` hook |
+| `absences:read` | `host::list_absences`; the `absence.changed` hook |
+| `work:read` | `host::list_work_days` |
 | `notify` | `host::notify` |
 | `network` | HTTP to `allowed_hosts`; `host::oauth_token` |
 
-Ask for as little as you need: the install dialog lists every permission in plain words. Data passed to a hook, such as the entries in an `ExportRequest`, needs no permission.
+Ask for as little as you need: the install dialog lists every permission in plain words. Data passed to a hook, such as the entries in an `ExportRequest`, needs no permission. The `meeting.changed` and `absence.changed` hooks carry meetings and absences, so declare them together with `meetings:read` / `absences:read`: the install dialog then shows the person what the addon reads.
 
 ## Limits
 
@@ -279,4 +358,6 @@ When a call fails or hits a limit, Zeima shows the error on the Addons page and 
 
 ## Versioning
 
-Increase `version` with every release. Installing a package with the same `id` replaces the old version; settings and storage are kept. Use `min_app_version` when you rely on features of a newer Zeima. Within a major version of the SDK, new fields are only ever added, never removed or renamed.
+Increase `version` with every release. Installing a package with the same `id` replaces the old version; settings and storage are kept. Use `min_app_version` when you rely on features of a newer Zeima: the meeting, absence and work-day calls, the activities call and the `meeting.changed` / `absence.changed` hooks need `1.0.0`, and so does the local date and time in `Tick`. Within a major version of the SDK, new fields are only ever added, never removed or renamed.
+
+**Changes in 1.0.** The SDK gained `host::list_activities`, `list_meetings`, `list_absences` and `list_work_days` with the types `Activity`, `Meeting`, `MeetingOccurrence`, `MeetingResponse`, `Absence`, `WorkDay` and `DateRange`; the events `meeting.changed` and `absence.changed` (with the `Event` helpers `change`, `meeting_id`, `meeting`, `status`, `occurrence_at`, `absence_id`, `absence`, `day`); and `timezone`, `localDate` and `localTime` on `Tick`. Tag groups no longer exist in the app: `Tag.group_name` is still read from old data, but do not rely on it.

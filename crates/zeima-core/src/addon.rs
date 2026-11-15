@@ -20,10 +20,22 @@ pub enum Permission {
     EntriesWrite,
     #[serde(rename = "projects:read")]
     ProjectsRead,
+    /// Read the activities (what kind of work an entry is).
+    #[serde(rename = "activities:read")]
+    ActivitiesRead,
     #[serde(rename = "tags:read")]
     TagsRead,
     #[serde(rename = "cost-centers:read")]
     CostCentersRead,
+    /// Read the person's meetings and what they answered (organization workspaces).
+    #[serde(rename = "meetings:read")]
+    MeetingsRead,
+    /// Read the person's absences and their approval status.
+    #[serde(rename = "absences:read")]
+    AbsencesRead,
+    /// Read work days: target, worked time, balance, holidays.
+    #[serde(rename = "work:read")]
+    WorkRead,
     /// Show desktop notifications.
     #[serde(rename = "notify")]
     Notify,
@@ -49,6 +61,12 @@ pub enum Hook {
     EntryDeleted,
     #[serde(rename = "day.closed")]
     DayClosed,
+    /// A meeting of the person was created, changed, cancelled or answered.
+    #[serde(rename = "meeting.changed")]
+    MeetingChanged,
+    /// An absence of the person was requested, changed, decided or deleted.
+    #[serde(rename = "absence.changed")]
+    AbsenceChanged,
     /// Custom report export formats (`export_formats`).
     #[serde(rename = "report.export")]
     ReportExport,
@@ -72,6 +90,8 @@ impl Hook {
             Self::EntryUpdated => "entry.updated",
             Self::EntryDeleted => "entry.deleted",
             Self::DayClosed => "day.closed",
+            Self::MeetingChanged => "meeting.changed",
+            Self::AbsenceChanged => "absence.changed",
             Self::ReportExport => "report.export",
             Self::QuickswitchSuggest => "quickswitch.suggest",
             Self::ScheduleTick => "schedule.tick",

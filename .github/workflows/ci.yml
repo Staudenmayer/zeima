@@ -185,6 +185,7 @@ jobs:
         run: |
           bash addons/build.sh csv-export
           bash addons/build.sh recent-notes
+          bash addons/build.sh day-digest
           bash addons/build.sh ics-calendar
           bash addons/build.sh host-test
       # The zeima (src-tauri) lib test exe has no application manifest on

@@ -151,6 +151,16 @@
           ]
         },
         {
+          "description": "A meeting of the person was created, changed, cancelled or answered.",
+          "type": "string",
+          "const": "meeting.changed"
+        },
+        {
+          "description": "An absence of the person was requested, changed, decided or deleted.",
+          "type": "string",
+          "const": "absence.changed"
+        },
+        {
           "description": "Custom report export formats (`export_formats`).",
           "type": "string",
           "const": "report.export"
@@ -256,6 +266,26 @@
           "description": "Create time entries.",
           "type": "string",
           "const": "entries:write"
+        },
+        {
+          "description": "Read the activities (what kind of work an entry is).",
+          "type": "string",
+          "const": "activities:read"
+        },
+        {
+          "description": "Read the person's meetings and what they answered (organization workspaces).",
+          "type": "string",
+          "const": "meetings:read"
+        },
+        {
+          "description": "Read the person's absences and their approval status.",
+          "type": "string",
+          "const": "absences:read"
+        },
+        {
+          "description": "Read work days: target, worked time, balance, holidays.",
+          "type": "string",
+          "const": "work:read"
         },
         {
           "description": "Show desktop notifications.",

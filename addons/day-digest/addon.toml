@@ -1,0 +1,30 @@
+# Example addon: reads meetings, absences, work days and activities, and reacts
+# to meeting and absence changes. Shows the newer host API (docs/addons.md).
+id = "dev.zeima.day-digest"
+name = "Day digest"
+version = "1.0.0"
+author = "Zeima"
+description = "Tells you in the morning what the day holds (meetings, absences, target), when a meeting is cancelled and how your absence requests were decided."
+min_app_version = "1.0.0"
+wasm = "day_digest.wasm"
+permissions = ["meetings:read", "absences:read", "work:read", "activities:read", "notify"]
+hooks = ["schedule.tick", "meeting.changed", "absence.changed"]
+schedule_minutes = 15
+
+[[settings]]
+key = "hour"
+label = "Send the digest from (hour, 0-23)"
+type = "number"
+default = "8"
+
+[[settings]]
+key = "cancelled"
+label = "Notify when a meeting is cancelled"
+type = "boolean"
+default = "true"
+
+[[settings]]
+key = "decisions"
+label = "Notify when an absence request is decided"
+type = "boolean"
+default = "true"

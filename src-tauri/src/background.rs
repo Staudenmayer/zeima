@@ -41,7 +41,11 @@ pub fn spawn(app: AppHandle) {
             let state = app.state::<AppState>();
             close_days(&app).await;
             crate::meeting_prompt::check(&app).await;
-            if app.state::<addons::Addons>().tick(state.core.now_ms()).await {
+            if app
+                .state::<addons::Addons>()
+                .tick(state.core.now_ms(), state.core.tz().unwrap_or(chrono_tz::UTC))
+                .await
+            {
                 timeline_changed(&app);
             }
             // Every workspace with a running timer keeps its heartbeat (crash recovery).

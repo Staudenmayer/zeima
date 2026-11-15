@@ -799,6 +799,10 @@ export type HolidayView = {
  *  WASM function (docs/addons.md).
  */
 export type Hook = "entry.started" | "entry.stopped" | "entry.created" | "entry.updated" | "entry.deleted" | "day.closed" | 
+/**  A meeting of the person was created, changed, cancelled or answered. */
+"meeting.changed" | 
+/**  An absence of the person was requested, changed, decided or deleted. */
+"absence.changed" | 
 /**  Custom report export formats (`export_formats`). */
 "report.export" | 
 /**  Extra options in the quick switch. */
@@ -1036,7 +1040,15 @@ export type Permission =
 /**  Read time entries. */
 "entries:read" | 
 /**  Create time entries. */
-"entries:write" | "projects:read" | "tags:read" | "cost-centers:read" | 
+"entries:write" | "projects:read" | 
+/**  Read the activities (what kind of work an entry is). */
+"activities:read" | "tags:read" | "cost-centers:read" | 
+/**  Read the person's meetings and what they answered (organization workspaces). */
+"meetings:read" | 
+/**  Read the person's absences and their approval status. */
+"absences:read" | 
+/**  Read work days: target, worked time, balance, holidays. */
+"work:read" | 
 /**  Show desktop notifications. */
 "notify" | 
 /**  HTTP requests, only to `allowed_hosts`. */

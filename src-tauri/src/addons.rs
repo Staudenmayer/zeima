@@ -232,6 +232,98 @@ fn zeima_list_projects(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserD
     })
 }
 
+fn zeima_list_activities(
+    p: &mut CurrentPlugin,
+    i: &[Val],
+    o: &mut [Val],
+    u: UserData<HostCtx>,
+) -> HostResult {
+    host(p, i, o, u, Some(Permission::ActivitiesRead), |ctx, (): ()| {
+        convert::<_, Vec<sdk::Activity>>(block_on(ctx.core().list_activities(true))?)
+    })
+}
+
+/// Most days one `list_work_days` call may ask for.
+const MAX_WORK_DAYS: i64 = 366;
+
+fn parse_date(text: &str) -> Result<chrono::NaiveDate, extism::Error> {
+    chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
+        .map_err(|_| extism::Error::msg(format!("'{text}' is not a date like 2026-10-05")))
+}
+
+fn date_range(range: &sdk::DateRange) -> Result<(chrono::NaiveDate, chrono::NaiveDate), extism::Error> {
+    let (from, to) = (parse_date(&range.from)?, parse_date(&range.to)?);
+    if to < from {
+        return Err(extism::Error::msg("the range ends before it starts"));
+    }
+    Ok((from, to))
+}
+
+fn zeima_list_meetings(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+    host(
+        p,
+        i,
+        o,
+        u,
+        Some(Permission::MeetingsRead),
+        |ctx, range: sdk::Range| {
+            // Meetings exist in an organization's workspace; elsewhere there are none.
+            let list = if ctx.core().ctx().shared {
+                block_on(ctx.core().meetings_between(range.from, range.to))?
+            } else {
+                Vec::new()
+            };
+            let mut list = convert::<_, Vec<sdk::MeetingOccurrence>>(list)?;
+            let me = ctx.core().ctx().user_id.clone();
+            for o in &mut list {
+                o.is_organizer = o.meeting.user_id == me;
+            }
+            Ok(list)
+        },
+    )
+}
+
+fn zeima_list_absences(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+    host(
+        p,
+        i,
+        o,
+        u,
+        Some(Permission::AbsencesRead),
+        |ctx, range: sdk::DateRange| {
+            let (from, to) = date_range(&range)?;
+            let mut list = convert::<_, Vec<sdk::Absence>>(block_on(ctx.core().list_absences(from, to))?)?;
+            let types = block_on(ctx.core().list_absence_types())?;
+            for a in &mut list {
+                if let Some(t) = types.iter().find(|t| t.id == a.type_id) {
+                    a.type_name = t.name.clone();
+                    a.type_key = t.key.clone();
+                }
+            }
+            Ok(list)
+        },
+    )
+}
+
+fn zeima_list_work_days(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
+    host(
+        p,
+        i,
+        o,
+        u,
+        Some(Permission::WorkRead),
+        |ctx, range: sdk::DateRange| {
+            let (from, to) = date_range(&range)?;
+            if (to - from).num_days() >= MAX_WORK_DAYS {
+                return Err(extism::Error::msg(format!(
+                    "ask for at most {MAX_WORK_DAYS} days at a time"
+                )));
+            }
+            convert::<_, Vec<sdk::WorkDay>>(block_on(ctx.core().work_days(from, to))?)
+        },
+    )
+}
+
 fn zeima_list_tags(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(p, i, o, u, Some(Permission::TagsRead), |ctx, (): ()| {
         convert::<_, Vec<sdk::Tag>>(block_on(ctx.core().list_tags())?)
@@ -443,6 +535,34 @@ fn build_plugin(
             zeima_list_projects,
         )
         .with_function(
+            sdk::host_fns::LIST_ACTIVITIES,
+            [PTR],
+            [PTR],
+            data.clone(),
+            zeima_list_activities,
+        )
+        .with_function(
+            sdk::host_fns::LIST_MEETINGS,
+            [PTR],
+            [PTR],
+            data.clone(),
+            zeima_list_meetings,
+        )
+        .with_function(
+            sdk::host_fns::LIST_ABSENCES,
+            [PTR],
+            [PTR],
+            data.clone(),
+            zeima_list_absences,
+        )
+        .with_function(
+            sdk::host_fns::LIST_WORK_DAYS,
+            [PTR],
+            [PTR],
+            data.clone(),
+            zeima_list_work_days,
+        )
+        .with_function(
             sdk::host_fns::LIST_TAGS,
             [PTR],
             [PTR],
@@ -623,6 +743,30 @@ impl Addons {
         }
     }
 
+    /// Sends an event the app raises itself (not a core domain event) to every
+    /// enabled addon that declared the hook: `meeting.changed`, `absence.changed`.
+    /// `fields` are added next to `type`.
+    pub async fn dispatch_app_event(&self, hook: &str, fields: serde_json::Value) {
+        let addons: Vec<_> = self
+            .loaded()
+            .into_iter()
+            .filter(|a| a.manifest.hooks.iter().any(|h| h.as_str() == hook))
+            .collect();
+        if addons.is_empty() {
+            return;
+        }
+        let mut event = serde_json::json!({ "type": hook });
+        if let (Some(base), serde_json::Value::Object(extra)) = (event.as_object_mut(), fields) {
+            base.extend(extra);
+        }
+        let Ok(input) = serde_json::to_string(&event) else {
+            return;
+        };
+        for addon in addons {
+            self.call(&addon, "on_event", input.clone(), CALL_TIMEOUT).await;
+        }
+    }
+
     /// Manifest of a loaded addon.
     pub fn manifest(&self, id: &str) -> Option<AddonManifest> {
         self.loaded
@@ -670,7 +814,7 @@ impl Addons {
 
     /// `schedule.tick` for addons whose interval has passed; returns
     /// whether any ran (their timeline items may have changed).
-    pub async fn tick(&self, now: i64) -> bool {
+    pub async fn tick(&self, now: i64, tz: chrono_tz::Tz) -> bool {
         let mut ran = false;
         for addon in self.loaded() {
             let Some(minutes) = addon.manifest.schedule_minutes else {
@@ -689,7 +833,16 @@ impl Addons {
                 due
             };
             if due {
-                let input = serde_json::to_string(&sdk::Tick { now }).unwrap_or_default();
+                let local = chrono::DateTime::from_timestamp_millis(now).map(|d| d.with_timezone(&tz));
+                let tick = sdk::Tick {
+                    now,
+                    timezone: tz.name().to_string(),
+                    local_date: local
+                        .map(|d| d.format("%Y-%m-%d").to_string())
+                        .unwrap_or_default(),
+                    local_time: local.map(|d| d.format("%H:%M").to_string()).unwrap_or_default(),
+                };
+                let input = serde_json::to_string(&tick).unwrap_or_default();
                 self.call(&addon, "on_schedule_tick", input, CALL_TIMEOUT).await;
                 ran = true;
             }
@@ -919,7 +1072,7 @@ mod tests {
             return;
         };
         let id = "dev.zeima.host-test";
-        assert!(f.addons.tick(T0).await);
+        assert!(f.addons.tick(T0, chrono_tz::UTC).await);
         assert_eq!(f.addons.error(id), None);
         let stored = f.secrets.0.lock().unwrap().clone();
         assert_eq!(
@@ -936,7 +1089,7 @@ mod tests {
         );
         assert_eq!(f.core.addon_kv_keys(id, "").await.unwrap(), Vec::<String>::new());
         // Not due again within the interval.
-        assert!(!f.addons.tick(T0 + 60_000).await);
+        assert!(!f.addons.tick(T0 + 60_000, chrono_tz::UTC).await);
     }
 
     #[tokio::test]
@@ -965,7 +1118,7 @@ mod tests {
         f.secrets
             .set("addon:dev.zeima.host-test:oauth:demo", "rt-1")
             .unwrap();
-        f.addons.tick(T0).await;
+        f.addons.tick(T0, chrono_tz::UTC).await;
         let items = f.addons.timeline(&request).await;
         assert_eq!(items[0].1.title, format!("token=at-1 key=key-{T0}"));
     }
@@ -1026,7 +1179,7 @@ mod tests {
             return;
         };
         let id = "dev.zeima.ics-calendar";
-        assert!(f.addons.tick(T0).await);
+        assert!(f.addons.tick(T0, chrono_tz::UTC).await);
         assert_eq!(f.addons.error(id), None);
         let request = sdk::TimelineRequest {
             range: sdk::Range {
@@ -1191,5 +1344,167 @@ mod tests {
                 "1:30 h worked".to_string()
             )]
         );
+    }
+
+    const DIGEST: &str = "dev.zeima.day-digest";
+    const DIGEST_PERMISSIONS: [Permission; 5] = [
+        Permission::MeetingsRead,
+        Permission::AbsencesRead,
+        Permission::WorkRead,
+        Permission::ActivitiesRead,
+        Permission::Notify,
+    ];
+
+    #[tokio::test]
+    async fn the_newer_host_calls_need_their_permissions() {
+        let Some(f) = load("dev.zeima.day-digest-1.0.0.zip", &[Permission::Notify]).await else {
+            return;
+        };
+        assert!(f.addons.tick(T0, chrono_tz::UTC).await);
+        let error = f.addons.error(DIGEST).unwrap();
+        assert!(error.contains("permission 'work:read'"), "{error}");
+        assert!(f.notifications.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn day_digest_tells_what_the_day_holds_once_a_day() {
+        let Some(f) = load("dev.zeima.day-digest-1.0.0.zip", &DIGEST_PERMISSIONS).await else {
+            return;
+        };
+        // A working week with 8 hours a day, Monday to Friday.
+        let day = |minutes| zeima_core::worktime::DayPlan {
+            target_minutes: minutes,
+            core_start: None,
+            core_end: None,
+        };
+        f.core
+            .save_schedule(
+                None,
+                zeima_core::WorkScheduleInput {
+                    valid_from: "2026-01-01".parse().unwrap(),
+                    model: zeima_core::worktime::ScheduleModel::Fixed,
+                    days: vec![day(480), day(480), day(480), day(480), day(480), day(0), day(0)],
+                },
+            )
+            .await
+            .unwrap();
+        // A morning off.
+        let types = f.core.list_absence_types().await.unwrap();
+        let vacation = types
+            .iter()
+            .find(|t| t.key.as_deref() == Some("vacation"))
+            .unwrap();
+        f.core
+            .save_absence(
+                None,
+                zeima_core::model::AbsenceInput {
+                    type_id: vacation.id.clone(),
+                    start_date: "2026-10-05".parse().unwrap(),
+                    end_date: "2026-10-05".parse().unwrap(),
+                    half_day: Some(zeima_core::model::HalfDay::Am),
+                    note: String::new(),
+                },
+            )
+            .await
+            .unwrap();
+        // Before the hour (06:00): nothing yet.
+        f.addons.tick(T0 - 2 * HOUR, chrono_tz::UTC).await;
+        assert_eq!(f.addons.error(DIGEST), None);
+        assert!(f.notifications.lock().unwrap().is_empty());
+
+        // From 08:00 on: one digest with the day's target (Monday, a working day).
+        assert!(f.addons.tick(T0 + 20 * 60_000, chrono_tz::UTC).await);
+        assert_eq!(f.addons.error(DIGEST), None);
+        let shown = f.notifications.lock().unwrap().clone();
+        assert_eq!(shown.len(), 1, "{shown:?}");
+        assert_eq!(shown[0].0, "Day digest · Today");
+        assert!(shown[0].1.contains("target"), "{}", shown[0].1);
+        assert!(
+            shown[0].1.contains(&format!("{} (am)", vacation.name)),
+            "{}",
+            shown[0].1
+        );
+        assert_eq!(
+            f.core
+                .addon_kv_get(DIGEST, "last_digest")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("2026-10-05")
+        );
+
+        // Later the same day: not again.
+        f.addons.tick(T0 + 5 * HOUR, chrono_tz::UTC).await;
+        assert_eq!(f.notifications.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn day_digest_reacts_to_cancelled_meetings_and_decided_absences() {
+        let Some(f) = load("dev.zeima.day-digest-1.0.0.zip", &DIGEST_PERMISSIONS).await else {
+            return;
+        };
+        f.addons
+            .dispatch_app_event(
+                "meeting.changed",
+                serde_json::json!({ "change": "cancelled", "meetingId": "m1", "meeting": { "id": "m1", "title": "Planning" } }),
+            )
+            .await;
+        f.addons
+            .dispatch_app_event(
+                "absence.changed",
+                serde_json::json!({
+                    "change": "rejected",
+                    "absenceId": "a1",
+                    "absence": { "id": "a1", "startDate": "2026-10-12", "endDate": "2026-10-16", "decisionNote": "busy week" }
+                }),
+            )
+            .await;
+        // Answers and other changes are of no interest to it.
+        f.addons
+            .dispatch_app_event(
+                "meeting.changed",
+                serde_json::json!({ "change": "answered", "meetingId": "m1", "status": "accepted" }),
+            )
+            .await;
+        assert_eq!(f.addons.error(DIGEST), None);
+        assert_eq!(
+            f.notifications.lock().unwrap().clone(),
+            vec![
+                (
+                    "Day digest · Meeting cancelled".to_string(),
+                    "Planning".to_string()
+                ),
+                (
+                    "Day digest · Absence request".to_string(),
+                    "2026-10-12 to 2026-10-16 was rejected: busy week".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn day_digest_settings_turn_the_notifications_off() {
+        let Some(f) = load_with(
+            "dev.zeima.day-digest-1.0.0.zip",
+            &DIGEST_PERMISSIONS,
+            &[("cancelled", "false"), ("decisions", "false")],
+        )
+        .await
+        else {
+            return;
+        };
+        f.addons
+            .dispatch_app_event(
+                "meeting.changed",
+                serde_json::json!({ "change": "cancelled", "meetingId": "m1", "meeting": { "title": "Planning" } }),
+            )
+            .await;
+        f.addons
+            .dispatch_app_event(
+                "absence.changed",
+                serde_json::json!({ "change": "approved", "absenceId": "a1", "absence": { "startDate": "2026-10-12", "endDate": "2026-10-12" } }),
+            )
+            .await;
+        assert!(f.notifications.lock().unwrap().is_empty());
     }
 }

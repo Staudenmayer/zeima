@@ -371,11 +371,11 @@ Delivered as first-party **addons** (§5.12), not built into the app. The addon 
 ### 5.12 Addon System
 - **Manifest** (`addon.toml`): `id, name, version, author, min_app_version, permissions[], hooks[], ui_contributions[]`
 - **Runtime**: WASM modules via **Extism**. The host exposes a capability-scoped API:
-  - read: `entries`, `projects`, `tags`, `calendar` (per permission)
+  - read: `entries`, `projects`, `activities`, `tags`, `cost-centers`, `meetings`, `absences`, `work` days (per permission)
   - write: `create_entry`, `set_tags`, `notify`
   - `http_fetch` to declared domains only
   - `kv_store` (per addon)
-- **Hooks** (event bus): `entry.started`, `entry.stopped`, `entry.created/updated/deleted`, `day.closed`, `report.export` (custom export formats), `quickswitch.suggest`, `schedule.tick`.
+- **Hooks** (event bus): `entry.started`, `entry.stopped`, `entry.created/updated/deleted`, `day.closed`, `meeting.changed` (created, updated, cancelled, answered), `absence.changed` (created, updated, deleted, approved, rejected), `report.export` (custom export formats), `quickswitch.suggest`, `schedule.tick` (with the user's local date and time), `timeline.events`. Developer guide: `docs/addons.md`.
 - **UI contributions** (v2): settings panel (declarative JSON form schema), dashboard widget (declarative chart spec), report export format. No arbitrary HTML/JS in v1, for security.
 - **Distribution**: local install from file in v1. Later a signed registry, and orgs can allowlist addons.
 - First-party addons to prove the API: calendars (§5.7, the first ones), Jira/GitHub issue linking, configurable CSV export format, Timeular BLE tracker, office Wi-Fi detection.

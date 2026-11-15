@@ -4,7 +4,7 @@
 use chrono::NaiveDate;
 use serde::Serialize;
 use specta::Type;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use zeima_core::jurisdiction::{self, ProfileInfo};
 use zeima_core::model::{
     Absence, AbsenceInput, AbsenceType, AbsenceTypeInput, BalanceAdjustment, BalanceAdjustmentInput,
@@ -126,6 +126,17 @@ pub async fn schedule_delete(app: AppHandle, state: State<'_, AppState>, id: Str
 // Absences
 // --------------------------------------------------------------------------
 
+/// Tells the addons that listen to `hook` (`meeting.changed`, `absence.changed`) what happened
+/// on this device; it does not wait for them.
+fn addon_event(app: &AppHandle, hook: &'static str, fields: serde_json::Value) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        app.state::<crate::addons::Addons>()
+            .dispatch_app_event(hook, fields)
+            .await;
+    });
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn absence_type_list(state: State<'_, AppState>) -> CmdResult<Vec<AbsenceType>> {
@@ -193,8 +204,14 @@ pub async fn absence_save(
     id: Option<String>,
     input: AbsenceInput,
 ) -> CmdResult<Absence> {
+    let created = id.is_none();
     let absence = state.data().save_absence(id.as_deref(), input).await?;
     work_changed(&app).await;
+    addon_event(
+        &app,
+        "absence.changed",
+        serde_json::json!({ "change": if created { "created" } else { "updated" }, "absenceId": absence.id, "absence": absence }),
+    );
     Ok(absence)
 }
 
@@ -203,6 +220,11 @@ pub async fn absence_save(
 pub async fn absence_delete(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state.data().delete_absence(&id).await?;
     work_changed(&app).await;
+    addon_event(
+        &app,
+        "absence.changed",
+        serde_json::json!({ "change": "deleted", "absenceId": id }),
+    );
     Ok(())
 }
 
@@ -364,6 +386,11 @@ pub async fn absence_decide(
 ) -> CmdResult<Absence> {
     let absence = state.data().decide_absence(&id, approve, &note).await?;
     work_changed(&app).await;
+    addon_event(
+        &app,
+        "absence.changed",
+        serde_json::json!({ "change": if approve { "approved" } else { "rejected" }, "absenceId": absence.id, "absence": absence }),
+    );
     Ok(absence)
 }
 
@@ -573,6 +600,11 @@ pub async fn meeting_create(
 ) -> CmdResult<zeima_core::Meeting> {
     let meeting = state.data().create_meeting(input).await?;
     changed(&app, &[DataKind::Timeline]).await;
+    addon_event(
+        &app,
+        "meeting.changed",
+        serde_json::json!({ "change": "created", "meetingId": meeting.id, "meeting": meeting }),
+    );
     Ok(meeting)
 }
 
@@ -586,6 +618,11 @@ pub async fn meeting_update(
 ) -> CmdResult<zeima_core::Meeting> {
     let meeting = state.data().update_meeting(&id, input).await?;
     changed(&app, &[DataKind::Timeline]).await;
+    addon_event(
+        &app,
+        "meeting.changed",
+        serde_json::json!({ "change": "updated", "meetingId": meeting.id, "meeting": meeting }),
+    );
     Ok(meeting)
 }
 
@@ -598,6 +635,11 @@ pub async fn meeting_cancel(
 ) -> CmdResult<zeima_core::Meeting> {
     let meeting = state.data().cancel_meeting(&id).await?;
     changed(&app, &[DataKind::Timeline]).await;
+    addon_event(
+        &app,
+        "meeting.changed",
+        serde_json::json!({ "change": "cancelled", "meetingId": meeting.id, "meeting": meeting }),
+    );
     Ok(meeting)
 }
 
@@ -616,6 +658,11 @@ pub async fn meeting_respond(
         .respond_to_meeting(&id, status, occurrence_at.map(|ms| ms as i64))
         .await?;
     changed(&app, &[DataKind::Timeline]).await;
+    addon_event(
+        &app,
+        "meeting.changed",
+        serde_json::json!({ "change": "answered", "meetingId": id, "status": response.status, "occurrenceAt": response.occurrence_at }),
+    );
     Ok(response)
 }
 
@@ -630,6 +677,11 @@ pub async fn meeting_respond_clear(
 ) -> CmdResult<()> {
     state.data().clear_date_answer(&id, occurrence_at as i64).await?;
     changed(&app, &[DataKind::Timeline]).await;
+    addon_event(
+        &app,
+        "meeting.changed",
+        serde_json::json!({ "change": "answerCleared", "meetingId": id, "occurrenceAt": occurrence_at as i64 }),
+    );
     Ok(())
 }
 
