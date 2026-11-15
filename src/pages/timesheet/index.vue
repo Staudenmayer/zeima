@@ -4,8 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useStorage } from '@vueuse/core'
-import { CalendarDays, ChevronDown, UserPlus, ChevronLeft, ChevronRight, Clock, Copy, List, Pencil, Play, Plus, Scissors, Trash2, X } from '@lucide/vue'
-import { commands, events, type Absence, type AddonTimelineItem, type EntryPatch, type TimeEntry } from '@/bindings'
+import { Check, CircleAlert, CircleCheck, CircleHelp, CircleX, CalendarDays, ChevronDown, UserPlus, ChevronLeft, ChevronRight, Clock, Copy, List, Pencil, Play, Plus, Scissors, Trash2, X } from '@lucide/vue'
+import { commands, events, type Absence, type AddonTimelineItem, type EntryPatch, type Meeting, type MeetingOccurrence, type RsvpStatus, type TimeEntry } from '@/bindings'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
@@ -48,6 +48,8 @@ import { call, errorMessage } from '@/lib/ipc'
 import { HOUR, addDays, dayRange, daysBetween, fromInputs, getTimeZone, startOfDay, toDateInput, toTimeInput, weekDays } from '@/lib/time'
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import MeetingPopover from '@/components/time/MeetingPopover.vue'
+import type { MeetingState } from '@/lib/meetingStatus'
+import MeetingDialog from '@/components/time/MeetingDialog.vue'
 import MeetingDetailsDialog from '@/components/time/MeetingDetailsDialog.vue'
 import TableToolbar from '@/components/time/TableToolbar.vue'
 import { useActivitiesStore } from '@/stores/activities'
@@ -138,6 +140,88 @@ const absenceItems = computed<AddonTimelineItem[]>(() =>
 const isAbsence = (i: AddonTimelineItem) => i.addonId === ABSENCES
 const router = useRouter()
 
+// ---------------------------------------------------------------- meetings
+// The meetings of the range (organization workspaces): the answer of the person and what repeats.
+// They are on the timeline already (except the ones declined: the table shows those dimmed).
+const MEETINGS = 'zeima.meetings'
+const occurrences = ref(new Map<string, MeetingOccurrence>())
+let occurrenceRequest = 0
+async function loadOccurrences() {
+  const mine = ++occurrenceRequest
+  if (!workspaces.inOrg) {
+    occurrences.value = new Map()
+    return
+  }
+  try {
+    const list = await call(commands.meetingsList(toDateInput(range.value.from), toDateInput(range.value.to - 1)))
+    if (mine === occurrenceRequest) occurrences.value = new Map(list.map((o) => [`${o.meeting.id}@${o.startAt}`, o]))
+  } catch {
+    if (mine === occurrenceRequest) occurrences.value = new Map()
+  }
+}
+watch([range, () => workspaces.active?.id], loadOccurrences, { immediate: true, deep: true })
+const unlistenMeetings = events.dataChanged.listen((e) => {
+  if (e.payload.kinds.includes('timeline')) void loadOccurrences()
+})
+onScopeDispose(() => void unlistenMeetings.then((fn) => fn()))
+
+const myId = computed(() => account.status.user?.id ?? '')
+const occOf = (item: AddonTimelineItem) => (item.addonId === MEETINGS ? occurrences.value.get(item.id) : undefined)
+/** The person is asked to the meeting (not its organizer) and it is still on. */
+const isAsked = (o: MeetingOccurrence) => !o.meeting.cancelled && o.meeting.attendeeIds.includes(myId.value)
+const isMine = (o: MeetingOccurrence | undefined) => !!o && o.meeting.userId === myId.value && !o.meeting.cancelled
+const declined = (item: AddonTimelineItem) => occOf(item)?.myStatus === 'declined'
+/** How a meeting looks in the calendar: the organizer's counts as accepted. */
+const meetingState = (item: AddonTimelineItem): MeetingState | null => {
+  const o = occOf(item)
+  return o ? (o.meeting.userId === myId.value ? 'accepted' : (o.myStatus ?? 'none')) : null
+}
+/** The calendar shows declined meetings too, dimmed, so each answer is told apart. */
+const calendarEvents = computed(() => [...shownTimeline.value, ...declinedItems.value])
+const STATUS_ICON = { accepted: CircleCheck, tentative: CircleHelp, declined: CircleX, none: CircleAlert } as const
+const STATUS_COLOR = { accepted: 'text-green-600', tentative: 'text-amber-500', declined: 'text-destructive', none: 'text-muted-foreground' } as const
+const statusKey = (o: MeetingOccurrence): keyof typeof STATUS_ICON => (o.meeting.userId === myId.value ? 'accepted' : (o.myStatus ?? 'none'))
+const statusTitle = (o: MeetingOccurrence) => {
+  const key = statusKey(o)
+  return t('meetings.answerMenu', { answer: key === 'none' ? t('meetings.noAnswer') : t(`meetings.answers.${key}`) })
+}
+/** What the menu offers: an answer for this date (or the one meeting) and, for a repeating one, for all dates. */
+function answerChoices(o: MeetingOccurrence) {
+  const order: RsvpStatus[] = ['accepted', 'tentative', 'declined']
+  const repeats = !!o.meeting.rrule
+  return [
+    ...order.map((s) => ({ key: s, status: s, all: false, label: t(`meetings.${repeats ? 'answerThis' : 'answerOne'}.${s}`), current: o.myStatus === s && (!repeats || o.myDateAnswer) })),
+    ...(repeats ? order.map((s) => ({ key: `all-${s}`, status: s, all: true, label: t(`meetings.answerAll.${s}`), current: o.myStatus === s && !o.myDateAnswer })) : []),
+  ]
+}
+async function answerMeeting(o: MeetingOccurrence, status: RsvpStatus, all: boolean) {
+  try {
+    await call(commands.meetingRespond(o.meeting.id, status, o.meeting.rrule && !all ? o.startAt : null))
+    // For all dates: an answer given for this date alone is taken back, so the series answer counts.
+    if (all && o.myDateAnswer) await call(commands.meetingRespondClear(o.meeting.id, o.startAt))
+    await loadOccurrences()
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
+}
+const organizerNote = (o: MeetingOccurrence) =>
+  [o.meeting.userId === myId.value ? '' : t('meetings.by', { name: org.nameOf(o.meeting.userId) || t('team.someone') }), o.meeting.rrule ? t('meetings.repeatsNote') : ''].filter(Boolean).join(' · ')
+
+// A new or changed meeting: from the add dialog (which can switch to a meeting), a drag, or a meeting's Edit.
+const mtgFormOpen = ref(false)
+const mtgEditing = ref<Meeting | null>(null)
+const mtgDraft = ref<{ startAt: number; endAt: number } | null>(null)
+const mtgItem = ref<AddonTimelineItem | null>(null)
+function openMeetingForm(m: Meeting | null, times: { startAt: number; endAt: number } | null = null, item: AddonTimelineItem | null = null) {
+  mtgItem.value = item
+  meetingOpen.value = false
+  mtgEditing.value = m
+  mtgDraft.value = times
+  mtgFormOpen.value = true
+}
+/** The open meeting is the person's own, so the details offer to change it. */
+const openedMine = computed(() => isMine(meetingItem.value ? occurrences.value.get(meetingItem.value.id) : undefined))
+
 // ---------------------------------------------------------------- filters
 // Entries, meetings and addon events are filtered alike, in every view.
 const KINDS = ['entries', 'events', 'absences'] as const
@@ -195,6 +279,30 @@ function matches(x: Filterable): boolean {
   return true
 }
 const showsKind = (kind: (typeof KINDS)[number]) => filter.value.kinds.length === 0 || filter.value.kinds.includes(kind)
+/** Declined meetings are not on the calendar; the table lists them dimmed, so the answer can be changed back. */
+const declinedItems = computed<AddonTimelineItem[]>(() =>
+  showsKind('events')
+    ? [...occurrences.value.values()]
+        .filter((o) => !o.meeting.cancelled && o.myStatus === 'declined')
+        .map((o) => ({
+          addonId: MEETINGS,
+          id: `${o.meeting.id}@${o.startAt}`,
+          title: o.meeting.title,
+          startAt: o.startAt,
+          endAt: o.endAt,
+          allDay: false,
+          detail: o.meeting.location,
+          color: '#3b82f6',
+          activityId: o.meeting.activityId,
+          projectId: o.meeting.projectId,
+          tagIds: o.meeting.tagIds,
+          billable: o.meeting.billable,
+          costCenterId: o.meeting.costCenterId,
+          note: o.meeting.title,
+        }))
+        .filter(matches)
+    : [],
+)
 const filterEntries = (list: TimeEntry[]) => (showsKind('entries') ? list.filter(matches) : [])
 const shownEntries = computed(() => filterEntries(entries.value))
 const shownTimeline = computed(() => [
@@ -281,7 +389,7 @@ const groups = computed(() =>
       totalMs: totalOf(i),
       entries: shownEntries.value.filter((e) => e.startAt >= day.from && e.startAt < day.to).reverse(),
       // Meetings and addon events of the day (as in the calendar), to track from here.
-      events: shownTimeline.value.filter((i) =>
+      events: [...shownTimeline.value, ...declinedItems.value].filter((i) =>
         isAbsence(i) ? i.startAt < day.to && i.endAt > day.from : !i.allDay && i.startAt >= day.from && i.startAt < day.to,
       ),
       // When the added people are busy that day (a meeting, an absence), not what for.
@@ -292,6 +400,15 @@ const groups = computed(() =>
       others: shownOthers.value
         .flatMap((o) => o.entries.filter((e) => e.startAt >= day.from && e.startAt < day.to).map((entry) => ({ entry, name: o.name, ...entry, person: o.name })))
         .sort((a, b) => b.entry.startAt - a.entry.startAt),
+    }))
+    // One list per day, newest first: meetings, own entries and the other people's entries by their time.
+    .map((g) => ({
+      ...g,
+      rows: [
+        ...g.events.map((item) => ({ kind: 'event' as const, key: `e/${item.addonId}/${item.id}`, item, startAt: item.startAt, endAt: item.endAt, activityId: item.activityId, projectId: item.projectId, tagIds: item.tagIds, note: item.title })),
+        ...g.entries.map((entry) => ({ kind: 'entry' as const, key: `t/${entry.id}`, entry, startAt: entry.startAt, endAt: entry.endAt, activityId: entry.activityId, projectId: entry.projectId, tagIds: entry.tagIds, note: entry.note })),
+        ...g.others.map((o) => ({ kind: 'other' as const, key: `o/${o.name}/${o.entry.id}`, o, startAt: o.entry.startAt, endAt: o.entry.endAt, activityId: o.entry.activityId, projectId: o.entry.projectId, tagIds: o.entry.tagIds, note: o.entry.note, person: o.name })),
+      ].sort((x, y) => Number(y.kind === 'event' && isAbsence(y.item)) - Number(x.kind === 'event' && isAbsence(x.item)) || y.startAt - x.startAt),
     }))
     .filter((g) => mode.value === 'day' || g.entries.length > 0 || g.events.length > 0 || g.others.length > 0 || g.busy.length > 0)
     .reverse(),
@@ -321,12 +438,28 @@ function createAt(at: number) {
   entryDialogOpen.value = true
 }
 
+/** A new entry over the time span dragged in the calendar. */
+function createRange(startAt: number, endAt: number) {
+  editing.value = null
+  draft.value = { startAt, endAt, activityId: null, projectId: null, tagIds: [], note: '' }
+  entryDialogOpen.value = true
+}
+
 /** A meeting opens its details (who takes part, what they answered); other events are tracked straight away. */
 const meetingItem = ref<AddonTimelineItem | null>(null)
 const meetingOpen = ref(false)
 const meetingAnchor = shallowRef<Anchor | null>(null)
+// A click outside closes a popover on the press, before the click arrives: a click on the card whose
+// popover was just closed must not open it again, so it acts as a toggle.
+const JUST_CLOSED_MS = 400
+let meetingClosed = { id: '', at: 0 }
+let entryClosed = { id: '', at: 0 }
+watch(meetingOpen, (open) => {
+  if (!open && meetingItem.value) meetingClosed = { id: meetingItem.value.id, at: Date.now() }
+})
 function openItem(item: AddonTimelineItem, anchor: Anchor) {
   if (item.addonId !== 'zeima.meetings') return track(item)
+  if (meetingClosed.id === item.id && Date.now() - meetingClosed.at < JUST_CLOSED_MS) return
   // A second click on the same meeting closes it.
   if (meetingOpen.value && meetingItem.value?.id === item.id) {
     meetingOpen.value = false
@@ -375,9 +508,13 @@ const popoverEntry = computed(() => entries.value.find((e) => e.id === popoverId
 const popoverAnchor = shallowRef<Anchor | null>(null)
 /** Times of the entry being dragged in the calendar, live. */
 const dragTimes = ref<{ id: string; startAt: number; endAt: number | null } | null>(null)
+watch(popoverOpen, (open) => {
+  if (!open && popoverId.value) entryClosed = { id: popoverId.value, at: Date.now() }
+})
 /** A click on a block opens its popover; a second click closes it. */
 function openPopover(e: TimeEntry, anchor: Anchor) {
   meetingOpen.value = false
+  if (entryClosed.id === e.id && Date.now() - entryClosed.at < JUST_CLOSED_MS) return
   if (popoverOpen.value && popoverId.value === e.id) {
     popoverOpen.value = false
     return
@@ -518,6 +655,9 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
   note: (r) => r.note,
   duration: (r) => (r.endAt ?? timer.now) - r.startAt,
 })
+
+/** Sorting by time also orders the days: oldest first when ascending, newest first when descending (and unsorted). */
+const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' ? [...groups.value].reverse() : groups.value))
 </script>
 
 <template>
@@ -539,7 +679,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
       <Button size="sm" variant="outline" @click="anchor = startOfDay(Date.now())">{{ $t('timesheet.today') }}</Button>
       <Button size="icon" variant="ghost" :title="$t('timesheet.next')" @click="move(1)"><ChevronRight /></Button>
     </div>
-    <Button @click="openNew()"><Plus /> {{ $t('timesheet.addEntry') }}</Button>
+    <Button @click="openNew()"><Plus /> {{ $t('timesheet.add') }}</Button>
   </PageHeader>
 
   <!-- Filters: what the calendar, the table and the totals show. -->
@@ -581,10 +721,12 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
     :entries="shownEntries"
     :total="totalOf(0)"
     :now="timer.now"
-    :events="shownTimeline"
+    :events="calendarEvents"
+    :meeting-state="meetingState"
     :others="shownOthers"
     @edit="openPopover"
     @create="createAt"
+    @create-range="createRange"
     @track="openItem"
   />
 
@@ -595,10 +737,12 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
     :entries="shownEntries"
     :totals="days.map((_, i) => totalOf(i))"
     :now="timer.now"
-    :events="shownTimeline"
+    :events="calendarEvents"
+    :meeting-state="meetingState"
     :others="shownOthers"
     @edit="openPopover"
     @create="openNew"
+    @create-range="createRange"
     @resize="resizeEntry"
     @preview="dragTimes = $event"
     @track="openItem"
@@ -633,7 +777,7 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
           <th class="w-40 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
         </tr>
       </thead>
-      <tbody v-for="group in groups" :key="group.day.from">
+      <tbody v-for="group in orderedGroups" :key="group.day.from">
         <tr class="border-b bg-muted/40">
           <th class="w-8 py-1.5 pr-0 pl-3">
             <Checkbox
@@ -655,97 +799,116 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
             </div>
           </th>
         </tr>
+        <template v-for="row in sortRows(group.rows)" :key="row.key">
         <tr
-          v-for="item in sortRows(group.events)"
-          :key="`${item.addonId}/${item.id}`"
-          class="group cursor-pointer border-b border-dashed text-muted-foreground last:border-b-0 hover:bg-muted/30"
-          :class="isAbsence(item) ? 'bg-[oklch(0.95_0.045_350)] dark:bg-[oklch(0.3_0.07_350)]' : ''"
-          :title="isAbsence(item) ? undefined : $t('timesheet.trackEvent')"
-          @click="isAbsence(item) ? router.push('/absences') : openItemInDialog(item)"
+          v-if="row.kind === 'event'"
+          class="group cursor-pointer border-b text-muted-foreground last:border-b-0 hover:bg-muted/30"
+          :class="[isAbsence(row.item) ? 'bg-[oklch(0.95_0.045_350)] dark:bg-[oklch(0.3_0.07_350)]' : '', declined(row.item) ? 'opacity-55' : '']"
+          :title="isAbsence(row.item) ? undefined : $t('timesheet.trackEvent')"
+          @click="isAbsence(row.item) ? router.push('/absences') : isMine(occOf(row.item)) ? openMeetingForm(occOf(row.item)!.meeting, null, row.item) : openItemInDialog(row.item)"
         >
           <td class="w-8 py-1.5 pr-0 pl-3" />
           <td v-if="withPeople" class="px-3 py-1.5">{{ $t('timesheet.me') }}</td>
-          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ isAbsence(item) ? $t('timesheet.allDay') : `${format.time(item.startAt)}–${format.time(item.endAt)}` }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ isAbsence(row.item) ? $t('timesheet.allDay') : `${format.time(row.item.startAt)}–${format.time(row.item.endAt)}` }}</td>
           <td class="max-w-44 px-3 py-1.5">
-            <ActivityLabel v-if="item.activityId" :activity="activities.byId.get(item.activityId)" />
+            <ActivityLabel v-if="row.item.activityId" :activity="activities.byId.get(row.item.activityId)" />
             <span v-else>–</span>
           </td>
           <td class="max-w-56 px-3 py-1.5">
-            <ProjectDot v-if="item.projectId" :project="projects.byId.get(item.projectId) ?? null" show-alias />
+            <ProjectDot v-if="row.item.projectId" :project="projects.byId.get(row.item.projectId) ?? null" show-alias />
             <span v-else>–</span>
           </td>
-          <td class="px-3 py-1.5"><TagList :ids="item.tagIds" /></td>
-          <td class="max-w-0 w-full truncate px-3 py-1.5" :title="item.detail ?? item.title">
-            <span class="font-medium text-foreground">{{ item.title }}</span><span v-if="item.detail"> · {{ item.detail }}</span>
+          <td class="whitespace-nowrap px-3 py-1.5"><TagList :ids="row.item.tagIds" /></td>
+          <td class="max-w-0 w-full truncate px-3 py-1.5" :title="row.item.detail ?? row.item.title">
+            <span class="font-medium text-foreground" :class="declined(row.item) ? 'line-through' : ''">{{ row.item.title }}</span><span v-if="row.item.detail"> · {{ row.item.detail }}</span>
+            <span v-if="occOf(row.item) && organizerNote(occOf(row.item)!)" class="ml-2 text-xs">{{ organizerNote(occOf(row.item)!) }}</span>
           </td>
-          <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ isAbsence(item) ? '–' : settings.formatDuration(item.endAt - item.startAt) }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ isAbsence(row.item) ? '–' : settings.formatDuration(row.item.endAt - row.item.startAt) }}</td>
           <td class="px-1 py-0.5" @click.stop>
-            <div v-if="!isAbsence(item)" class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-              <Button size="icon" variant="ghost" class="size-7" :title="$t('timesheet.trackEvent')" @click="track(item)"><Play /></Button>
+            <div v-if="!isAbsence(row.item)" class="flex items-center justify-end gap-1">
+              <template v-if="occOf(row.item)">
+                <DropdownMenu v-if="isAsked(occOf(row.item)!)">
+                  <DropdownMenuTrigger as-child>
+                    <Button size="icon" variant="ghost" class="size-7" :class="STATUS_COLOR[statusKey(occOf(row.item)!)]" :title="statusTitle(occOf(row.item)!)" :aria-label="statusTitle(occOf(row.item)!)">
+                      <component :is="STATUS_ICON[statusKey(occOf(row.item)!)]" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" class="min-w-52">
+                    <DropdownMenuItem v-for="a in answerChoices(occOf(row.item)!)" :key="a.key" @select="answerMeeting(occOf(row.item)!, a.status, a.all)">
+                      <span class="flex-1">{{ a.label }}</span><Check v-if="a.current" class="size-4" />
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <span v-else class="flex size-7 items-center justify-center" :class="STATUS_COLOR[statusKey(occOf(row.item)!)]" :title="statusTitle(occOf(row.item)!)"><component :is="STATUS_ICON[statusKey(occOf(row.item)!)]" class="size-4" /></span>
+              </template>
+              <div class="flex w-14 justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <Button v-if="isMine(occOf(row.item))" size="icon" variant="ghost" class="size-7" :title="$t('meetings.edit')" @click="openMeetingForm(occOf(row.item)!.meeting, null, row.item)"><Pencil /></Button>
+                <Button size="icon" variant="ghost" class="size-7" :title="$t('timesheet.trackEvent')" @click="track(row.item)"><Play /></Button>
+              </div>
             </div>
           </td>
         </tr>
         <tr
-          v-for="entry in sortRows(group.entries)"
-          :key="entry.id"
+          v-else-if="row.kind === 'entry'"
           class="group cursor-pointer border-b last:border-b-0 hover:bg-muted/30"
-          :class="selected.has(entry.id) ? 'bg-muted/50' : ''"
-          @click="openEdit(entry)"
+          :class="selected.has(row.entry.id) ? 'bg-muted/50' : ''"
+          @click="openEdit(row.entry)"
         >
           <td class="w-8 py-1.5 pr-0 pl-3" @click.stop>
             <Checkbox
               class="flex"
-              :model-value="selected.has(entry.id)"
+              :model-value="selected.has(row.entry.id)"
               :aria-label="$t('timesheet.bulk.select')"
-              @update:model-value="setSelected([entry], $event === true)"
+              @update:model-value="setSelected([row.entry], $event === true)"
             />
           </td>
           <td v-if="withPeople" class="whitespace-nowrap px-3 py-1.5">{{ $t('timesheet.me') }}</td>
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums text-muted-foreground">
-            {{ format.time(entry.startAt) }}–{{ entry.endAt === null ? '' : format.time(entry.endAt) }}
+            {{ format.time(row.entry.startAt) }}–{{ row.entry.endAt === null ? '' : format.time(row.entry.endAt) }}
             <sup
-              v-if="entry.endAt !== null && daysBetween(entry.startAt, entry.endAt) > 0"
+              v-if="row.entry.endAt !== null && daysBetween(row.entry.startAt, row.entry.endAt) > 0"
               class="text-[10px] font-medium text-foreground"
-              :title="format.day(entry.endAt)"
-            >+{{ daysBetween(entry.startAt, entry.endAt) }}</sup>
+              :title="format.day(row.entry.endAt)"
+            >+{{ daysBetween(row.entry.startAt, row.entry.endAt) }}</sup>
           </td>
           <td class="max-w-44 px-3 py-1.5">
-            <ActivityLabel :activity="entry.activityId ? activities.byId.get(entry.activityId) : null" />
+            <ActivityLabel :activity="row.entry.activityId ? activities.byId.get(row.entry.activityId) : null" />
           </td>
           <td class="max-w-56 px-3 py-1.5">
-            <ProjectDot :project="entry.projectId ? projects.byId.get(entry.projectId) : null" show-alias />
+            <ProjectDot :project="row.entry.projectId ? projects.byId.get(row.entry.projectId) : null" show-alias />
           </td>
-          <td class="px-3 py-1.5"><TagList :ids="entry.tagIds" /></td>
-          <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="entry.note">{{ entry.note }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5"><TagList :ids="row.entry.tagIds" /></td>
+          <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="row.entry.note">{{ row.entry.note }}</td>
           <td
             class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums"
-            :class="entry.endAt === null ? 'text-green-600 dark:text-green-400' : ''"
+            :class="row.entry.endAt === null ? 'text-green-600 dark:text-green-400' : ''"
           >
-            <span v-if="entry.billable" class="mr-1 text-xs font-normal text-muted-foreground" :title="$t('entry.billable')">€</span>
-            {{ settings.formatDuration(durationMs(entry)) }}
+            <span v-if="row.entry.billable" class="mr-1 text-xs font-normal text-muted-foreground" :title="$t('entry.billable')">€</span>
+            {{ settings.formatDuration(durationMs(row.entry)) }}
           </td>
           <td class="px-1 py-0.5" @click.stop>
             <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-              <Button v-if="entry.endAt !== null" size="icon" variant="ghost" class="size-7" :title="$t('timer.continue')" @click="continueEntry(entry)"><Play /></Button>
-              <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openEdit(entry)"><Pencil /></Button>
-              <Button size="icon" variant="ghost" class="size-7" :title="$t('timesheet.split')" :disabled="entry.locked" @click="openSplit(entry)"><Scissors /></Button>
-              <Button v-if="entry.endAt !== null" size="icon" variant="ghost" class="size-7" :title="$t('timesheet.duplicate')" @click="duplicate(entry)"><Copy /></Button>
-              <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" :disabled="entry.locked" @click="askDelete(entry)"><Trash2 /></Button>
+              <Button v-if="row.entry.endAt !== null" size="icon" variant="ghost" class="size-7" :title="$t('timer.continue')" @click="continueEntry(row.entry)"><Play /></Button>
+              <Button size="icon" variant="ghost" class="size-7" :title="$t('common.edit')" @click="openEdit(row.entry)"><Pencil /></Button>
+              <Button size="icon" variant="ghost" class="size-7" :title="$t('timesheet.split')" :disabled="row.entry.locked" @click="openSplit(row.entry)"><Scissors /></Button>
+              <Button v-if="row.entry.endAt !== null" size="icon" variant="ghost" class="size-7" :title="$t('timesheet.duplicate')" @click="duplicate(row.entry)"><Copy /></Button>
+              <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" :disabled="row.entry.locked" @click="askDelete(row.entry)"><Trash2 /></Button>
             </div>
           </td>
         </tr>
-        <tr v-for="o in sortRows(group.others)" :key="`${o.name}/${o.entry.id}`" class="border-b text-muted-foreground last:border-b-0">
+        <tr v-else-if="row.kind === 'other'" class="border-b text-muted-foreground last:border-b-0">
           <td class="w-8 py-1.5 pr-0 pl-3" />
-          <td class="whitespace-nowrap px-3 py-1.5 font-medium text-foreground">{{ o.name }}</td>
-          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ format.time(o.entry.startAt) }}–{{ o.entry.endAt === null ? '' : format.time(o.entry.endAt) }}</td>
-          <td class="max-w-44 px-3 py-1.5"><ActivityLabel :activity="o.entry.activityId ? activities.byId.get(o.entry.activityId) : null" /></td>
-          <td class="max-w-56 px-3 py-1.5"><ProjectDot :project="o.entry.projectId ? projects.byId.get(o.entry.projectId) : null" show-alias /></td>
-          <td class="px-3 py-1.5"><TagList :ids="o.entry.tagIds" /></td>
-          <td class="max-w-0 w-full truncate px-3 py-1.5" :title="o.entry.note">{{ o.entry.note }}</td>
-          <td class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums">{{ settings.formatDuration(durationMs(o.entry)) }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 font-medium text-foreground">{{ row.o.name }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ format.time(row.o.entry.startAt) }}–{{ row.o.entry.endAt === null ? '' : format.time(row.o.entry.endAt) }}</td>
+          <td class="max-w-44 px-3 py-1.5"><ActivityLabel :activity="row.o.entry.activityId ? activities.byId.get(row.o.entry.activityId) : null" /></td>
+          <td class="max-w-56 px-3 py-1.5"><ProjectDot :project="row.o.entry.projectId ? projects.byId.get(row.o.entry.projectId) : null" show-alias /></td>
+          <td class="whitespace-nowrap px-3 py-1.5"><TagList :ids="row.o.entry.tagIds" /></td>
+          <td class="max-w-0 w-full truncate px-3 py-1.5" :title="row.o.entry.note">{{ row.o.entry.note }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums">{{ settings.formatDuration(durationMs(row.o.entry)) }}</td>
           <td class="px-1 py-0.5" />
         </tr>
-        <tr v-for="b in group.busy" :key="`${b.name}/${b.kind}/${b.from}`" class="border-b border-dashed text-muted-foreground last:border-b-0" :class="b.kind === 'absence' ? 'bg-[oklch(0.95_0.045_350)] dark:bg-[oklch(0.3_0.07_350)]' : ''">
+        </template>
+        <tr v-for="b in group.busy" :key="`${b.name}/${b.kind}/${b.from}`" class="border-b text-muted-foreground last:border-b-0" :class="b.kind === 'absence' ? 'bg-[oklch(0.95_0.045_350)] dark:bg-[oklch(0.3_0.07_350)]' : ''">
           <td class="w-8 py-1.5 pr-0 pl-3" />
           <td class="whitespace-nowrap px-3 py-1.5 font-medium text-foreground">{{ b.name }}</td>
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ b.kind === 'absence' ? $t('timesheet.allDay') : `${format.time(Math.max(b.from, group.day.from))}–${format.time(Math.min(b.to, group.day.to))}` }}</td>
@@ -855,7 +1018,8 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
     @delete="askDelete"
     @more="openEdit"
   />
-  <EntryDialog v-model:open="entryDialogOpen" :entry="editing" :day="newEntryDay" :draft="draft" />
+  <EntryDialog v-model:open="entryDialogOpen" :entry="editing" :day="newEntryDay" :draft="draft" @meeting="openMeetingForm(null, $event)" />
+  <MeetingDialog v-model:open="mtgFormOpen" :meeting="mtgEditing" :draft="mtgDraft" :track-item="mtgItem" @saved="loadOccurrences" @track="track" />
   <ConfirmDialog v-model:open="confirmOpen" :title="$t('timesheet.deleteConfirm')" @confirm="confirmDelete" />
   <ConfirmDialog
     v-model:open="bulkDeleteOpen"
@@ -879,6 +1043,6 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
       </form>
     </DialogContent>
   </Dialog>
-  <MeetingDetailsDialog v-model:open="meetingDialogOpen" :item="meetingItem" @track="track" />
-  <MeetingPopover v-model:open="meetingOpen" :item="meetingItem" :reference="meetingAnchor" @track="track" />
+  <MeetingDetailsDialog v-model:open="meetingDialogOpen" :item="meetingItem" :can-edit="openedMine" @edit="openMeetingForm($event, null, meetingItem)" @answered="loadOccurrences" @track="track" />
+  <MeetingPopover v-model:open="meetingOpen" :item="meetingItem" :reference="meetingAnchor" :can-edit="openedMine" @edit="openMeetingForm($event, null, meetingItem)" @answered="loadOccurrences" @track="track" />
 </template>

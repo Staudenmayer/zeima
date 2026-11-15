@@ -536,6 +536,24 @@ impl Core {
         rows.iter().map(absence_from_row).collect()
     }
 
+    /// Rejected absences of the other people of this workspace overlapping
+    /// `[from, to]` (the ones this device holds: those of the people the person decides for).
+    pub async fn list_others_rejected(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Absence>> {
+        let rows = sqlx::query(
+            "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note, decided_by, decision_note FROM absence
+             WHERE workspace_id = ? AND user_id <> ? AND status = 'rejected' AND deleted_at IS NULL
+               AND start_date <= ? AND end_date >= ?
+             ORDER BY start_date",
+        )
+        .bind(&self.ctx().workspace_id)
+        .bind(&self.ctx().user_id)
+        .bind(to)
+        .bind(from)
+        .fetch_all(self.pool())
+        .await?;
+        rows.iter().map(absence_from_row).collect()
+    }
+
     pub async fn save_absence(&self, id: Option<&str>, input: AbsenceInput) -> Result<Absence> {
         let input = input.normalized()?;
         let mut tx = self.begin().await?;

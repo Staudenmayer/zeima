@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import type { AddonTimelineItem } from '@/bindings'
+import type { AddonTimelineItem, Meeting } from '@/bindings'
 import MeetingDetails from '@/components/time/MeetingDetails.vue'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import type { Anchor } from '@/lib/anchor'
 
 // A meeting of the timesheet opened next to where it was clicked, like an
 // entry: who takes part and what each answered, your own answer, and tracking it.
-defineProps<{ item: AddonTimelineItem | null; reference: Anchor | null }>()
+defineProps<{ item: AddonTimelineItem | null; reference: Anchor | null; canEdit?: boolean }>()
 const open = defineModel<boolean>('open', { required: true })
-const emit = defineEmits<{ track: [item: AddonTimelineItem]; answered: [] }>()
+const emit = defineEmits<{ track: [item: AddonTimelineItem]; edit: [meeting: Meeting]; answered: [] }>()
 </script>
 
 <template>
@@ -23,7 +23,7 @@ const emit = defineEmits<{ track: [item: AddonTimelineItem]; answered: [] }>()
       class="max-h-(--reka-popover-content-available-height) w-80 overflow-x-hidden overflow-y-auto p-3"
       @open-auto-focus.prevent
     >
-      <MeetingDetails :item="item" :active="open" heading @track="emit('track', $event)" @answered="emit('answered')" @close="open = false" />
+      <MeetingDetails :item="item" :active="open" heading :can-edit="canEdit" quick-edit @edit="emit('edit', $event)" @track="emit('track', $event)" @answered="emit('answered')" @close="open = false" />
     </PopoverContent>
   </Popover>
 </template>

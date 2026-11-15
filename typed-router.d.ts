@@ -59,13 +59,6 @@ declare module 'vue-router/auto-routes' {
       Record<never, never>,
       | never
     >,
-    '/approvals/': RouteRecordInfo<
-      '/approvals/',
-      '/approvals',
-      Record<never, never>,
-      Record<never, never>,
-      | never
-    >,
     '/cost-centers/': RouteRecordInfo<
       '/cost-centers/',
       '/cost-centers',
@@ -83,13 +76,6 @@ declare module 'vue-router/auto-routes' {
     '/locations/': RouteRecordInfo<
       '/locations/',
       '/locations',
-      Record<never, never>,
-      Record<never, never>,
-      | never
-    >,
-    '/meetings/': RouteRecordInfo<
-      '/meetings/',
-      '/meetings',
       Record<never, never>,
       Record<never, never>,
       | never
@@ -230,14 +216,6 @@ declare module 'vue-router/auto-routes' {
       pathParamNames:
         | never
     }
-    'src/pages/approvals/index.vue': {
-      routes:
-        | '/approvals/'
-      views:
-        | never
-      pathParamNames:
-        | never
-    }
     'src/pages/cost-centers/index.vue': {
       routes:
         | '/cost-centers/'
@@ -257,14 +235,6 @@ declare module 'vue-router/auto-routes' {
     'src/pages/locations/index.vue': {
       routes:
         | '/locations/'
-      views:
-        | never
-      pathParamNames:
-        | never
-    }
-    'src/pages/meetings/index.vue': {
-      routes:
-        | '/meetings/'
       views:
         | never
       pathParamNames:

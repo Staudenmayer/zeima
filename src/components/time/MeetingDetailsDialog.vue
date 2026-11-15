@@ -11,9 +11,9 @@ defineEmits<{ track: [item: AddonTimelineItem]; edit: [meeting: Meeting]; answer
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent :aria-describedby="undefined" class="sm:max-w-md">
-      <DialogHeader><DialogTitle>{{ item?.title }}</DialogTitle></DialogHeader>
-      <MeetingDetails :item="item" :active="open" :can-track="canTrack" :can-edit="canEdit" @track="$emit('track', $event)" @edit="$emit('edit', $event)" @answered="$emit('answered')" @close="open = false" />
+    <DialogContent :aria-describedby="undefined" :show-close-button="false" class="sm:max-w-md">
+      <DialogHeader class="sr-only"><DialogTitle>{{ item?.title }}</DialogTitle></DialogHeader>
+      <MeetingDetails :item="item" :active="open" :can-track="canTrack" :can-edit="canEdit" quick-edit heading floating @track="$emit('track', $event)" @edit="$emit('edit', $event)" @answered="$emit('answered')" @close="open = false" />
     </DialogContent>
   </Dialog>
 </template>

@@ -2,6 +2,7 @@
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Building, CalendarCheck, ChevronLeft, ChevronRight, Home, MapPinned, Plane, Plus, Settings2 } from '@lucide/vue'
 import { commands, type LocationKind, type LocationPattern, type WorkLocation } from '@/bindings'
 import { Button } from '@/components/ui/button'
@@ -125,14 +126,16 @@ const today = computed(() => iso(Date.now()))
 
 <template>
   <PageHeader :title="$t('nav.locations')">
-    <div class="flex flex-wrap items-center gap-1">
-      <div class="mr-2 flex gap-1">
-        <Button size="sm" :variant="view === 'week' ? 'default' : 'outline'" @click="view = 'week'">{{ $t('locations.week') }}</Button>
-        <Button size="sm" :variant="view === 'month' ? 'default' : 'outline'" @click="view = 'month'">{{ $t('locations.month') }}</Button>
-      </div>
-      <Button size="icon" variant="outline" :title="$t('locations.previous')" @click="move(-1)"><ChevronLeft /></Button>
+    <Tabs v-model="view">
+      <TabsList>
+        <TabsTrigger value="week">{{ $t('locations.week') }}</TabsTrigger>
+        <TabsTrigger value="month">{{ $t('locations.month') }}</TabsTrigger>
+      </TabsList>
+    </Tabs>
+    <div class="flex items-center">
+      <Button size="icon" variant="ghost" :title="$t('locations.previous')" @click="move(-1)"><ChevronLeft /></Button>
       <Button size="sm" variant="outline" @click="weekStart = startOfWeek(Date.now())">{{ $t('locations.today') }}</Button>
-      <Button size="icon" variant="outline" :title="$t('locations.next')" @click="move(1)"><ChevronRight /></Button>
+      <Button size="icon" variant="ghost" :title="$t('locations.next')" @click="move(1)"><ChevronRight /></Button>
     </div>
   </PageHeader>
 

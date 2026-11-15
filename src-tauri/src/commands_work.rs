@@ -174,6 +174,17 @@ pub async fn absence_list_others(
     Ok(state.data().list_others_absences(from, to).await?)
 }
 
+/// Rejected absences of the other people (what this device holds of them).
+#[tauri::command]
+#[specta::specta]
+pub async fn absence_list_rejected_others(
+    state: State<'_, AppState>,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> CmdResult<Vec<Absence>> {
+    Ok(state.data().list_others_rejected(from, to).await?)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn absence_save(

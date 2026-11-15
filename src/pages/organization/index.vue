@@ -3,7 +3,7 @@ import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { Building2, MailPlus, Pencil, Plus, Trash2, UserMinus, UserX, UserCheck, X } from '@lucide/vue'
+import { Building2, Pencil, Plus, Trash2, UserMinus, UserX, UserCheck, X } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -388,7 +388,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(shownAudit, {
 
 <template>
   <PageHeader :title="$t('nav.organization')">
-    <Button v-if="org.info && canInvite" @click="inviteOpen = true"><MailPlus /> {{ $t('org.invite') }}</Button>
+    <Button v-if="org.info && canInvite" @click="inviteOpen = true"><Plus /> {{ $t('org.invite') }}</Button>
   </PageHeader>
 
   <EmptyState v-if="!account.status.signedIn" :icon="Building2" :text="$t('org.signedOut')">

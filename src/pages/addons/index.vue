@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { AlertTriangle, CircleCheck, Globe, KeyRound, Loader2, PackagePlus, Puzzle, Settings2, Trash2 } from '@lucide/vue'
+import { AlertTriangle, CircleCheck, Globe, KeyRound, Loader2, Plus, Puzzle, Settings2, Trash2 } from '@lucide/vue'
 import { commands, type AddonInfo, type AddonPackage, type OAuthProvider } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -135,11 +135,11 @@ async function remove() {
 
 <template>
   <PageHeader :title="$t('nav.addons')">
-    <Button @click="pick"><PackagePlus /> {{ $t('addons.installFromFile') }}</Button>
+    <Button @click="pick"><Plus /> {{ $t('addons.installFromFile') }}</Button>
   </PageHeader>
 
   <EmptyState v-if="addons.length === 0" :icon="Puzzle" :text="$t('addons.empty')">
-    <Button variant="outline" @click="pick"><PackagePlus /> {{ $t('addons.installFromFile') }}</Button>
+    <Button variant="outline" @click="pick"><Plus /> {{ $t('addons.installFromFile') }}</Button>
   </EmptyState>
 
   <div v-else class="grid max-w-4xl gap-3">

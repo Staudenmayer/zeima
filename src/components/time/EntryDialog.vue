@@ -11,6 +11,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { type EntryDraft, useEntryForm } from '@/composables/useEntryForm'
 import { useActivitiesStore } from '@/stores/activities'
 import { useCostCentersStore } from '@/stores/costCenters'
+import { useWorkspaceStore } from '@/stores/workspace'
+import { fromInputs } from '@/lib/time'
 import ActivitySelect from './ActivitySelect.vue'
 import CostCenterSelect from './CostCenterSelect.vue'
 import ProjectSelect from './ProjectSelect.vue'
@@ -24,7 +26,9 @@ const props = defineProps<{
   /** Values for a new entry, e.g. from a calendar event. */
   draft?: EntryDraft | null
 }>()
+const emit = defineEmits<{ /** "Meeting" was chosen: the times so far, for the meeting dialog. */ meeting: [times: { startAt: number; endAt: number }] }>()
 const open = defineModel<boolean>('open', { required: true })
+const workspaces = useWorkspaceStore()
 
 const activities = useActivitiesStore()
 const costCenters = useCostCentersStore()
@@ -35,6 +39,15 @@ const { activityId, activityMissing, projectId, tagIds, date, endDate, start, en
 watch(open, (isOpen) => {
   if (isOpen) reset()
 })
+
+/** In an organization a new item can be a meeting too: the switch hands the times over to the meeting dialog. */
+function toMeeting() {
+  const startAt = fromInputs(date.value, start.value)
+  let endAt = fromInputs(date.value, end.value)
+  if (Number.isNaN(endAt) || endAt <= startAt) endAt = startAt + 3_600_000
+  open.value = false
+  emit('meeting', { startAt: Number.isNaN(startAt) ? Date.now() : startAt, endAt })
+}
 
 async function save() {
   if (await saveForm()) open.value = false
@@ -48,6 +61,10 @@ async function save() {
         <DialogTitle>{{ entry ? $t('timesheet.editEntry') : $t('timesheet.addEntry') }}</DialogTitle>
       </DialogHeader>
       <form class="grid gap-4" @submit.prevent="save">
+        <div v-if="!entry && workspaces.inOrg" role="group" :aria-label="$t('timesheet.whatToAdd')" class="inline-flex gap-0.5 justify-self-start rounded-lg bg-muted p-0.5">
+          <Button type="button" size="sm" variant="outline" class="h-7" aria-pressed="true">{{ $t('timesheet.addKindEntry') }}</Button>
+          <Button type="button" size="sm" variant="ghost" class="h-7" aria-pressed="false" @click="toMeeting">{{ $t('timesheet.addKindMeeting') }}</Button>
+        </div>
         <div class="grid gap-2">
           <Label>{{ $t('entry.activity') }}</Label>
           <ActivitySelect v-model="activityId" :invalid="activityMissing" />

@@ -8,11 +8,11 @@ const list = computed(() => props.ids.map((id) => tags.byId.get(id)).filter((t) 
 </script>
 
 <template>
-  <span class="inline-flex flex-wrap gap-1">
+  <span class="inline-flex flex-nowrap gap-1 whitespace-nowrap">
     <span
       v-for="tag in list"
       :key="tag.id"
-      class="rounded-full px-2 py-px text-[11px] leading-4 text-white"
+      class="shrink-0 rounded-full px-2 py-px text-[11px] leading-4 text-white"
       :style="{ backgroundColor: tag.color }"
     >{{ tag.name }}</span>
   </span>

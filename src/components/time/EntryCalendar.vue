@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { useElementSize } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import type { AddonTimelineItem, TimeEntry } from '@/bindings'
@@ -8,6 +8,7 @@ import { type Anchor, pointAnchor } from '@/lib/anchor'
 import type { PersonDay } from '@/lib/busy'
 import { textOn } from '@/lib/colors'
 import { layoutLanes, type Lanes } from '@/lib/lanes'
+import { type MeetingState, meetingLook } from '@/lib/meetingStatus'
 import { HOUR, fromInputs, toDateInput, type DayRange } from '@/lib/time'
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { useOrgStore } from '@/stores/org'
@@ -34,6 +35,8 @@ const props = defineProps<{
   /** Other people (timesheet filter bar): each gets a column of its own in
    * every day, next to the person's own. Read only. */
   others?: PersonDay[]
+  /** The person's answer to a timeline item that is a meeting (null: not a meeting), for how it looks. */
+  meetingState?: (item: AddonTimelineItem) => MeetingState | null
   /** An edge was dragged: save the new start and end (end `null` while
    * running). Resolves to whether it was saved. Bound as `@resize`. */
   onResize?: (entry: TimeEntry, startAt: number, endAt: number | null) => Promise<boolean>
@@ -44,6 +47,8 @@ const emit = defineEmits<{
   edit: [entry: TimeEntry, anchor: Anchor]
   /** Double-click on an empty slot: start of that day. */
   create: [day: number]
+  /** Dragged over an empty stretch of a day: its start and end (15-minute steps). */
+  createRange: [startAt: number, endAt: number]
   /** Times of the entry being dragged, live; `null` when the drag ends. */
   preview: [times: { id: string; startAt: number; endAt: number | null } | null]
   /** Click on a timed timeline item: create an entry from it. */
@@ -178,6 +183,52 @@ function onDragKey(event: KeyboardEvent) {
 }
 
 watch(preview, (p) => emit('preview', p))
+
+// Creating: press on an empty spot of a day and drag down to mark the time span of a new entry.
+const CREATE_SNAP_MS = 15 * 60_000
+const creating = ref<{ col: number; from: number; startAt: number; endAt: number } | null>(null)
+function timeInColumn(col: number, event: PointerEvent): number {
+  const el = columnEls[col]
+  const day = props.days[col]
+  if (!el || !day) return 0
+  const rect = el.getBoundingClientRect()
+  const y = Math.min(Math.max(event.clientY - rect.top, 0), rect.height)
+  return day.from + (y / hourPx.value) * HOUR
+}
+function startCreate(event: PointerEvent, col: number) {
+  if (event.button !== 0 || event.target !== event.currentTarget) return
+  event.preventDefault()
+  const at = timeInColumn(col, event)
+  creating.value = { col, from: at, startAt: Math.floor(at / CREATE_SNAP_MS) * CREATE_SNAP_MS, endAt: Math.floor(at / CREATE_SNAP_MS) * CREATE_SNAP_MS }
+  window.addEventListener('pointermove', onCreateMove)
+  window.addEventListener('pointerup', onCreateEnd)
+  window.addEventListener('keydown', onCreateKey)
+}
+function onCreateMove(event: PointerEvent) {
+  const c = creating.value
+  if (!c) return
+  autoScroll(event)
+  const at = timeInColumn(c.col, event)
+  const [lo, hi] = at < c.from ? [at, c.from] : [c.from, at]
+  creating.value = { ...c, startAt: Math.round(lo / CREATE_SNAP_MS) * CREATE_SNAP_MS, endAt: Math.round(hi / CREATE_SNAP_MS) * CREATE_SNAP_MS }
+}
+function stopCreating() {
+  window.removeEventListener('pointermove', onCreateMove)
+  window.removeEventListener('pointerup', onCreateEnd)
+  window.removeEventListener('keydown', onCreateKey)
+}
+function onCreateEnd() {
+  stopCreating()
+  const c = creating.value
+  creating.value = null
+  if (c && c.endAt - c.startAt >= CREATE_SNAP_MS) emit('createRange', c.startAt, c.endAt)
+}
+function onCreateKey(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  stopCreating()
+  creating.value = null
+}
+onScopeDispose(stopCreating)
 
 // The saved entry (or a failed save's reload) replaces the preview.
 watch(
@@ -336,6 +387,7 @@ function fill(color: string, fadeTop: boolean, fadeBottom: boolean): string {
 
 function eventStyle(day: DayRange, b: EventBlock) {
   const color = b.item.color ?? 'var(--muted-foreground)'
+  const state = props.meetingState?.(b.item) ?? null
   const top = y(day, b.start)
   return {
     top: `${top}px`,
@@ -343,12 +395,14 @@ function eventStyle(day: DayRange, b: EventBlock) {
     ...across(b),
     borderColor: color,
     backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)`,
+    ...(state ? meetingLook(state) : {}),
   }
 }
 
 function eventTooltip(item: AddonTimelineItem) {
   const time = item.allDay ? t('timesheet.allDay') : `${format.time(item.startAt)}–${format.time(item.endAt)}`
-  return [time, item.title, item.detail, item.allDay ? null : t('timesheet.trackEvent')].filter(Boolean).join('\n')
+  const state = props.meetingState?.(item)
+  return [time, item.title, item.detail, state ? t(`meetings.answers.${state === 'none' ? 'waiting' : state}`) : null, item.allDay ? null : t('timesheet.trackEvent')].filter(Boolean).join('\n')
 }
 
 function blockHeight(day: DayRange, b: Lanes) {
@@ -536,8 +590,16 @@ function hourLabel(h: number) {
           :ref="(el) => { if (el) columnEls[ci] = el as HTMLElement; else columnEls.length = columns.length }"
           class="relative min-w-0 flex-1 overflow-hidden border-l"
           :style="{ height: `${height}px` }"
+          :class="creating ? 'select-none' : ''"
           @dblclick.self="emit('create', col.day.from)"
+          @pointerdown="startCreate($event, ci)"
         >
+          <!-- The time span being marked for a new entry -->
+          <div
+            v-if="creating && creating.col === ci && creating.endAt - creating.startAt >= CREATE_SNAP_MS"
+            class="pointer-events-none absolute inset-x-0.5 z-[2] overflow-hidden rounded-md border border-dashed border-primary bg-primary/15 px-1.5 py-0.5 text-[11px] font-medium text-primary"
+            :style="{ top: `${y(col.day, creating.startAt)}px`, height: `${y(col.day, creating.endAt) - y(col.day, creating.startAt)}px` }"
+          >{{ format.time(creating.startAt) }}–{{ format.time(creating.endAt) }}</div>
           <div
             v-for="h in hourLabels.slice(1)"
             :key="h"
@@ -564,7 +626,7 @@ function hourLabel(h: number) {
             :aria-label="`${$t('timesheet.trackEvent')}: ${ev.item.title}`"
             @click="clickItem(ev.item, $event)"
           >
-            <span class="truncate font-medium">{{ ev.item.title }}</span>
+            <span class="truncate font-medium" :class="meetingState?.(ev.item) === 'declined' ? 'line-through' : ''">{{ ev.item.title }}</span>
             <span v-if="ev.item.detail && blockHeight(col.day, ev) >= 30" class="truncate text-muted-foreground">{{ ev.item.detail }}</span>
           </button>
           <button

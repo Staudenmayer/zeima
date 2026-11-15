@@ -77,6 +77,8 @@ export const commands = {
 	absenceList: (from: string, to: string) => typedError<Absence[], CmdError>(__TAURI_INVOKE("absence_list", { from, to })),
 	/**  Approved absences of the other people (what this device holds of them). */
 	absenceListOthers: (from: string, to: string) => typedError<Absence[], CmdError>(__TAURI_INVOKE("absence_list_others", { from, to })),
+	/**  Rejected absences of the other people (what this device holds of them). */
+	absenceListRejectedOthers: (from: string, to: string) => typedError<Absence[], CmdError>(__TAURI_INVOKE("absence_list_rejected_others", { from, to })),
 	absenceSave: (id: string | null, input: AbsenceInput) => typedError<Absence, CmdError>(__TAURI_INVOKE("absence_save", { id, input })),
 	absenceDelete: (id: string) => typedError<null, CmdError>(__TAURI_INVOKE("absence_delete", { id })),
 	vacationSummary: (year: number) => typedError<VacationSummary, CmdError>(__TAURI_INVOKE("vacation_summary", { year })),

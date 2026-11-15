@@ -2,7 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { commands, type Meeting, type MeetingInput, type Room } from '@/bindings'
+import { commands, type AddonTimelineItem, type Meeting, type MeetingInput, type Room } from '@/bindings'
+import { DoorOpen, Play, X } from '@lucide/vue'
+import RoomsDialog from './RoomsDialog.vue'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -24,8 +26,8 @@ import CostCenterSelect from './CostCenterSelect.vue'
 import ProjectSelect from './ProjectSelect.vue'
 import TagPicker from './TagPicker.vue'
 
-const props = defineProps<{ meeting: Meeting | null }>()
-const emit = defineEmits<{ saved: [] }>()
+const props = defineProps<{ meeting: Meeting | null; /** Times for a new meeting (from the timesheet's add dialog or a drag). */ draft?: { startAt: number; endAt: number } | null; /** The meeting as a timeline item: the dialog then offers to track it. */ trackItem?: AddonTimelineItem | null }>()
+const emit = defineEmits<{ saved: []; track: [item: AddonTimelineItem] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const { t } = useI18n()
@@ -41,6 +43,7 @@ const DAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
 
 const form = ref({ title: '', date: '', start: '09:00', end: '10:00', location: '', roomId: null as string | null, url: '', note: '', projectId: null as string | null, activityId: null as string | null, tagIds: [] as string[], billable: false, costCenterId: null as string | null, attendees: [] as string[], repeat: 'none' as Repeat, weekdays: [] as number[], count: 10 })
 const saving = ref(false)
+const roomsOpen = ref(false)
 const busy = ref<Record<string, { from: number; to: number; kind: string }[]>>({})
 
 const me = computed(() => account.status.user?.id ?? '')
@@ -98,12 +101,13 @@ watch(open, async (isOpen) => {
   if (!isOpen) return
   weekdaysTouched = props.meeting !== null
   const m = props.meeting
-  const day = m ? toDateInput(m.startAt) : toDateInput(Date.now() + 86_400_000)
+  const d = m ? null : (props.draft ?? null)
+  const day = m ? toDateInput(m.startAt) : d ? toDateInput(d.startAt) : toDateInput(Date.now() + 86_400_000)
   form.value = {
     title: m?.title ?? '',
     date: day,
-    start: m ? toTimeInput(m.startAt) : '09:00',
-    end: m ? toTimeInput(m.endAt) : '10:00',
+    start: m ? toTimeInput(m.startAt) : d ? toTimeInput(d.startAt) : '09:00',
+    end: m ? toTimeInput(m.endAt) : d ? toTimeInput(d.endAt) : '10:00',
     location: m?.location ?? '',
     roomId: m?.roomId ?? null,
     url: m?.onlineUrl ?? '',
@@ -166,7 +170,7 @@ const rooms = ref<Room[]>([])
 const roomBooked = ref<Set<string>>(new Set())
 let roomTicket = 0
 watch(
-  [open, startAt, endAt],
+  [open, startAt, endAt, roomsOpen],
   async () => {
     if (!open.value) return
     const mine = ++roomTicket
@@ -239,8 +243,13 @@ async function save() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent :aria-describedby="undefined" class="max-h-[90vh] overflow-y-auto sm:max-w-xl">
-      <DialogHeader><DialogTitle>{{ meeting ? $t('meetings.edit') : $t('meetings.new') }}</DialogTitle></DialogHeader>
+    <DialogContent :aria-describedby="undefined" :show-close-button="false" class="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+      <!-- Title, track and close on one line (the dialog's own close button is off so they line up). -->
+      <DialogHeader class="flex-row items-center gap-1">
+        <DialogTitle class="min-w-0 flex-1 truncate">{{ meeting ? $t('meetings.edit') : $t('meetings.new') }}</DialogTitle>
+        <Button v-if="meeting && trackItem" type="button" size="icon" variant="ghost" class="size-7" :title="$t('timesheet.trackEvent')" :aria-label="$t('timesheet.trackEvent')" @click="(open = false, emit('track', trackItem))"><Play /></Button>
+        <Button type="button" size="icon" variant="ghost" class="size-7" :title="$t('common.close')" :aria-label="$t('common.close')" @click="open = false"><X /></Button>
+      </DialogHeader>
       <form class="grid gap-4" @submit.prevent="save">
         <div class="grid gap-2"><Label for="m-title">{{ $t('meetings.title') }}</Label><Input id="m-title" v-model="form.title" required maxlength="200" autofocus /></div>
         <div class="grid grid-cols-3 gap-3">
@@ -291,7 +300,10 @@ async function save() {
              warnings go under both, so the two fields stay level. -->
         <div class="grid grid-cols-2 gap-3">
           <div class="grid gap-2">
-            <Label :for="rooms.length ? undefined : 'm-loc'">{{ $t('meetings.location') }}</Label>
+            <div class="flex items-center justify-between gap-2">
+              <Label :for="rooms.length ? undefined : 'm-loc'">{{ $t('meetings.location') }}</Label>
+              <button v-if="workspaces.can('policy.write')" type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" @click="roomsOpen = true"><DoorOpen class="size-3" /> {{ $t('meetings.rooms') }}</button>
+            </div>
             <Select v-if="rooms.length" :model-value="form.roomId ?? NO_ROOM" @update:model-value="(v) => (form.roomId = v === NO_ROOM ? null : String(v))">
               <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -331,4 +343,5 @@ async function save() {
       </form>
     </DialogContent>
   </Dialog>
+  <RoomsDialog v-model:open="roomsOpen" />
 </template>

@@ -43,7 +43,7 @@ It runs fully offline for one person. A paid tier adds sync and organization fea
 | Online users (presence) | — | — | ✅ |
 | Work-location view (office / home office) | — | — | ✅ |
 | Meetings: schedule & sync with attendees | — | — | ✅ |
-| Approvals (absences) | — | — | ✅ |
+| Approvals (absences, in the Absences table) | — | — | ✅ |
 | SSO (Entra ID / Google Workspace / SAML / LDAP via Keycloak) | — | — | ✅ (Enterprise add-on) |
 | Hosting | local only | cloud | **cloud (default)** or **self-hosted** (offline license file) |
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AddonTimelineItem, TimeEntry } from '@/bindings'
 import { useFormat } from '@/composables/useFormat'
@@ -7,6 +7,7 @@ import { type Anchor, pointAnchor } from '@/lib/anchor'
 import type { PersonDay } from '@/lib/busy'
 import { textOn } from '@/lib/colors'
 import { layoutLanes } from '@/lib/lanes'
+import { type MeetingState, meetingLook } from '@/lib/meetingStatus'
 import { HOUR, fromInputs, toDateInput, type DayRange } from '@/lib/time'
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { useOrgStore } from '@/stores/org'
@@ -31,6 +32,8 @@ const props = defineProps<{
   events?: AddonTimelineItem[]
   /** Other people's rows, in the order shown. */
   others?: PersonDay[]
+  /** The person's answer to a timeline item that is a meeting (null: not a meeting), for how it looks. */
+  meetingState?: (item: AddonTimelineItem) => MeetingState | null
 }>()
 
 const emit = defineEmits<{
@@ -38,6 +41,8 @@ const emit = defineEmits<{
   edit: [entry: TimeEntry, anchor: Anchor]
   /** Double-click on an empty spot: the full hour under the pointer. */
   create: [at: number]
+  /** Dragged over an empty stretch of the person's own row: its start and end (15-minute steps). */
+  createRange: [startAt: number, endAt: number]
   /** Click on a timed timeline item: create an entry from it. */
   track: [item: AddonTimelineItem, anchor: Anchor]
 }>()
@@ -168,7 +173,8 @@ const rows = computed(() => {
 const eventBlocks = computed(() =>
   layoutLanes(eventSegments.value).map((b) => {
     const color = b.item.color ?? 'var(--muted-foreground)'
-    return { ...b, style: { ...place(b), borderColor: color, backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)` } }
+    const state = props.meetingState?.(b.item) ?? null
+    return { ...b, style: { ...place(b), borderColor: color, backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)`, ...(state ? meetingLook(state) : {}) } }
   }),
 )
 
@@ -183,7 +189,8 @@ function tooltip(e: TimeEntry, activityName?: string, projectName?: string) {
 }
 
 function eventTooltip(item: AddonTimelineItem) {
-  return [`${format.time(item.startAt)}–${format.time(item.endAt)}`, item.title, item.detail, t('timesheet.trackEvent')]
+  const state = props.meetingState?.(item)
+  return [`${format.time(item.startAt)}–${format.time(item.endAt)}`, item.title, item.detail, state ? t(`meetings.answers.${state === 'none' ? 'waiting' : state}`) : null, t('timesheet.trackEvent')]
     .filter(Boolean)
     .join('\n')
 }
@@ -211,6 +218,51 @@ function onTrackDblClick(event: MouseEvent) {
   )
   emit('create', fromInputs(toDateInput(props.day.from), `${String(hour).padStart(2, '0')}:00`))
 }
+
+// Creating: press on an empty spot of the own row and drag sideways to mark the time span of a new entry.
+const CREATE_SNAP_MS = 15 * 60_000
+const creating = ref<{ el: HTMLElement; from: number; startAt: number; endAt: number } | null>(null)
+function timeAt(el: HTMLElement, event: PointerEvent): number {
+  const rect = el.getBoundingClientRect()
+  const f = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1)
+  return props.day.from + (shown.value.first + f * hourCount.value) * HOUR
+}
+function startCreate(event: PointerEvent) {
+  const el = event.currentTarget as HTMLElement
+  if (event.button !== 0 || event.target !== el) return
+  event.preventDefault()
+  const at = timeAt(el, event)
+  const snapped = Math.floor(at / CREATE_SNAP_MS) * CREATE_SNAP_MS
+  creating.value = { el, from: at, startAt: snapped, endAt: snapped }
+  window.addEventListener('pointermove', onCreateMove)
+  window.addEventListener('pointerup', onCreateEnd)
+  window.addEventListener('keydown', onCreateKey)
+}
+function onCreateMove(event: PointerEvent) {
+  const c = creating.value
+  if (!c) return
+  const at = timeAt(c.el, event)
+  const [lo, hi] = at < c.from ? [at, c.from] : [c.from, at]
+  creating.value = { ...c, startAt: Math.round(lo / CREATE_SNAP_MS) * CREATE_SNAP_MS, endAt: Math.round(hi / CREATE_SNAP_MS) * CREATE_SNAP_MS }
+}
+function stopCreating() {
+  window.removeEventListener('pointermove', onCreateMove)
+  window.removeEventListener('pointerup', onCreateEnd)
+  window.removeEventListener('keydown', onCreateKey)
+}
+function onCreateEnd() {
+  stopCreating()
+  const c = creating.value
+  creating.value = null
+  if (c && c.endAt - c.startAt >= CREATE_SNAP_MS) emit('createRange', c.startAt, c.endAt)
+}
+function onCreateKey(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    stopCreating()
+    creating.value = null
+  }
+}
+onScopeDispose(stopCreating)
 </script>
 
 <template>
@@ -252,7 +304,12 @@ function onTrackDblClick(event: MouseEvent) {
             </p>
             <p class="text-xs tabular-nums text-muted-foreground">{{ settings.formatDuration(row.total) }}</p>
           </div>
-          <div class="relative min-w-0 flex-1" @dblclick="row.mine && onTrackDblClick($event)">
+          <div class="relative min-w-0 flex-1" :class="creating ? 'select-none' : ''" @dblclick="row.mine && onTrackDblClick($event)" @pointerdown="row.mine && startCreate($event)">
+            <div
+              v-if="row.mine && creating && creating.endAt - creating.startAt >= CREATE_SNAP_MS"
+              class="pointer-events-none absolute inset-y-0.5 z-[2] overflow-hidden rounded-md border border-dashed border-primary bg-primary/15 px-2 py-1 text-[11px] font-medium text-primary"
+              :style="{ left: `${x(creating.startAt)}%`, width: `${x(creating.endAt) - x(creating.startAt)}%` }"
+            >{{ format.time(creating.startAt) }}–{{ format.time(creating.endAt) }}</div>
             <div
               v-for="label in hourLabels"
               :key="label.h"
@@ -270,7 +327,7 @@ function onTrackDblClick(event: MouseEvent) {
                 :aria-label="`${$t('timesheet.trackEvent')}: ${ev.item.title}`"
                 @click="clickItem(ev.item, $event)"
               >
-                <span class="truncate font-medium">{{ ev.item.title }}</span>
+                <span class="truncate font-medium" :class="meetingState?.(ev.item) === 'declined' ? 'line-through' : ''">{{ ev.item.title }}</span>
                 <span v-if="ev.item.detail" class="truncate text-muted-foreground">{{ ev.item.detail }}</span>
               </button>
             </template>
