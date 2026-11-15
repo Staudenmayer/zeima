@@ -2,9 +2,9 @@
 import { Check, CircleAlert, X, CircleCheck, CircleHelp, CircleX, ExternalLink, MapPin, Pencil, Play } from '@lucide/vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { commands, type AddonTimelineItem, type Meeting, type MeetingOccurrence, type RsvpStatus } from '@/bindings'
+import PersonPopover from '@/components/time/PersonPopover.vue'
 import MeetingQuickEdit from '@/components/time/MeetingQuickEdit.vue'
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { Button } from '@/components/ui/button'
@@ -27,7 +27,6 @@ const emit = defineEmits<{ track: [item: AddonTimelineItem]; edit: [meeting: Mee
 const format = useFormat()
 const org = useOrgStore()
 const account = useAccountStore()
-const router = useRouter()
 const projects = useProjectsStore()
 
 const occurrence = ref<MeetingOccurrence | null>(null)
@@ -117,11 +116,6 @@ async function chooseScope(only: boolean) {
     }
   }
 }
-/** A name opens the coworkers list for that person. */
-function showPerson(userId: string) {
-  emit('close')
-  void router.push({ path: '/directory', query: { user: userId } })
-}
 </script>
 
 <template>
@@ -158,10 +152,12 @@ function showPerson(userId: string) {
             <h3 class="text-xs font-medium text-muted-foreground">{{ $t('meetings.participants') }}</h3>
             <ul class="grid gap-1.5">
               <li v-for="p in participantsOf(occurrence)" :key="p.userId" class="flex items-center gap-2">
-                <button type="button" class="flex min-w-0 flex-1 items-center gap-2 text-left hover:underline" :title="$t('directory.open')" @click="showPerson(p.userId)">
-                  <UserAvatar :user-id="p.userId" size="sm" />
-                  <span class="truncate">{{ org.nameOf(p.userId) || $t('team.someone') }}</span>
-                </button>
+                <PersonPopover :user-id="p.userId">
+                  <button type="button" class="flex min-w-0 flex-1 items-center gap-2 text-left hover:underline" :title="$t('directory.showProfile')">
+                    <UserAvatar :user-id="p.userId" size="sm" />
+                    <span class="truncate">{{ org.nameOf(p.userId) || $t('team.someone') }}</span>
+                  </button>
+                </PersonPopover>
                 <span class="flex items-center gap-1.5 text-xs" :style="{ color: ANSWER_COLORS[p.answer] }">
                   <span class="size-2 rounded-full" :style="{ backgroundColor: ANSWER_COLORS[p.answer] }" />{{ $t(`meetings.answers.${p.answer}`) }}
                 </span>

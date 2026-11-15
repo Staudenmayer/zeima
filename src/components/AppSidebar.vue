@@ -12,7 +12,6 @@ import {
   Clock,
   FolderKanban,
   Building2,
-  Contact,
   Check,
   ChevronsUpDown,
   User,
@@ -77,7 +76,6 @@ const tracking = computed(() => [
   { title: t('nav.reports'), url: '/reports', icon: BarChart3 },
   { title: approvals.waiting && workspaces.inOrg && workspaces.can('absence.approve') ? `${t('nav.absences')} (${approvals.waiting})` : t('nav.absences'), url: '/absences', icon: Palmtree },
   ...(workspaces.inOrg ? [{ title: t('nav.locations'), url: '/locations', icon: MapPinned }] : []),
-  ...(workspaces.inOrg ? [{ title: t('nav.directory'), url: '/directory', icon: Contact }] : []),
   // Those who may see other people's time (their department's or all); for the rest the page would show only themselves.
   ...(workspaces.inOrg && ['group', 'org'].includes(workspaces.scopeOf('entry.read') ?? '')
     ? [{ title: t('nav.team'), url: '/team', icon: Users }]

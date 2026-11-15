@@ -761,6 +761,13 @@ export default {
     add: 'Add room',
   },
   directory: {
+    expand: 'Expand',
+    collapse: 'Collapse',
+    writeEmail: 'Write an email',
+    status: 'Status',
+    workingOn: 'Working on {project}',
+    jobDescription: 'Job description',
+    showProfile: 'Show profile',
     personal: "The coworkers are listed in an organization's workspace. Switch to one in the sidebar.",
     empty: 'Nobody here yet.',
     search: 'Search name, email, job…',

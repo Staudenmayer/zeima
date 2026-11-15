@@ -763,6 +763,13 @@ const de: typeof en = {
     add: 'Raum hinzufügen',
   },
   directory: {
+    expand: 'Aufklappen',
+    collapse: 'Zuklappen',
+    writeEmail: 'E-Mail schreiben',
+    status: 'Status',
+    workingOn: 'Arbeitet an {project}',
+    jobDescription: 'Stellenbeschreibung',
+    showProfile: 'Profil anzeigen',
     personal: 'Die Kolleginnen und Kollegen stehen im Arbeitsbereich einer Organisation. Wechsle in der Seitenleiste zu einer.',
     empty: 'Noch niemand hier.',
     search: 'Name, E-Mail, Tätigkeit suchen…',

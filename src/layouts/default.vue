@@ -15,6 +15,7 @@
       </main>
       <SetupWizard />
     </SidebarInset>
+    <OnlineSidebar v-if="workspaces.inOrg" class="hidden lg:block" />
   </SidebarProvider>
 </template>
 
@@ -24,15 +25,18 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import AppSidebar from '@/components/AppSidebar.vue'
+import OnlineSidebar from '@/components/time/OnlineSidebar.vue'
 import SetupWizard from '@/components/time/SetupWizard.vue'
 import TimerPill from '@/components/time/TimerPill.vue'
 import { Separator } from '@/components/ui/separator'
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { useUpdatesStore } from '@/stores/updates'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 const route = useRoute()
 const { t } = useI18n()
 const updates = useUpdatesStore()
+const workspaces = useWorkspaceStore()
 
 // A quiet look for a newer version shortly after the app starts. Offline, or
 // in a development build, it finds nothing and says nothing.
