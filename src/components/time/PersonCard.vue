@@ -38,10 +38,9 @@ async function mail(address: string) {
 
 <template>
   <div class="overflow-hidden rounded-[inherit] text-sm">
-    <div class="h-14 bg-gradient-to-br from-primary to-primary/55" />
-    <div class="grid gap-3 px-4 pb-4">
-      <span class="relative -mt-7 inline-flex w-fit">
-        <UserAvatar :user-id="userId" :name="name" size="lg" class="size-16 border-4 border-popover text-2xl" />
+    <div class="grid gap-3 p-4">
+      <span class="relative inline-flex w-fit">
+        <UserAvatar :user-id="userId" :name="name" size="lg" class="size-16 text-2xl" />
         <span
           class="absolute right-0.5 bottom-0.5 aspect-square size-4 rounded-full ring-[3px] ring-popover"
           :style="{ backgroundColor: PRESENCE_COLORS[state] }"

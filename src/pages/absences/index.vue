@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PersonPopover from '@/components/time/PersonPopover.vue'
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -308,7 +309,7 @@ const { sort, sorted: sortedAbsences } = useSort(filtered, {
           <tbody>
             <tr v-for="a in sortedAbsences" :key="a.id" class="group border-b last:border-b-0 hover:bg-muted/30" :class="[mine(a) ? 'cursor-pointer' : '', a.status === 'rejected' ? 'opacity-60' : '']" @click="mine(a) && open(a)">
               <td class="w-[3px] p-0" :style="{ backgroundColor: barColor(a) }" :title="$t(`absences.status.${a.status}`)" />
-              <td v-if="withPeople" class="whitespace-nowrap px-3 py-1.5 font-medium"><span class="flex items-center gap-2"><UserAvatar :user-id="mine(a) ? org.myId : a.userId" :name="personName(a)" size="sm" />{{ personName(a) }}</span></td>
+              <td v-if="withPeople" class="whitespace-nowrap px-3 py-1.5 font-medium"><PersonPopover :user-id="mine(a) ? org.myId : a.userId"><button type="button" class="flex items-center gap-2 rounded-sm text-left" @click.stop><UserAvatar :user-id="mine(a) ? org.myId : a.userId" :name="personName(a)" size="sm" />{{ personName(a) }}</button></PersonPopover></td>
               <td class="whitespace-nowrap px-3 py-1.5 font-medium tabular-nums" :class="a.status === 'rejected' ? 'line-through' : ''">{{ range(a) }}</td>
               <td class="whitespace-nowrap px-3 py-1.5">
                 <span class="flex items-center gap-2">

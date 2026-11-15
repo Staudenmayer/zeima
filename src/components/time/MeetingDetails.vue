@@ -153,7 +153,7 @@ async function chooseScope(only: boolean) {
             <ul class="grid gap-1.5">
               <li v-for="p in participantsOf(occurrence)" :key="p.userId" class="flex items-center gap-2">
                 <PersonPopover :user-id="p.userId">
-                  <button type="button" class="flex min-w-0 flex-1 items-center gap-2 text-left hover:underline" :title="$t('directory.showProfile')">
+                  <button type="button" class="flex min-w-0 flex-1 items-center gap-2 text-left" :title="$t('directory.showProfile')">
                     <UserAvatar :user-id="p.userId" size="sm" />
                     <span class="truncate">{{ org.nameOf(p.userId) || $t('team.someone') }}</span>
                   </button>

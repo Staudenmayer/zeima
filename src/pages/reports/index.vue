@@ -32,9 +32,11 @@ import { useActivitiesStore } from '@/stores/activities'
 import { useProjectsStore } from '@/stores/projects'
 import { useSettingsStore } from '@/stores/settings'
 import { useTagsStore } from '@/stores/tags'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { useTimerStore } from '@/stores/timer'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
+import TeamReport from '@/components/time/TeamReport.vue'
 import TableToolbar from '@/components/time/TableToolbar.vue'
 import { useTableSearch } from '@/composables/useTableSearch'
 
@@ -49,6 +51,11 @@ const tags = useTagsStore()
 const costCenters = useCostCentersStore()
 const timer = useTimerStore()
 const labels = useReportLabels()
+const workspaces = useWorkspaceStore()
+// Those who may see other people's time (their department's or all); for the rest the view would show only themselves.
+const canSeeTeam = computed(() => workspaces.inOrg && ['group', 'org'].includes(workspaces.scopeOf('entry.read') ?? ''))
+// A remembered Team view is gone with the permission (or in another workspace).
+watch(canSeeTeam, (ok) => { if (!ok && state.value.view === 'team') state.value.view = 'summary' }, { immediate: true })
 
 const presets: PeriodPreset[] = ['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth', 'thisYear', 'lastYear']
 const groups: ReportGroup[] = ['activity', 'project', 'tag', 'costCenter', 'billable', 'day', 'week', 'month']
@@ -66,7 +73,7 @@ const state = useStorage('reports.state', {
   billable: 'all' as 'all' | 'yes' | 'no',
   group1: 'project' as ReportGroup,
   group2: NONE as ReportGroup | typeof NONE,
-  view: 'summary' as 'summary' | 'entries',
+  view: 'summary' as 'summary' | 'entries' | 'team',
 }, undefined, { mergeDefaults: true })
 
 const range = computed(() => {
@@ -229,7 +236,7 @@ const { sort: entrySort, sorted: sortedEntries } = useSort(shownEntries, {
 
 <template>
   <PageHeader :title="$t('nav.reports')">
-    <DropdownMenu>
+    <DropdownMenu v-if="state.view !== 'team'">
       <DropdownMenuTrigger as-child>
         <Button variant="outline" :disabled="exporting"><Download /> {{ $t('reports.export') }}</Button>
       </DropdownMenuTrigger>
@@ -253,6 +260,15 @@ const { sort: entrySort, sorted: sortedEntries } = useSort(shownEntries, {
     </DropdownMenu>
   </PageHeader>
 
+  <!-- View -->
+  <Tabs v-model="state.view" class="mb-4">
+    <TabsList>
+      <TabsTrigger value="summary">{{ $t('reports.summary') }}</TabsTrigger>
+      <TabsTrigger value="entries">{{ $t('reports.entries') }}</TabsTrigger>
+      <TabsTrigger v-if="canSeeTeam" value="team">{{ $t('nav.team') }}</TabsTrigger>
+    </TabsList>
+  </Tabs>
+
   <!-- Period and filters -->
   <div class="mb-4 flex flex-wrap items-center gap-2">
     <Select v-model="state.period">
@@ -269,6 +285,7 @@ const { sort: entrySort, sorted: sortedEntries } = useSort(shownEntries, {
     </template>
     <span v-else class="text-sm text-muted-foreground">{{ periodLabel }}</span>
 
+    <template v-if="state.view !== 'team'">
     <span class="mx-1 h-5 w-px bg-border" />
     <MultiFilter v-model="state.activityIds" :label="$t('entry.activity')" :options="activityOptions" />
     <MultiFilter v-model="state.projectIds" :label="$t('entry.project')" :options="projectOptions" />
@@ -288,7 +305,11 @@ const { sort: entrySort, sorted: sortedEntries } = useSort(shownEntries, {
       </SelectContent>
     </Select>
     <Button v-if="hasFilter" size="sm" variant="ghost" @click="clearFilters">{{ $t('reports.clearFilter') }}</Button>
+    </template>
   </div>
+
+  <TeamReport v-if="state.view === 'team' && canSeeTeam" :range="range" />
+  <template v-else>
 
   <!-- Totals -->
   <div class="mb-6 grid gap-4 sm:grid-cols-3">
@@ -317,14 +338,8 @@ const { sort: entrySort, sorted: sortedEntries } = useSort(shownEntries, {
     </Card>
   </div>
 
-  <!-- View and grouping -->
-  <div class="mb-3 flex flex-wrap items-center gap-2">
-    <Tabs v-model="state.view">
-      <TabsList>
-        <TabsTrigger value="summary">{{ $t('reports.summary') }}</TabsTrigger>
-        <TabsTrigger value="entries">{{ $t('reports.entries') }}</TabsTrigger>
-      </TabsList>
-    </Tabs>
+  <!-- Grouping -->
+  <div v-if="state.view === 'summary'" class="mb-3 flex flex-wrap items-center gap-2">
     <template v-if="state.view === 'summary'">
       <span class="ml-auto text-sm text-muted-foreground">{{ $t('reports.groupBy') }}</span>
       <Select v-model="state.group1">
@@ -476,5 +491,6 @@ const { sort: entrySort, sorted: sortedEntries } = useSort(shownEntries, {
       </tbody>
     </table>
   </div>
+  </template>
   </template>
 </template>

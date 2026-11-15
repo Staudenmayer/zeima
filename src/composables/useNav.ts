@@ -12,7 +12,6 @@ import {
   Palmtree,
   Shapes,
   Tags,
-  Users,
 } from '@lucide/vue'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -30,7 +29,6 @@ export interface NavItem extends NavLeaf {
 // Pages that are the same kind of list share one entry in the sidebar and a tab strip on top.
 const GROUPS = [
   { titleKey: 'nav.catalog', urls: ['/activities', '/projects', '/tags', '/cost-centers'] },
-  { titleKey: 'nav.team', urls: ['/locations', '/team'] },
 ]
 
 /** The tracking entries of the sidebar, grouped, and the tabs of the page that is open. */
@@ -58,10 +56,6 @@ export function useNav() {
       icon: Palmtree,
     },
     ...(workspaces.inOrg ? [{ title: t('nav.locations'), url: '/locations', icon: MapPinned }] : []),
-    // Those who may see other people's time (their department's or all); for the rest the page would show only themselves.
-    ...(workspaces.inOrg && ['group', 'org'].includes(workspaces.scopeOf('entry.read') ?? '')
-      ? [{ title: t('nav.team'), url: '/team', icon: Users }]
-      : []),
   ])
 
   const items = computed<NavItem[]>(() => {

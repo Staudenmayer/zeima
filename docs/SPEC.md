@@ -575,7 +575,7 @@ Pricing difference (suggested): self-hosted is sold as annual seat licenses (Ent
 ## 8. Frontend
 
 ### 8.1 Navigation (sidebar)
-`Dashboard` · `Timesheet` (day/week timeline) · `Projects` · `Tags` · `Reports` · `Absences` · *(org)* `Team` (online users, work location) · `Meetings` · `Admin` (users, groups, cost centers, policies) · `Addons` · `Settings`
+`Dashboard` · `Timesheet` (day/week timeline) · `Projects` · `Tags` · `Reports` (summary, entries, *(org)* team) · `Absences` · *(org)* `Locations` · `Meetings` · `Admin` (users, groups, cost centers, policies) · `Addons` · `Settings`
 
 ### 8.2 Windows
 - **main**: the full app (existing)

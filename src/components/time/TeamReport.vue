@@ -1,13 +1,15 @@
 <script setup lang="ts">
+import PersonPopover from '@/components/time/PersonPopover.vue'
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { Users } from '@lucide/vue'
 import { commands, type TeamMember, type TimeEntry } from '@/bindings'
 import { Button } from '@/components/ui/button'
+import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import MultiFilter, { type FilterOption } from '@/components/time/MultiFilter.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
-import PageHeader from '@/components/time/PageHeader.vue'
-import { addDays, formatDuration, startOfDay, startOfWeek } from '@/lib/time'
+import { formatDuration } from '@/lib/time'
 import { call, errorMessage } from '@/lib/ipc'
 import { useCostCentersStore } from '@/stores/costCenters'
 import { useOrgStore } from '@/stores/org'
@@ -18,9 +20,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
 import TableToolbar from '@/components/time/TableToolbar.vue'
-import { useTableSearch } from '@/composables/useTableSearch'
-
-definePage({ meta: { titleKey: 'nav.team' } })
+import { passes, useTableSearch } from '@/composables/useTableSearch'
 
 const org = useOrgStore()
 const tags = useTagsStore()
@@ -29,29 +29,7 @@ const projects = useProjectsStore()
 const settings = useSettingsStore()
 const workspaces = useWorkspaceStore()
 
-type Preset = 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth'
-const PRESETS: Preset[] = ['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth']
-const preset = ref<Preset>('thisWeek')
-
-function range(p: Preset) {
-  const now = Date.now()
-  const week = startOfWeek(now)
-  const d = new Date(startOfDay(now))
-  const month = (offset: number) => ({
-    from: startOfDay(new Date(d.getFullYear(), d.getMonth() + offset, 1, 12).getTime()),
-    to: startOfDay(new Date(d.getFullYear(), d.getMonth() + offset + 1, 1, 12).getTime()),
-  })
-  switch (p) {
-    case 'thisWeek':
-      return { from: week, to: addDays(week, 7) }
-    case 'lastWeek':
-      return { from: addDays(week, -7), to: week }
-    case 'thisMonth':
-      return month(0)
-    default:
-      return month(-1)
-  }
-}
+const props = defineProps<{ range: { from: number; to: number } }>()
 
 const team = ref<TeamMember[]>([])
 const loading = ref(false)
@@ -62,7 +40,7 @@ const nameOf = (id: string) => org.nameOf(id)
 const projectName = (id: string | null) => (id ? (projects.byId.get(id)?.name ?? '') : '')
 
 const DAY = 86_400_000
-const currentRange = computed(() => range(preset.value))
+const currentRange = computed(() => props.range)
 const days = computed(() => Math.round((currentRange.value.to - currentRange.value.from) / DAY))
 /** The departments a person is in, as the departments list names them. */
 const departmentsOf = (userId: string) => org.departments.filter((g) => g.memberIds.includes(userId)).map((g) => g.path)
@@ -128,7 +106,7 @@ async function load() {
   try {
     if (org.members.length === 0) await org.load().catch(() => {})
     await Promise.all([org.loadPolicies().catch(() => {}), tags.load().catch(() => {}), costCenters.load().catch(() => {})])
-    team.value = await call(commands.teamSummary(range(preset.value)))
+    team.value = await call(commands.teamSummary(props.range))
   } catch (err) {
     toast.error(errorMessage(err))
   } finally {
@@ -136,17 +114,24 @@ async function load() {
   }
 }
 onMounted(load)
-watch([preset, () => workspaces.active?.id], () => {
+watch([() => props.range.from, () => props.range.to, () => workspaces.active?.id], () => {
   opened.value = null
   void load()
 })
 
 // One search for both lists: the departments' and the people's.
 const { search, searching, matches: matchesDepartment } = useTableSearch<{ path: string }>([], (g) => [g.path])
-const shownDepartments = computed(() => departmentTotals.value.filter(matchesDepartment))
+const departments = ref<(string | null)[]>([])
+const departmentOptions = computed<FilterOption[]>(() => departmentTotals.value.map((g) => ({ value: g.path, label: g.path })))
+const clearFilters = () => {
+  search.value = ''
+  departments.value = []
+}
+const inDepartments = (userId: string) => departments.value.length === 0 || departmentsOf(userId).some((d) => passes(departments.value, d))
+const shownDepartments = computed(() => departmentTotals.value.filter((g) => matchesDepartment(g) && passes(departments.value, g.path)))
 const shownTeam = computed(() => {
   const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  return team.value.filter((m) => words.every((w) => (nameOf(m.userId) || '').toLowerCase().includes(w)))
+  return team.value.filter((m) => inDepartments(m.userId) && words.every((w) => (nameOf(m.userId) || '').toLowerCase().includes(w)))
 })
 const { sort, sorted: sortedDepartments } = useSort(shownDepartments, {
   department: (g) => g.path,
@@ -157,22 +142,28 @@ const { sort, sorted: sortedDepartments } = useSort(shownDepartments, {
 </script>
 
 <template>
-  <PageHeader :title="$t('nav.team')">
-    <div class="flex gap-1">
-      <Button v-for="p in PRESETS" :key="p" size="sm" :variant="preset === p ? 'default' : 'outline'" @click="preset = p">{{ $t(`team.${p}`) }}</Button>
-    </div>
-  </PageHeader>
 
   <EmptyState v-if="!workspaces.inOrg" :icon="Users" :text="$t('team.personal')" />
   <EmptyState v-else-if="!['group', 'org'].includes(workspaces.scopeOf('entry.read') ?? '')" :icon="Users" :text="$t('noAccess.team')" />
 
-  <div v-else class="grid gap-4">
-    <div class="flex flex-wrap gap-6 text-sm">
-      <div><p class="text-xs text-muted-foreground">{{ $t('team.total') }}</p><p class="text-2xl font-semibold tabular-nums">{{ hours(total) }}</p></div>
-      <div><p class="text-xs text-muted-foreground">{{ $t('team.billable') }}</p><p class="text-2xl font-semibold tabular-nums">{{ hours(billable) }}</p></div>
+  <template v-else>
+    <div class="mb-6 grid gap-4 sm:grid-cols-3">
+      <Card class="py-4"><CardHeader class="px-4"><CardDescription>{{ $t('team.total') }}</CardDescription><CardTitle class="text-2xl tabular-nums">{{ hours(total) }}</CardTitle></CardHeader></Card>
+      <Card class="py-4">
+        <CardHeader class="px-4">
+          <CardDescription>{{ $t('team.billable') }}</CardDescription>
+          <CardTitle class="text-2xl tabular-nums">
+            {{ hours(billable) }}
+            <span v-if="total > 0" class="text-sm font-normal text-muted-foreground">· {{ Math.round((billable / total) * 100) }} %</span>
+          </CardTitle>
+        </CardHeader>
+      </Card>
+      <Card class="py-4"><CardHeader class="px-4"><CardDescription>{{ $t('team.peopleColumn') }}</CardDescription><CardTitle class="text-2xl tabular-nums">{{ team.length }}</CardTitle></CardHeader></Card>
     </div>
-
-    <TableToolbar v-if="team.length" v-model="search" class="!mb-0" :active="searching" :placeholder="$t('team.search')" @clear="search = ''" />
+    <div class="grid gap-4">
+    <TableToolbar v-if="team.length" v-model="search" class="!mb-0" :active="searching || departments.length > 0" :placeholder="$t('team.search')" @clear="clearFilters">
+      <MultiFilter v-if="departmentOptions.length" v-model="departments" :label="$t('team.department')" :options="departmentOptions" />
+    </TableToolbar>
     <section v-if="shownDepartments.length" class="grid gap-1">
       <h2 class="text-sm font-medium">{{ $t('team.departments') }}</h2>
       <div class="overflow-x-auto rounded-lg border">
@@ -209,7 +200,7 @@ const { sort, sorted: sortedDepartments } = useSort(shownDepartments, {
     <ul v-else class="grid gap-3">
       <li v-for="m in shownTeam" :key="m.userId" class="rounded-lg border p-3">
         <div class="flex items-baseline gap-3">
-          <span class="flex flex-1 items-center gap-2 self-center font-medium"><UserAvatar :user-id="m.userId" size="sm" />{{ nameOf(m.userId) || $t('team.someone') }}</span>
+          <span class="flex flex-1 items-center self-center font-medium"><PersonPopover :user-id="m.userId"><button type="button" class="flex items-center gap-2"><UserAvatar :user-id="m.userId" size="sm" />{{ nameOf(m.userId) || $t('team.someone') }}</button></PersonPopover></span>
           <span class="text-sm tabular-nums">{{ hours(m.totalMs) }}</span>
           <span v-if="overtime(m) !== null" class="text-xs tabular-nums" :class="outlier(m) ? 'font-medium text-amber-600' : 'text-muted-foreground'">{{ signed(overtime(m)!) }}</span>
           <span class="w-24 text-right text-xs tabular-nums text-muted-foreground">{{ $t('team.billableShort', { h: hours(m.billableMs) }) }}</span>
@@ -240,5 +231,6 @@ const { sort, sorted: sortedDepartments } = useSort(shownDepartments, {
       </li>
     </ul>
     <p class="text-xs text-muted-foreground">{{ $t('team.hint') }}</p>
-  </div>
+    </div>
+  </template>
 </template>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PersonPopover from '@/components/time/PersonPopover.vue'
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -459,7 +460,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(shownAudit, {
               >
                 <td class="px-3 py-1.5">
                   <div class="flex items-center gap-2">
-                    <span v-if="r.member" class="relative inline-flex shrink-0"><UserAvatar :user-id="r.member.id" :name="r.name" size="md" /><PresenceDot :user-id="r.member.id" class="absolute -right-0.5 -bottom-0.5 ring-2 ring-background" /></span>
+                    <PersonPopover v-if="r.member" :user-id="r.member.id"><button type="button" class="relative inline-flex shrink-0 rounded-full" @click.stop><UserAvatar :user-id="r.member.id" :name="r.name" size="md" /><PresenceDot :user-id="r.member.id" class="absolute -right-0.5 -bottom-0.5 ring-2 ring-background" /></button></PersonPopover>
                     <UserAvatar v-else :name="r.name" size="md" class="opacity-50" />
                     <div class="min-w-0">
                       <p class="truncate font-medium">{{ r.name }}</p>

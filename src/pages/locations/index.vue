@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PersonPopover from '@/components/time/PersonPopover.vue'
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
@@ -161,8 +162,8 @@ const today = computed(() => iso(Date.now()))
         <tbody>
           <tr v-for="p in people" :key="p.id" class="border-b last:border-0">
             <td class="truncate px-3 py-2 font-medium">
-              <span v-if="p.id === me" class="flex items-center gap-1.5"><UserAvatar :user-id="org.myId" size="xs" /> {{ $t('locations.you') }}</span>
-              <span v-else class="flex items-center gap-1.5"><UserAvatar :user-id="p.id" :name="p.name" size="xs" />{{ p.name || $t('locations.someone') }}</span>
+              <PersonPopover v-if="p.id === me" :user-id="org.myId"><button type="button" class="flex items-center gap-1.5"><UserAvatar :user-id="org.myId" size="xs" /> {{ $t('locations.you') }}</button></PersonPopover>
+              <PersonPopover v-else :user-id="p.id"><button type="button" class="flex items-center gap-1.5"><UserAvatar :user-id="p.id" :name="p.name" size="xs" />{{ p.name || $t('locations.someone') }}</button></PersonPopover>
             </td>
             <td v-for="d in days" :key="d" class="px-0.5 py-1 text-center">
               <DropdownMenu v-if="p.id === me">

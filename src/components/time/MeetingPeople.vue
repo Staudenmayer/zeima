@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PersonPopover from '@/components/time/PersonPopover.vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { MeetingOccurrence } from '@/bindings'
@@ -27,7 +28,7 @@ const label = (id: string, answer: string) => `${org.nameOf(id) || t('team.someo
       :style="{ boxShadow: `0 0 0 2px ${ANSWER_COLORS[p.answer]}` }"
       :title="label(p.userId, p.answer)"
     >
-      <UserAvatar :user-id="p.userId" size="sm" />
+      <PersonPopover :user-id="p.userId"><button type="button" class="inline-flex rounded-full" @click.stop><UserAvatar :user-id="p.userId" size="sm" /></button></PersonPopover>
     </span>
     <span v-if="more > 0" class="ml-1.5 text-xs text-muted-foreground" :title="people.slice(max).map((p) => label(p.userId, p.answer)).join('\n')">+{{ more }}</span>
   </div>
