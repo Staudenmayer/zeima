@@ -44,6 +44,9 @@ pub struct AutoPauseConfig {
     /// A timer left running over this time (or overnight) is stopped at the
     /// last activity. `None` disables it.
     pub night_stop: Option<String>,
+    /// A timer stopped for the night starts again, with the same activity, project
+    /// and tags, on the first activity of the next working day.
+    pub restart_next_day: bool,
     /// Notify when the legal daily maximum is exceeded.
     pub warn_daily_max: bool,
     /// Offer to start tracking at the first activity of the day.
@@ -63,6 +66,7 @@ impl Default for AutoPauseConfig {
             lunch_end: "13:30".into(),
             lunch_min_minutes: 15,
             night_stop: Some("22:00".into()),
+            restart_next_day: true,
             warn_daily_max: true,
             morning_prompt: true,
         }

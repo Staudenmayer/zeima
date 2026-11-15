@@ -287,6 +287,7 @@ Rules are evaluated by the Rust timer engine, which runs whether or not the wind
 | **Idle** | No input for N min (OS idle time) → ask on return: *discard idle time / keep / assign to other project* | 10 min, prompt |
 | **Lock / Suspend** | Screen locked or system sleep → pause from lock time; resume prompt on unlock | on |
 | **Night / end of day** | Timer still running after `latest_end` of the schedule or a fixed time (e.g. 22:00) → stop at last activity | 22:00 |
+| **Restart next day** | A timer stopped for the night (the away period reached a new day) starts again with the same activity, project and tags on the first activity of that day, if it is a working day and nothing was tracked yet | on |
 | **Max day length / rest time** | Warn when work exceeds the profile's daily max, or when rest between days is below its minimum; org-configurable | From profile (AT: 12 h / 11 h rest) |
 
 No auto-pause rule hardcodes a legal value. All defaults come from the active country profile (§5.13), and users or orgs may only make them stricter unless the profile marks a value as `advisory`.
@@ -339,6 +340,7 @@ Delivered as first-party **addons** (§5.12), not built into the app. The addon 
 - The meeting is linked to a project and cost center. At meeting time, each attendee gets a prompt to *track this meeting* (or it is tracked automatically if they opted in).
 - Bidirectional sync with the organizer's calendar provider. RSVPs sync back.
 - Recurrence via RRULE.
+- **Following meetings.** While a timer runs and a meeting the person organizes or accepted starts, tracking moves to the meeting's activity (the running one's if the meeting has none), project and tags, and goes back to what was running when the meeting ends (a new entry each way). Only a timer started before the meeting is followed; a timer started or stopped during the meeting is left alone and not started again. A setting (Settings → General, "Follow meetings I accepted", on by default) turns it off. The follow state is kept in `local_meta` (`meeting_follow`), so a restart in the middle of a meeting still goes back.
 - **Answering a repeating meeting.** An attendee answers (yes / maybe / no) for all dates of the series, or for one date only. The answer for a date (`meeting_response.occurrence_at`, the date's start) counts instead of the series answer; taking it back makes the series answer count again. Free/busy, presence and the "track this meeting" prompt follow the answer of the date.
 
 ### 5.9 User Management (Org)

@@ -41,6 +41,9 @@ pub struct AppSettings {
     /// Tell the organizations which project the running timer is on. Off by
     /// default: they hear only that the person is tracking.
     pub share_project_presence: bool,
+    /// While a timer runs and a meeting the person accepted starts, track the
+    /// meeting's activity, project and tags, and go back when it is over.
+    pub follow_meetings: bool,
 }
 
 impl Default for AppSettings {
@@ -59,6 +62,7 @@ impl Default for AppSettings {
             number_format: NumberFormat::Auto,
             week_start: WeekStart::Auto,
             share_project_presence: false,
+            follow_meetings: true,
         }
     }
 }

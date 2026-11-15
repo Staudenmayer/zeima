@@ -9,7 +9,7 @@ use chrono::{NaiveDate, Timelike};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 use zeima_core::autopause::{AutoPauseConfig, AwayPeriod, Detector, Observation};
-use zeima_core::model::TimerState;
+use zeima_core::model::{Pause, PauseKind, StartTimer, TimerState};
 use zeima_core::summary::Range;
 use zeima_core::worktime::DayWarning;
 
@@ -85,7 +85,7 @@ pub async fn on_startup(app: &AppHandle) {
     for core in crate::workspaces::all_cores(&state).await {
         match core.check_forgotten_timer(&cfg).await {
             Ok(Some(found)) => {
-                forgotten = Some(Ok(Some(found)));
+                forgotten = Some(Ok(Some((core.clone(), found))));
                 break;
             }
             Ok(None) => {}
@@ -93,7 +93,15 @@ pub async fn on_startup(app: &AppHandle) {
         }
     }
     match forgotten.unwrap_or(Ok(None)) {
-        Ok(Some(_)) => {
+        Ok(Some((core, pause))) => {
+            restart_after_night(
+                app,
+                &core,
+                &pause,
+                pause.end_at.unwrap_or_else(|| core.now_ms()),
+                &cfg,
+            )
+            .await;
             commands::changed(app, &[DataKind::Entry, DataKind::Away]).await;
             windows::show_prompt(app);
         }
@@ -156,7 +164,8 @@ async fn on_return(app: &AppHandle, period: AwayPeriod, cfg: &AutoPauseConfig) {
     let state = app.state::<AppState>();
     let core = crate::workspaces::running_core(&state).await;
     match core.handle_away(period, cfg).await {
-        Ok(Some(_)) => {
+        Ok(Some(pause)) => {
+            restart_after_night(app, &core, &pause, period.to, cfg).await;
             commands::changed(app, &[DataKind::Entry, DataKind::Away]).await;
             windows::show_prompt(app);
         }
@@ -164,6 +173,68 @@ async fn on_return(app: &AppHandle, period: AwayPeriod, cfg: &AutoPauseConfig) {
         Err(err) => eprintln!("auto-pause failed: {err}"),
     }
     offer_morning(app, cfg).await;
+}
+
+/// A timer that was stopped for the night (the away period crossed into a new day) starts
+/// again on the first activity of that day, with what it was doing, if it is a working day and
+/// nothing was tracked yet. `back_at` is when the person came back.
+async fn restart_after_night(
+    app: &AppHandle,
+    core: &zeima_core::Core,
+    pause: &Pause,
+    back_at: i64,
+    cfg: &AutoPauseConfig,
+) {
+    if !cfg.enabled || !cfg.restart_next_day || pause.kind != PauseKind::AutoNight {
+        return;
+    }
+    let (Ok(tz), Ok(today)) = (core.tz(), core.today()) else {
+        return;
+    };
+    // Only into a new day: a stop at 22:00 that ends the same evening is not a night.
+    if zeima_core::worktime::local_date(pause.start_at, tz) >= zeima_core::worktime::local_date(back_at, tz) {
+        return;
+    }
+    let Some(entry) = pause.resume_entry_id.as_deref() else {
+        return;
+    };
+    let Ok(entry) = core.get_entry(entry).await else {
+        return;
+    };
+    let working_day = core
+        .work_days(today, today)
+        .await
+        .ok()
+        .and_then(|days| days.first().map(|d| d.target_ms > 0))
+        .unwrap_or(true);
+    let (from, to) = zeima_core::worktime::day_bounds(today, tz);
+    let tracked_today = core
+        .list_entries(Range { from, to })
+        .await
+        .map(|e| !e.is_empty())
+        .unwrap_or(true);
+    if !working_day || tracked_today || !matches!(core.timer_state().await, Ok(TimerState::Idle)) {
+        return;
+    }
+    let started = core
+        .start_timer(StartTimer {
+            activity_id: entry.activity_id.clone(),
+            project_id: entry.project_id.clone(),
+            tag_ids: entry.tag_ids.clone(),
+            note: entry.note.clone(),
+            billable: Some(entry.billable),
+        })
+        .await;
+    if started.is_ok() {
+        let de = app.state::<AppState>().settings().language() == "de";
+        let body = if de {
+            "Die Zeiterfassung läuft wie gestern weiter. Beende sie in der Zeiterfassung, wenn das nicht passt."
+        } else {
+            "Tracking started again as yesterday. Stop it in the timesheet if that is not what you want."
+        };
+        let title = if de { "Neuer Tag" } else { "New day" };
+        let _ = app.notification().builder().title(title).body(body).show();
+    }
 }
 
 /// First activity of the day without a running timer: offer to start.

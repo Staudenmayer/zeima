@@ -14,6 +14,7 @@ mod commands_work;
 mod events;
 mod instance;
 mod license;
+mod meeting_follow;
 mod meeting_prompt;
 mod oauth;
 mod org;
@@ -286,6 +287,7 @@ pub fn run() {
             sync::spawn_listener(app.handle().clone());
             sync::spawn_push_watcher(app.handle().clone());
             presence::spawn(app.handle().clone());
+            meeting_follow::spawn(app.handle().clone());
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { activity::on_startup(&handle).await });
             let handle = app.handle().clone();

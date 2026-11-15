@@ -500,6 +500,11 @@ export type AppSettings = {
 	 *  default: they hear only that the person is tracking.
 	 */
 	shareProjectPresence?: boolean,
+	/**
+	 *  While a timer runs and a meeting the person accepted starts, track the
+	 *  meeting's activity, project and tags, and go back when it is over.
+	 */
+	followMeetings?: boolean,
 };
 
 export type AutoPauseConfig = {
@@ -521,6 +526,11 @@ export type AutoPauseConfig = {
 	 *  last activity. `None` disables it.
 	 */
 	nightStop?: string | null,
+	/**
+	 *  A timer stopped for the night starts again, with the same activity, project
+	 *  and tags, on the first activity of the next working day.
+	 */
+	restartNextDay?: boolean,
 	/**  Notify when the legal daily maximum is exceeded. */
 	warnDailyMax?: boolean,
 	/**  Offer to start tracking at the first activity of the day. */

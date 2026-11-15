@@ -198,6 +198,8 @@ What 2.0 deliberately does not include, and why:
 - [x] App: Meetings → for repeating meetings the answer has "All dates / This date only"; with a date answer the series answer is shown beside it.
 - [x] Tests (core, sync rules + free/busy) and the click prototype. Open: the organizer cannot answer; `.ics` export does not carry per-date answers.
 
+**Follow accepted meetings** (done in the repository, `src-tauri/src/meeting_follow.rs`): a running timer switches to the meeting's activity, project and tags when an accepted or own meeting starts, and back when it ends; setting "Follow meetings I accepted". Open: when no timer runs the meeting is not started by itself; the click prototype.
+
 **Roles made of permissions** (done in the repository): the four fixed roles are now defaults of a permission set (view, edit, delete per resource, with own/department/everyone reach for views); admins change them and create roles of their own, with the rule that nobody grants what they do not hold. Open: the click prototype and a per-role table of what the desktop hides for the people with only some permissions (the server already refuses everything).
 
 **Before tagging 2.0.0:** run `deploy/e2e/org-smoke.mjs` and `deploy/e2e/smoke.mjs` against the real stack; try two apps (Linux plus Windows or macOS) on one organization by hand: invite, switch workspace, track, request and approve an absence, create a meeting; fix the updater key password secret; then `node scripts/version.mjs set 2.0.0`, commit and tag (the repository is still at the old version).

@@ -170,6 +170,13 @@ async function save() {
           </div>
           <Switch :model-value="form.shareProjectPresence ?? false" @update:model-value="form.shareProjectPresence = $event" />
         </div>
+        <div v-if="account.status.signedIn" class="grid gap-2 sm:grid-cols-2 sm:items-center">
+          <div>
+            <Label>{{ $t('settings.followMeetings') }}</Label>
+            <p class="text-xs text-muted-foreground">{{ $t('settings.followMeetingsHint') }}</p>
+          </div>
+          <Switch :model-value="form.followMeetings ?? true" @update:model-value="form.followMeetings = $event" />
+        </div>
       </CardContent>
     </Card>
 

@@ -158,6 +158,13 @@ async function save() {
         <CardContent v-if="nightEnabled" class="grid gap-2 sm:grid-cols-2 sm:items-center">
           <Label>{{ $t('autopause.nightTime') }}</Label>
           <TimeInput v-model="nightTime" />
+          <label class="flex items-center justify-between gap-4 text-sm sm:col-span-2">
+            <span>
+              {{ $t('autopause.restartNextDay') }}
+              <span class="block text-xs text-muted-foreground">{{ $t('autopause.restartNextDayHint') }}</span>
+            </span>
+            <Switch v-model="form.restartNextDay" />
+          </label>
         </CardContent>
       </Card>
 
