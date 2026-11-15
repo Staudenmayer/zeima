@@ -582,8 +582,8 @@ mod tests {
         let white = |s| {
             with_badge(&base, GREEN, s)
                 .rgba()
-                .chunks_exact(4)
-                .filter(|p| p == &[255, 255, 255, 255])
+                .iter()
+                .filter(|&&byte| byte == 255)
                 .count()
         };
         // The ring is white too, so a symbol means more white pixels than none.
