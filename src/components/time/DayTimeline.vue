@@ -41,6 +41,8 @@ const emit = defineEmits<{
   edit: [entry: TimeEntry, anchor: Anchor]
   /** Double-click on an empty spot: the full hour under the pointer. */
   create: [at: number]
+  /** Click on an absence of the day: open it in the absence list. */
+  absence: [item: AddonTimelineItem]
   /** Dragged over an empty stretch of the person's own row: its start and end (15-minute steps). */
   createRange: [startAt: number, endAt: number]
   /** Click on a timed timeline item: create an entry from it. */
@@ -277,9 +279,10 @@ onScopeDispose(stopCreating)
           v-for="item in allDay"
           :key="`${item.addonId}/${item.id}`"
           class="truncate rounded-sm px-2 py-0.5 text-xs leading-4"
-          :class="item.addonId === 'zeima.absences' ? 'absent-hatch' : 'border border-dashed'"
+          :class="item.addonId === 'zeima.absences' ? 'absent-hatch cursor-pointer' : 'border border-dashed'"
           :style="item.addonId === 'zeima.absences' ? undefined : { borderColor: item.color ?? 'var(--border)' }"
           :title="eventTooltip(item)"
+          @click="item.addonId === 'zeima.absences' && emit('absence', item)"
         >{{ item.title }}</li>
       </ul>
 

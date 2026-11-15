@@ -107,6 +107,7 @@ const de: typeof en = {
     whatToAdd: 'Was hinzufügen',
     addKindEntry: 'Zeiteintrag',
     addKindMeeting: 'Termin',
+    titleColumn: 'Titel',
     addEntry: 'Eintrag hinzufügen',
     bulk: {
       selected: '{n} ausgewählt | {n} ausgewählt',

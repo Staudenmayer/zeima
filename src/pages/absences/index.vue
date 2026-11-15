@@ -2,6 +2,7 @@
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { Check, ChevronLeft, ChevronRight, Palmtree, Pencil, Plus, Trash2, X } from '@lucide/vue'
 import { commands, type Absence, type AbsenceType, type HolidayView, type VacationSummary } from '@/bindings'
@@ -178,6 +179,23 @@ watch(
 const filter = ref({ people: [] as (string | null)[], types: [] as (string | null)[], statuses: [] as (string | null)[], months: [] as (string | null)[] })
 const search = ref('')
 const hasFilter = computed(() => search.value.trim() !== '' || Object.values(filter.value).some((v) => v.length > 0))
+// Opened from the timesheet (an absence clicked there): the list is filtered to that person, year and month.
+const route = useRoute()
+watch(
+  () => route.query,
+  (q) => {
+    if (typeof q.absence !== 'string') return
+    if (typeof q.year === 'string' && Number(q.year)) year.value = Number(q.year)
+    search.value = ''
+    filter.value = {
+      people: typeof q.person === 'string' && workspaces.inOrg ? [q.person] : [],
+      types: [],
+      statuses: [],
+      months: typeof q.month === 'string' ? [q.month] : [],
+    }
+  },
+  { immediate: true },
+)
 const clearFilter = () => {
   search.value = ''
   filter.value = { people: [], types: [], statuses: [], months: [] }

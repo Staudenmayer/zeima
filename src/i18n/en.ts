@@ -105,6 +105,7 @@ export default {
     whatToAdd: 'What to add',
     addKindEntry: 'Time entry',
     addKindMeeting: 'Meeting',
+    titleColumn: 'Title',
     addEntry: 'Add entry',
     bulk: {
       selected: '{n} selected | {n} selected',

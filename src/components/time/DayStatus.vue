@@ -31,8 +31,7 @@ function warning(w: DayWarning): string {
     <span
       v-for="id in day.absenceTypeIds"
       :key="id"
-      class="rounded-full px-2 py-0.5 text-white"
-      :style="{ backgroundColor: work.absenceTypesById.get(id)?.color }"
+      class="absent-hatch rounded-full px-2 py-0.5"
     >{{ work.absenceTypesById.get(id) ? work.absenceTypeName(work.absenceTypesById.get(id)!) : '' }}</span>
     <span v-for="(w, i) in day.warnings" :key="i" class="rounded-full bg-destructive/15 px-2 py-0.5 text-destructive">
       ⚠ {{ warning(w) }}

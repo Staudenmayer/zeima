@@ -49,6 +49,7 @@ import { HOUR, addDays, dayRange, daysBetween, fromInputs, getTimeZone, startOfD
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import MeetingPopover from '@/components/time/MeetingPopover.vue'
 import type { MeetingState } from '@/lib/meetingStatus'
+import MeetingPeople from '@/components/time/MeetingPeople.vue'
 import MeetingDialog from '@/components/time/MeetingDialog.vue'
 import MeetingDetailsDialog from '@/components/time/MeetingDetailsDialog.vue'
 import TableToolbar from '@/components/time/TableToolbar.vue'
@@ -139,6 +140,11 @@ const absenceItems = computed<AddonTimelineItem[]>(() =>
 )
 const isAbsence = (i: AddonTimelineItem) => i.addonId === ABSENCES
 const router = useRouter()
+/** An absence opens the absence list, filtered to that person, year and month. */
+function openAbsence(item: AddonTimelineItem) {
+  const a = absences.value.find((x) => x.id === item.id)
+  void router.push({ path: '/absences', query: a ? { absence: a.id, person: a.userId, year: a.startDate.slice(0, 4), month: String(Number(a.startDate.slice(5, 7))) } : {} })
+}
 
 // ---------------------------------------------------------------- meetings
 // The meetings of the range (organization workspaces): the answer of the person and what repeats.
@@ -405,7 +411,7 @@ const groups = computed(() =>
     .map((g) => ({
       ...g,
       rows: [
-        ...g.events.map((item) => ({ kind: 'event' as const, key: `e/${item.addonId}/${item.id}`, item, startAt: item.startAt, endAt: item.endAt, activityId: item.activityId, projectId: item.projectId, tagIds: item.tagIds, note: item.title })),
+        ...g.events.map((item) => ({ kind: 'event' as const, key: `e/${item.addonId}/${item.id}`, item, startAt: item.startAt, endAt: item.endAt, activityId: item.activityId, projectId: item.projectId, tagIds: item.tagIds, note: item.title, place: isAbsence(item) ? '' : (item.detail ?? ''), people: occurrences.value.get(item.id)?.meeting.attendeeIds.length ?? 0 })),
         ...g.entries.map((entry) => ({ kind: 'entry' as const, key: `t/${entry.id}`, entry, startAt: entry.startAt, endAt: entry.endAt, activityId: entry.activityId, projectId: entry.projectId, tagIds: entry.tagIds, note: entry.note })),
         ...g.others.map((o) => ({ kind: 'other' as const, key: `o/${o.name}/${o.entry.id}`, o, startAt: o.entry.startAt, endAt: o.entry.endAt, activityId: o.entry.activityId, projectId: o.entry.projectId, tagIds: o.entry.tagIds, note: o.entry.note, person: o.name })),
       ].sort((x, y) => Number(y.kind === 'event' && isAbsence(y.item)) - Number(x.kind === 'event' && isAbsence(x.item)) || y.startAt - x.startAt),
@@ -645,7 +651,7 @@ async function confirmSplit() {
 }
 
 // Sorting a column orders the rows of each day (meetings, own entries and other people's entries each as a block).
-interface SortRow { startAt: number; endAt: number | null; activityId: string | null; projectId: string | null; tagIds: string[]; note: string; person?: string }
+interface SortRow { startAt: number; endAt: number | null; activityId: string | null; projectId: string | null; tagIds: string[]; note: string; person?: string; place?: string; people?: number }
 const { sort, apply: sortRows } = useSort<SortRow>(null, {
   person: (r) => r.person ?? t('timesheet.me'),
   time: (r) => r.startAt,
@@ -653,6 +659,8 @@ const { sort, apply: sortRows } = useSort<SortRow>(null, {
   project: (r) => (r.projectId ? projects.byId.get(r.projectId)?.name : '') ?? '',
   tags: (r) => r.tagIds.map((id) => tags.byId.get(id)?.name ?? '').join(' '),
   note: (r) => r.note,
+  place: (r) => r.place ?? '',
+  people: (r) => r.people ?? 0,
   duration: (r) => (r.endAt ?? timer.now) - r.startAt,
 })
 
@@ -726,6 +734,7 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
     :others="shownOthers"
     @edit="openPopover"
     @create="createAt"
+    @absence="openAbsence"
     @create-range="createRange"
     @track="openItem"
   />
@@ -742,6 +751,7 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
     :others="shownOthers"
     @edit="openPopover"
     @create="openNew"
+    @absence="openAbsence"
     @create-range="createRange"
     @resize="resizeEntry"
     @preview="dragTimes = $event"
@@ -769,11 +779,13 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
           </th>
           <SortHead v-if="withPeople" :sort="sort" column="person" class="w-32 px-3 py-2 font-medium">{{ $t('timesheet.person') }}</SortHead>
           <SortHead :sort="sort" column="time" class="w-28 px-3 py-2 font-medium">{{ $t('timesheet.time') }}</SortHead>
+          <SortHead :sort="sort" column="duration" class="w-20 px-3 py-2 font-medium">{{ $t('timesheet.duration') }}</SortHead>
           <SortHead :sort="sort" column="activity" class="px-3 py-2 font-medium">{{ $t('entry.activity') }}</SortHead>
           <SortHead :sort="sort" column="project" class="px-3 py-2 font-medium">{{ $t('entry.project') }}</SortHead>
           <SortHead :sort="sort" column="tags" class="px-3 py-2 font-medium">{{ $t('entry.tags') }}</SortHead>
-          <SortHead :sort="sort" column="note" class="px-3 py-2 font-medium">{{ $t('entry.note') }}</SortHead>
-          <SortHead :sort="sort" column="duration" class="w-20 px-3 py-2 text-right font-medium">{{ $t('timesheet.duration') }}</SortHead>
+          <SortHead :sort="sort" column="note" class="px-3 py-2 font-medium">{{ $t('timesheet.titleColumn') }}</SortHead>
+          <SortHead :sort="sort" column="place" class="px-3 py-2 font-medium">{{ $t('meetings.location') }}</SortHead>
+          <SortHead :sort="sort" column="people" class="px-3 py-2 font-medium">{{ $t('meetings.attendees') }}</SortHead>
           <th class="w-40 px-1 py-2"><span class="sr-only">{{ $t('common.edit') }}</span></th>
         </tr>
       </thead>
@@ -788,7 +800,7 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
               @update:model-value="setSelected(group.entries, $event === true)"
             />
           </th>
-          <th :colspan="withPeople ? 8 : 7" class="px-3 py-1.5 text-left font-normal">
+          <th :colspan="withPeople ? 10 : 9" class="px-3 py-1.5 text-left font-normal">
             <div class="flex items-center justify-between gap-3">
               <span class="font-medium">{{ format.day(group.day.from) }}</span>
               <DayStatus v-if="group.work" :day="group.work" :holiday-name="holidayName(group.work.date)" />
@@ -803,13 +815,14 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
         <tr
           v-if="row.kind === 'event'"
           class="group cursor-pointer border-b text-muted-foreground last:border-b-0 hover:bg-muted/30"
-          :class="[isAbsence(row.item) ? 'bg-[oklch(0.95_0.045_350)] dark:bg-[oklch(0.3_0.07_350)]' : '', declined(row.item) ? 'opacity-55' : '']"
+          :class="[isAbsence(row.item) ? 'absent-stripes' : '', declined(row.item) ? 'opacity-55' : '']"
           :title="isAbsence(row.item) ? undefined : $t('timesheet.trackEvent')"
-          @click="isAbsence(row.item) ? router.push('/absences') : isMine(occOf(row.item)) ? openMeetingForm(occOf(row.item)!.meeting, null, row.item) : openItemInDialog(row.item)"
+          @click="isAbsence(row.item) ? openAbsence(row.item) : isMine(occOf(row.item)) ? openMeetingForm(occOf(row.item)!.meeting, null, row.item) : openItemInDialog(row.item)"
         >
           <td class="w-8 py-1.5 pr-0 pl-3" />
           <td v-if="withPeople" class="px-3 py-1.5">{{ $t('timesheet.me') }}</td>
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ isAbsence(row.item) ? $t('timesheet.allDay') : `${format.time(row.item.startAt)}–${format.time(row.item.endAt)}` }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ isAbsence(row.item) ? '–' : settings.formatDuration(row.item.endAt - row.item.startAt) }}</td>
           <td class="max-w-44 px-3 py-1.5">
             <ActivityLabel v-if="row.item.activityId" :activity="activities.byId.get(row.item.activityId)" />
             <span v-else>–</span>
@@ -819,11 +832,14 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
             <span v-else>–</span>
           </td>
           <td class="whitespace-nowrap px-3 py-1.5"><TagList :ids="row.item.tagIds" /></td>
-          <td class="max-w-0 w-full truncate px-3 py-1.5" :title="row.item.detail ?? row.item.title">
-            <span class="font-medium text-foreground" :class="declined(row.item) ? 'line-through' : ''">{{ row.item.title }}</span><span v-if="row.item.detail"> · {{ row.item.detail }}</span>
+          <td class="max-w-0 w-full truncate px-3 py-1.5" :title="row.item.title">
+            <span class="font-medium text-foreground" :class="declined(row.item) ? 'line-through' : ''">{{ row.item.title }}</span><span v-if="isAbsence(row.item) && row.item.detail"> · {{ row.item.detail }}</span>
             <span v-if="occOf(row.item) && organizerNote(occOf(row.item)!)" class="ml-2 text-xs">{{ organizerNote(occOf(row.item)!) }}</span>
           </td>
-          <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ isAbsence(row.item) ? '–' : settings.formatDuration(row.item.endAt - row.item.startAt) }}</td>
+          <td class="max-w-40 truncate px-3 py-1.5" :title="isAbsence(row.item) ? undefined : (row.item.detail ?? undefined)">{{ isAbsence(row.item) ? '' : row.item.detail || '–' }}</td>
+          <td class="px-3 py-1.5">
+            <MeetingPeople v-if="occOf(row.item) && occOf(row.item)!.meeting.attendeeIds.length" :occurrence="occOf(row.item)!" />
+          </td>
           <td class="px-1 py-0.5" @click.stop>
             <div v-if="!isAbsence(row.item)" class="flex items-center justify-end gap-1">
               <template v-if="occOf(row.item)">
@@ -871,6 +887,13 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
               :title="format.day(row.entry.endAt)"
             >+{{ daysBetween(row.entry.startAt, row.entry.endAt) }}</sup>
           </td>
+          <td
+            class="whitespace-nowrap px-3 py-1.5 font-medium tabular-nums"
+            :class="row.entry.endAt === null ? 'text-green-600 dark:text-green-400' : ''"
+          >
+            <span v-if="row.entry.billable" class="mr-1 text-xs font-normal text-muted-foreground" :title="$t('entry.billable')">€</span>
+            {{ settings.formatDuration(durationMs(row.entry)) }}
+          </td>
           <td class="max-w-44 px-3 py-1.5">
             <ActivityLabel :activity="row.entry.activityId ? activities.byId.get(row.entry.activityId) : null" />
           </td>
@@ -879,13 +902,7 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
           </td>
           <td class="whitespace-nowrap px-3 py-1.5"><TagList :ids="row.entry.tagIds" /></td>
           <td class="max-w-0 w-full truncate px-3 py-1.5 text-muted-foreground" :title="row.entry.note">{{ row.entry.note }}</td>
-          <td
-            class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums"
-            :class="row.entry.endAt === null ? 'text-green-600 dark:text-green-400' : ''"
-          >
-            <span v-if="row.entry.billable" class="mr-1 text-xs font-normal text-muted-foreground" :title="$t('entry.billable')">€</span>
-            {{ settings.formatDuration(durationMs(row.entry)) }}
-          </td>
+          <td class="px-3 py-1.5" /><td class="px-3 py-1.5" />
           <td class="px-1 py-0.5" @click.stop>
             <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
               <Button v-if="row.entry.endAt !== null" size="icon" variant="ghost" class="size-7" :title="$t('timer.continue')" @click="continueEntry(row.entry)"><Play /></Button>
@@ -900,23 +917,24 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
           <td class="w-8 py-1.5 pr-0 pl-3" />
           <td class="whitespace-nowrap px-3 py-1.5 font-medium text-foreground">{{ row.o.name }}</td>
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ format.time(row.o.entry.startAt) }}–{{ row.o.entry.endAt === null ? '' : format.time(row.o.entry.endAt) }}</td>
+          <td class="whitespace-nowrap px-3 py-1.5 font-medium tabular-nums">{{ settings.formatDuration(durationMs(row.o.entry)) }}</td>
           <td class="max-w-44 px-3 py-1.5"><ActivityLabel :activity="row.o.entry.activityId ? activities.byId.get(row.o.entry.activityId) : null" /></td>
           <td class="max-w-56 px-3 py-1.5"><ProjectDot :project="row.o.entry.projectId ? projects.byId.get(row.o.entry.projectId) : null" show-alias /></td>
           <td class="whitespace-nowrap px-3 py-1.5"><TagList :ids="row.o.entry.tagIds" /></td>
           <td class="max-w-0 w-full truncate px-3 py-1.5" :title="row.o.entry.note">{{ row.o.entry.note }}</td>
-          <td class="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums">{{ settings.formatDuration(durationMs(row.o.entry)) }}</td>
+          <td class="px-3 py-1.5" /><td class="px-3 py-1.5" />
           <td class="px-1 py-0.5" />
         </tr>
         </template>
-        <tr v-for="b in group.busy" :key="`${b.name}/${b.kind}/${b.from}`" class="border-b text-muted-foreground last:border-b-0" :class="b.kind === 'absence' ? 'bg-[oklch(0.95_0.045_350)] dark:bg-[oklch(0.3_0.07_350)]' : ''">
+        <tr v-for="b in group.busy" :key="`${b.name}/${b.kind}/${b.from}`" class="border-b text-muted-foreground last:border-b-0" :class="b.kind === 'absence' ? 'absent-stripes' : ''">
           <td class="w-8 py-1.5 pr-0 pl-3" />
           <td class="whitespace-nowrap px-3 py-1.5 font-medium text-foreground">{{ b.name }}</td>
           <td class="whitespace-nowrap px-3 py-1.5 tabular-nums">{{ b.kind === 'absence' ? $t('timesheet.allDay') : `${format.time(Math.max(b.from, group.day.from))}–${format.time(Math.min(b.to, group.day.to))}` }}</td>
-          <td class="px-3 py-1.5 italic" colspan="5">{{ b.kind === 'absence' ? $t('timesheet.absent') : $t('timesheet.busy') }}</td>
+          <td class="px-3 py-1.5 italic" colspan="7">{{ b.kind === 'absence' ? $t('timesheet.absent') : $t('timesheet.busy') }}</td>
           <td class="px-1 py-0.5" />
         </tr>
         <tr v-if="group.entries.length === 0 && group.events.length === 0 && group.others.length === 0 && group.busy.length === 0" class="border-b last:border-b-0">
-          <td :colspan="withPeople ? 9 : 8" class="px-3 py-6 text-center text-muted-foreground">{{ $t('timesheet.empty') }}</td>
+          <td :colspan="withPeople ? 11 : 10" class="px-3 py-6 text-center text-muted-foreground">{{ $t('timesheet.empty') }}</td>
         </tr>
       </tbody>
     </table>
