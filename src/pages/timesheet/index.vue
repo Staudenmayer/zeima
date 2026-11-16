@@ -30,7 +30,7 @@ import EmptyState from '@/components/time/EmptyState.vue'
 import ActivityLabel from '@/components/time/ActivityLabel.vue'
 import DayTimeline from '@/components/time/DayTimeline.vue'
 import EntryCalendar from '@/components/time/EntryCalendar.vue'
-import EntryDialog from '@/components/time/EntryDialog.vue'
+import AddDialog from '@/components/time/AddDialog.vue'
 import EntryPopover from '@/components/time/EntryPopover.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
 import ProjectDot from '@/components/time/ProjectDot.vue'
@@ -50,7 +50,6 @@ import UserAvatar from '@/components/time/UserAvatar.vue'
 import MeetingPopover from '@/components/time/MeetingPopover.vue'
 import type { MeetingState } from '@/lib/meetingStatus'
 import MeetingPeople from '@/components/time/MeetingPeople.vue'
-import MeetingDialog from '@/components/time/MeetingDialog.vue'
 import MeetingDetailsDialog from '@/components/time/MeetingDetailsDialog.vue'
 import TableToolbar from '@/components/time/TableToolbar.vue'
 import { useActivitiesStore } from '@/stores/activities'
@@ -1043,8 +1042,20 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
     @delete="askDelete"
     @more="openEdit"
   />
-  <EntryDialog v-model:open="entryDialogOpen" :entry="editing" :day="newEntryDay" :draft="draft" @meeting="openMeetingForm(null, $event)" />
-  <MeetingDialog v-model:open="mtgFormOpen" :meeting="mtgEditing" :draft="mtgDraft" :track-item="mtgItem" @saved="loadOccurrences" @track="track" @entry="meetingToEntry" />
+  <AddDialog
+    v-model:entry-open="entryDialogOpen"
+    v-model:meeting-open="mtgFormOpen"
+    :entry="editing"
+    :day="newEntryDay"
+    :draft="draft"
+    :meeting="mtgEditing"
+    :meeting-draft="mtgDraft"
+    :track-item="mtgItem"
+    @saved="loadOccurrences"
+    @track="track"
+    @to-meeting="openMeetingForm(null, $event)"
+    @to-entry="meetingToEntry"
+  />
   <ConfirmDialog v-model:open="confirmOpen" :title="$t('timesheet.deleteConfirm')" @confirm="confirmDelete" />
   <ConfirmDialog
     v-model:open="bulkDeleteOpen"

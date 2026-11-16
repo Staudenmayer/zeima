@@ -11,7 +11,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import { call, errorMessage } from '@/lib/ipc'
 import { fromInputs, getTimeZone, toDateInput, toTimeInput } from '@/lib/time'
 import { useAccountStore } from '@/stores/account'
@@ -21,10 +20,13 @@ import { useProjectsStore } from '@/stores/projects'
 import { useWorkspaceStore } from '@/stores/workspace'
 import ActivitySelect from './ActivitySelect.vue'
 import DateInput from './DateInput.vue'
-import MultiSelect from './MultiSelect.vue'
+import AttendeePanel from './AttendeePanel.vue'
+import NoteEditor from './NoteEditor.vue'
+import PlaceInput from './PlaceInput.vue'
+import TimeInput from './TimeInput.vue'
 import CostCenterSelect from './CostCenterSelect.vue'
 import ProjectSelect from './ProjectSelect.vue'
-import TagPicker from './TagPicker.vue'
+import TagInput from './TagInput.vue'
 
 const props = defineProps<{ meeting: Meeting | null; /** Times for a new meeting (from the timesheet's add dialog or a drag). */ draft?: { startAt: number; endAt: number } | null; /** The meeting as a timeline item: the dialog then offers to track it. */ trackItem?: AddonTimelineItem | null }>()
 const emit = defineEmits<{ saved: []; track: [item: AddonTimelineItem]; /** "Time entry" was chosen on a new meeting: the times so far, for the entry dialog. */ entry: [times: { startAt: number; endAt: number }] }>()
@@ -41,7 +43,7 @@ type Repeat = 'none' | 'daily' | 'weekly'
 const REPEATS: Repeat[] = ['none', 'daily', 'weekly']
 const DAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
 
-const form = ref({ title: '', date: '', start: '09:00', end: '10:00', location: '', roomId: null as string | null, url: '', note: '', projectId: null as string | null, activityId: null as string | null, tagIds: [] as string[], billable: false, costCenterId: null as string | null, attendees: [] as string[], repeat: 'none' as Repeat, weekdays: [] as number[], count: 10 })
+const form = ref({ title: '', date: '', endDate: '', start: '09:00', end: '10:00', location: '', roomId: null as string | null, url: '', note: '', projectId: null as string | null, activityId: null as string | null, tagIds: [] as string[], billable: false, costCenterId: null as string | null, attendees: [] as string[], repeat: 'none' as Repeat, weekdays: [] as number[], count: 10 })
 const saving = ref(false)
 const roomsOpen = ref(false)
 const busy = ref<Record<string, { from: number; to: number; kind: string }[]>>({})
@@ -106,6 +108,7 @@ watch(open, async (isOpen) => {
   form.value = {
     title: m?.title ?? '',
     date: day,
+    endDate: m ? toDateInput(m.endAt) : d ? toDateInput(d.endAt) : day,
     start: m ? toTimeInput(m.startAt) : d ? toTimeInput(d.startAt) : '09:00',
     end: m ? toTimeInput(m.endAt) : d ? toTimeInput(d.endAt) : '10:00',
     location: m?.location ?? '',
@@ -125,6 +128,14 @@ watch(open, async (isOpen) => {
   if (org.people.length === 0 && workspaces.active?.orgId) await org.loadGlance(workspaces.active.orgId).catch(() => {})
 })
 
+// The end date follows the start date until it is set apart from it.
+watch(
+  () => form.value.date,
+  (date, old) => {
+    if (!form.value.endDate || form.value.endDate === old || form.value.endDate < date) form.value.endDate = date
+  },
+)
+
 // A new meeting takes the project's billable default, as a new entry does.
 watch(
   () => form.value.projectId,
@@ -137,7 +148,8 @@ watch(
 /** The day of the first meeting: a weekly one starts on the first chosen weekday from the date on. */
 const firstDate = computed(() => (form.value.repeat === 'weekly' ? firstOn(form.value.date, form.value.weekdays) : form.value.date))
 const startAt = computed(() => fromInputs(firstDate.value, form.value.start))
-const endAt = computed(() => fromInputs(firstDate.value, form.value.end))
+/** A repeating meeting keeps its length when it starts on a later day. */
+const endAt = computed(() => startAt.value + (fromInputs(form.value.endDate || form.value.date, form.value.end) - fromInputs(form.value.date, form.value.start)))
 
 // Who is busy on the chosen day.
 let ticket = 0
@@ -165,7 +177,6 @@ watch(
 
 // The rooms of the organization, and which are booked at the chosen time
 // (asked of the server, which knows every meeting; only times come back).
-const NO_ROOM = '__none'
 const rooms = ref<Room[]>([])
 const roomBooked = ref<Set<string>>(new Set())
 let roomTicket = 0
@@ -251,113 +262,98 @@ async function save() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent :aria-describedby="undefined" :show-close-button="false" class="h-[min(40rem,94vh)] grid-rows-[auto_1fr] overflow-y-auto sm:max-w-5xl">
+    <DialogContent :aria-describedby="undefined" :show-close-button="false" class="h-[min(44rem,94vh)] grid-rows-[auto_1fr] overflow-hidden sm:max-w-6xl">
+      <!-- The line before the attendees runs the whole height of the dialog. -->
+      <div class="pointer-events-none absolute inset-y-0 right-[19.5rem] w-px bg-border" aria-hidden="true" />
       <!-- Title, track and close on one line (the dialog's own close button is off so they line up). -->
       <DialogHeader class="flex-row items-center gap-1">
         <DialogTitle class="min-w-0 flex-1 truncate">{{ meeting ? $t('meetings.edit') : $t('meetings.new') }}</DialogTitle>
         <Button v-if="meeting && trackItem" type="button" size="icon" variant="ghost" class="size-7" :title="$t('timesheet.trackEvent')" :aria-label="$t('timesheet.trackEvent')" @click="(open = false, emit('track', trackItem))"><Play /></Button>
         <Button type="button" size="icon" variant="ghost" class="size-7" :title="$t('common.close')" :aria-label="$t('common.close')" @click="open = false"><X /></Button>
       </DialogHeader>
-      <form class="flex flex-col gap-4" @submit.prevent="save">
-        <div v-if="!meeting" role="group" :aria-label="$t('timesheet.whatToAdd')" class="inline-flex gap-0.5 self-start justify-self-start rounded-lg bg-muted p-0.5">
-          <Button type="button" size="sm" variant="ghost" class="h-7" aria-pressed="false" @click="toEntry">{{ $t('timesheet.addKindEntry') }}</Button>
-          <Button type="button" size="sm" variant="outline" class="h-7" aria-pressed="true">{{ $t('timesheet.addKindMeeting') }}</Button>
-        </div>
-        <div class="grid grid-cols-2 gap-x-8">
-          <div class="flex flex-col gap-4">
-        <div class="grid gap-2"><Label for="m-title">{{ $t('meetings.title') }}</Label><Input id="m-title" v-model="form.title" required maxlength="200" autofocus /></div>
-        <div class="grid grid-cols-3 gap-3">
-          <div class="grid gap-2"><Label for="m-date">{{ $t('meetings.date') }}</Label><DateInput id="m-date" v-model="form.date" required /></div>
-          <div class="grid gap-2"><Label for="m-start">{{ $t('meetings.start') }}</Label><Input id="m-start" v-model="form.start" type="time" required /></div>
-          <div class="grid gap-2"><Label for="m-end">{{ $t('meetings.end') }}</Label><Input id="m-end" v-model="form.end" type="time" required /></div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div class="grid gap-2">
-            <Label>{{ $t('meetings.repeat') }}</Label>
-            <Select v-model="form.repeat">
-              <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem v-for="r in REPEATS" :key="r" :value="r">{{ $t(`meetings.repeats.${r}`) }}</SelectItem></SelectContent>
-            </Select>
-          </div>
-          <div v-if="form.repeat !== 'none'" class="grid gap-2"><Label for="m-count">{{ $t('meetings.times') }}</Label><Input id="m-count" v-model.number="form.count" type="number" min="1" max="500" /></div>
-        </div>
-        <div v-if="form.repeat === 'weekly'" class="grid gap-2">
-          <Label>{{ $t('meetings.weekdays') }}</Label>
-          <div class="flex flex-wrap gap-1.5" role="group" :aria-label="$t('meetings.weekdays')">
-            <Button
-              v-for="(name, i) in dayNames"
-              :key="name"
-              type="button"
-              size="sm"
-              class="min-w-12"
-              :variant="form.weekdays.includes(i) ? 'default' : 'outline'"
-              :aria-pressed="form.weekdays.includes(i)"
-              @click="toggleDay(i)"
-            >{{ name }}</Button>
-          </div>
-          <p class="text-xs text-muted-foreground">{{ $t('meetings.weeklyHint', { time: `${form.start}–${form.end}` }) }}</p>
-        </div>
-        <div class="grid gap-2">
-          <Label>{{ $t('meetings.attendees') }}</Label>
-          <MultiSelect
-            v-model="form.attendees"
-            :options="others.map((p) => ({ value: p.id, label: p.name || $t('team.someone'), person: true }))"
-            :placeholder="$t('meetings.addAttendees')"
-            :empty="$t('meetings.noPeople')"
-            :search-placeholder="$t('directory.search')"
-          />
-          <p v-for="c in conflicts" :key="c.id" class="text-xs text-amber-600">
-            {{ $t('meetings.busy', { name: nameOf(c.id), times: c.times.map((t) => (t.kind === 'absence' ? $t('meetings.absent') : `${clock(t.from)}–${clock(t.to)}`)).join(', ') }) }}
-          </p>
-        </div>
-        <!-- Place and online link side by side; the free-text place and the
-             warnings go under both, so the two fields stay level. -->
-        <div class="grid grid-cols-2 gap-3">
-          <div class="grid gap-2">
-            <div class="flex items-center justify-between gap-2">
-              <Label :for="rooms.length ? undefined : 'm-loc'">{{ $t('meetings.location') }}</Label>
-              <button v-if="workspaces.can('policy.write')" type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" @click="roomsOpen = true"><DoorOpen class="size-3" /> {{ $t('meetings.rooms') }}</button>
+      <form class="flex min-h-0 flex-col" @submit.prevent="save">
+        <div class="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_18rem]">
+          <div class="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto px-1 pr-8 pb-4 -mx-1">
+            <div v-if="!meeting" role="group" :aria-label="$t('timesheet.whatToAdd')" class="inline-flex gap-0.5 self-start rounded-lg bg-muted p-0.5">
+              <Button type="button" size="sm" variant="ghost" class="h-7" aria-pressed="false" @click="toEntry">{{ $t('timesheet.addKindEntry') }}</Button>
+              <Button type="button" size="sm" variant="outline" class="h-7" aria-pressed="true">{{ $t('timesheet.addKindMeeting') }}</Button>
             </div>
-            <Select v-if="rooms.length" :model-value="form.roomId ?? NO_ROOM" @update:model-value="(v) => (form.roomId = v === NO_ROOM ? null : String(v))">
-              <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem :value="NO_ROOM">{{ $t('meetings.otherPlace') }}</SelectItem>
-                <SelectItem v-for="r in rooms" :key="r.id" :value="r.id">
-                  {{ r.name }}<span v-if="r.capacity" class="text-muted-foreground"> · {{ $t('rooms.capacity', { n: r.capacity }) }}</span><span v-if="roomBooked.has(r.id)" class="text-amber-600"> · {{ $t('meetings.booked') }}</span>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <Input v-else id="m-loc" v-model="form.location" maxlength="200" />
+            <div class="grid gap-2"><Label for="m-title">{{ $t('meetings.title') }}</Label><Input id="m-title" v-model="form.title" required maxlength="200" autofocus /></div>
+            <div class="grid grid-cols-4 gap-3">
+              <div class="grid gap-2"><Label for="m-date">{{ $t('entry.startDate') }}</Label><DateInput id="m-date" v-model="form.date" required /></div>
+              <div class="grid gap-2"><Label for="m-start">{{ $t('entry.startTime') }}</Label><TimeInput id="m-start" v-model="form.start" required /></div>
+              <div class="grid gap-2"><Label for="m-end-date">{{ $t('entry.endDate') }}</Label><DateInput id="m-end-date" v-model="form.endDate" required /></div>
+              <div class="grid gap-2"><Label for="m-end">{{ $t('entry.endTime') }}</Label><TimeInput id="m-end" v-model="form.end" required /></div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="grid gap-2">
+                <Label>{{ $t('meetings.repeat') }}</Label>
+                <Select v-model="form.repeat">
+                  <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem v-for="r in REPEATS" :key="r" :value="r">{{ $t(`meetings.repeats.${r}`) }}</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div v-if="form.repeat !== 'none'" class="grid gap-2"><Label for="m-count">{{ $t('meetings.times') }}</Label><Input id="m-count" v-model.number="form.count" type="number" min="1" max="500" /></div>
+            </div>
+            <div v-if="form.repeat === 'weekly'" class="grid gap-2">
+              <Label>{{ $t('meetings.weekdays') }}</Label>
+              <div class="flex flex-wrap gap-1.5" role="group" :aria-label="$t('meetings.weekdays')">
+                <Button
+                  v-for="(name, i) in dayNames"
+                  :key="name"
+                  type="button"
+                  size="sm"
+                  class="min-w-12"
+                  :variant="form.weekdays.includes(i) ? 'default' : 'outline'"
+                  :aria-pressed="form.weekdays.includes(i)"
+                  @click="toggleDay(i)"
+                >{{ name }}</Button>
+              </div>
+              <p class="text-xs text-muted-foreground">{{ $t('meetings.weeklyHint', { time: `${form.start}–${form.end}` }) }}</p>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div class="grid gap-2"><Label>{{ $t('meetings.activity') }}</Label><ActivitySelect v-model="form.activityId" /></div>
+              <div class="grid gap-2"><Label>{{ $t('meetings.project') }}</Label><ProjectSelect v-model="form.projectId" /></div>
+            </div>
+            <div class="grid grid-cols-4 items-end gap-3">
+              <div class="col-span-2 grid gap-2">
+                <Label>{{ $t('entry.tags') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
+                <TagInput v-model="form.tagIds" :project-id="form.projectId" />
+              </div>
+              <div v-if="costCenters.all.length" class="grid gap-2">
+                <Label>{{ $t('costCenters.costCenter') }}</Label>
+                <CostCenterSelect v-model="form.costCenterId" :empty-label="$t('costCenters.automatic')" />
+              </div>
+              <label class="flex h-9 items-center gap-2 text-sm">
+                <Switch v-model="form.billable" />
+                {{ $t('entry.billable') }}
+              </label>
+            </div>
+            <!-- Place and online link side by side; the room warning goes under both. -->
+            <div class="grid grid-cols-2 gap-3">
+              <div class="grid gap-2">
+                <div class="flex items-center justify-between gap-2">
+                  <Label for="m-loc">{{ $t('meetings.location') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
+                  <button v-if="workspaces.can('policy.write')" type="button" class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground" @click="roomsOpen = true"><DoorOpen class="size-3" /> {{ $t('meetings.rooms') }}</button>
+                </div>
+                <PlaceInput id="m-loc" v-model:room-id="form.roomId" v-model:location="form.location" :rooms="rooms" :booked="roomBooked" />
+              </div>
+              <div class="grid gap-2"><Label for="m-url">{{ $t('meetings.onlineUrl') }}</Label><Input id="m-url" v-model="form.url" type="url" placeholder="https://" /></div>
+              <p v-if="form.roomId && roomBooked.has(form.roomId)" class="col-span-2 -mt-1 text-xs text-amber-600">{{ $t('meetings.roomTaken') }}</p>
+            </div>
+            <div class="grid gap-2"><Label for="m-note">{{ $t('meetings.note') }}</Label><NoteEditor id="m-note" v-model="form.note" min-height="6rem" /></div>
           </div>
-          <div class="grid gap-2"><Label for="m-url">{{ $t('meetings.onlineUrl') }}</Label><Input id="m-url" v-model="form.url" type="url" placeholder="https://" /></div>
-          <Input v-if="rooms.length && !form.roomId" v-model="form.location" class="col-span-2" maxlength="200" :placeholder="$t('meetings.otherPlacePlaceholder')" :aria-label="$t('meetings.location')" />
-          <p v-else-if="form.roomId && roomBooked.has(form.roomId)" class="col-span-2 -mt-1 text-xs text-amber-600">{{ $t('meetings.roomTaken') }}</p>
-        </div>
-          </div>
-          <div class="flex flex-col gap-4">
-        <div class="grid grid-cols-2 gap-3">
-          <div class="grid gap-2"><Label>{{ $t('meetings.activity') }}</Label><ActivitySelect v-model="form.activityId" /></div>
-          <div class="grid gap-2"><Label>{{ $t('meetings.project') }}</Label><ProjectSelect v-model="form.projectId" /></div>
-        </div>
-        <div class="grid gap-2">
-          <Label>{{ $t('entry.tags') }} <span class="font-normal text-muted-foreground">{{ $t('common.optional') }}</span></Label>
-          <TagPicker v-model="form.tagIds" :project-id="form.projectId" />
-        </div>
-        <div v-if="costCenters.all.length" class="grid gap-2">
-          <Label>{{ $t('costCenters.costCenter') }}</Label>
-          <CostCenterSelect v-model="form.costCenterId" :empty-label="$t('costCenters.automatic')" />
-        </div>
-        <label class="flex items-center gap-2 text-sm">
-          <Switch v-model="form.billable" />
-          {{ $t('entry.billable') }}
-        </label>
-        <div class="grid gap-2"><Label for="m-note">{{ $t('meetings.note') }}</Label><Textarea id="m-note" v-model="form.note" rows="6" /></div>
+          <div class="flex min-h-0 flex-col gap-2 pl-8">
+            <AttendeePanel v-model="form.attendees" :people="others" />
+            <p v-for="c in conflicts" :key="c.id" class="text-xs text-amber-600">
+              {{ $t('meetings.busy', { name: nameOf(c.id), times: c.times.map((t) => (t.kind === 'absence' ? $t('meetings.absent') : `${clock(t.from)}–${clock(t.to)}`)).join(', ') }) }}
+            </p>
+            <DialogFooter class="mt-auto pt-2">
+              <Button type="button" variant="outline" @click="open = false">{{ $t('common.cancel') }}</Button>
+              <Button type="submit" :disabled="saving">{{ $t('common.save') }}</Button>
+            </DialogFooter>
           </div>
         </div>
-        <DialogFooter class="mt-auto">
-          <Button type="button" variant="outline" @click="open = false">{{ $t('common.cancel') }}</Button>
-          <Button type="submit" :disabled="saving">{{ $t('common.save') }}</Button>
-        </DialogFooter>
       </form>
     </DialogContent>
   </Dialog>
