@@ -39,22 +39,22 @@
     },
     "packages/api-contract": {
       "name": "@zeima/api-contract",
-      "version": "1.0.0-alpha.3",
+      "version": "1.0.0-alpha.4",
       "devDependencies": {
         "openapi-typescript": "^7.13.0",
       },
     },
     "packages/core-wasm": {
       "name": "@zeima/core-wasm",
-      "version": "1.0.0-alpha.3",
+      "version": "1.0.0-alpha.4",
     },
     "packages/shared-fixtures": {
       "name": "@zeima/shared-fixtures",
-      "version": "1.0.0-alpha.3",
+      "version": "1.0.0-alpha.4",
     },
     "server": {
       "name": "@zeima/server",
-      "version": "1.0.0-alpha.3",
+      "version": "1.0.0-alpha.4",
       "dependencies": {
         "@fastify/cors": "^11.3.1",
         "@fastify/helmet": "^13.1.2",
