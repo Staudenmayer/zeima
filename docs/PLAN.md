@@ -210,10 +210,18 @@ What 2.0 deliberately does not include, and why:
 - SSO per org: Keycloak identity providers (Entra ID, Google Workspace, generic SAML/OIDC) linked to the org's email domain; LDAP/AD user federation for self-hosted; SCIM provisioning via a Keycloak SCIM extension; self-service SSO setup page in the admin UI
 - Self-hosted polish: Helm chart, air-gapped install bundle, admin docs, upgrade guide, mountable extra country profiles
 - Addon registry with signing; org addon allowlist
-- Timeular BLE tracker addon; office Wi-Fi location addon
 - Data import: **Toggl and Clockify ✅** (Settings → Data → Import: a detailed CSV export with the columns Project, Client, Description, Billable, Start date/time, End date/time, Tags, English or German headers; date order chosen by the person with a guess from the file; projects and tags matched by name and created; re-importing adds nothing; `zeima_core::import`). Timeular CSV still open (its export has a different layout)
 - Security review / penetration test; GDPR DPA, works-council documentation pack
 - Mobile companion (Tauri mobile) exploration
+
+---
+
+## Phase 8 — Later addons
+
+Last on the plan; each needs work the earlier phases do not.
+
+- [ ] **Microsoft 365 calendar addon: meeting sync.** Reading Outlook events (Microsoft Graph, `Calendars.Read`) and, for the meetings Zeima creates, writing them into the organizer's Outlook calendar with invites, reading the attendees' answers back (RSVP sync), creating an out-of-office event for an approved absence, and syncing when the window gets focus. Needs: an app registration with Microsoft by whoever distributes Zeima (the OAuth client id, `addons/build.sh` would put it in the manifest), a calendar **write permission** in the addon host (today addons only read), and the host events the addon reacts to (`meeting.changed`, `absence.changed`, already there). Zeima meetings keep exporting as `.ics` until then.
+- [ ] **Jira issue linking addon** *(last)*. Tie a time entry to a Jira issue: search and pick an issue when tracking (its key and title in the entry), show the issue on the entry, and optionally send the entry to the issue as a worklog. Needs the user's Jira address and API token (settings and the keychain), the `network` permission for that address only, and a way for an addon to put its own field on the entry dialog.
 
 ---
 

@@ -270,7 +270,6 @@ Cache these in a `daily_summary` table that is recomputed on change, for fast da
 - **Switching** stops the current entry and starts a new one with the same timestamp, so there are no gaps.
 - **Manual entries**: day timeline editor (drag to create or resize), list view, duplicate, split, merge.
 - **Forgotten-timer protection**: the night auto-pause (§5.3) plus a prompt on next start: "Timer ran overnight. Keep until 18:30 / custom / keep all."
-- **Optional (addon, later)**: Timeular physical tracker over Bluetooth LE. Each die face maps to a project.
 
 ### 5.2 Projects & Tags
 - CRUD, archive, color, alias, hierarchy, default billable flag and cost center.
@@ -361,7 +360,7 @@ Delivered as first-party **addons** (§5.12), not built into the app. The addon 
 
 ### 5.11 Work Location View (Org)
 - Week/month grid: rows = users (grouped by group), columns = days. Cells show 🏢 office / 🏠 home / ✈️ travel / 🌴 absent / holiday.
-- Users plan their week ahead (default pattern, e.g. Mon/Wed office). The actual location can be set by a one-click tray prompt in the morning (or later, office Wi-Fi SSID detection as an addon).
+- Users plan their week ahead (default pattern, e.g. Mon/Wed office). The actual location can be set by a one-click tray prompt in the morning.
 - Office capacity per day (e.g. desk count) with a warning when full.
 
 ### 5.12 Addon System
@@ -374,7 +373,7 @@ Delivered as first-party **addons** (§5.12), not built into the app. The addon 
 - **Hooks** (event bus): `entry.started`, `entry.stopped`, `entry.created/updated/deleted`, `day.closed`, `meeting.changed` (created, updated, cancelled, answered), `absence.changed` (created, updated, deleted, approved, rejected), `report.export` (custom export formats), `quickswitch.suggest`, `schedule.tick` (with the user's local date and time), `timeline.events`. Developer guide: `docs/addons.md`.
 - **UI contributions** (v2): settings panel (declarative JSON form schema), dashboard widget (declarative chart spec), report export format. No arbitrary HTML/JS in v1, for security.
 - **Distribution**: local install from file in v1. Later a signed registry, and orgs can allowlist addons.
-- First-party addons to prove the API: calendars (§5.7, the first ones), Jira/GitHub issue linking, configurable CSV export format, Timeular BLE tracker, office Wi-Fi detection.
+- First-party addons to prove the API: calendars (§5.7, the first ones), configurable CSV export format, and later a Microsoft 365 calendar addon with meeting sync and Jira issue linking (PLAN Phase 8).
 
 ### 5.13 Country Profiles (Jurisdictions)
 All country-specific behaviour is **data, not code**. Adding a country means adding one file plus fixture tests. No Rust or Vue changes are needed.
