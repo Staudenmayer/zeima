@@ -100,6 +100,15 @@ pub fn feed_url(address: &str) -> String {
     a.to_string()
 }
 
+/// The `Authorization` header for a calendar that asks for a user name and password.
+pub fn basic_auth(user: &str, password: &str) -> String {
+    use base64::Engine;
+    format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(format!("{user}:{password}"))
+    )
+}
+
 #[cfg(target_arch = "wasm32")]
 mod plugin {
     use extism_pdk::{config, http, plugin_fn, FnResult, HttpRequest, Json};
@@ -119,16 +128,25 @@ mod plugin {
         if !url.starts_with("https://") && !url.starts_with("http://") {
             return Err(extism_pdk::Error::msg("The address must start with https:// or webcal://.").into());
         }
-        let res = http::request::<()>(
-            &HttpRequest::new(&url).with_header("Accept", "text/calendar, */*"),
-            None,
-        )?;
+        let mut request = HttpRequest::new(&url).with_header("Accept", "text/calendar, */*");
+        let user = setting("username");
+        if !user.trim().is_empty() {
+            request = request.with_header(
+                "Authorization",
+                crate::basic_auth(user.trim(), &setting("password")),
+            );
+        }
+        let res = http::request::<()>(&request, None)?;
         let status = res.status_code();
         if !(200..300).contains(&status) {
-            return Err(extism_pdk::Error::msg(format!(
-                "The calendar server answered {status}. Check the link."
-            ))
-            .into());
+            let hint = if status == 401 {
+                " Check the user name and password."
+            } else {
+                " Check the link."
+            };
+            return Err(
+                extism_pdk::Error::msg(format!("The calendar server answered {status}.{hint}")).into(),
+            );
         }
         let body = String::from_utf8_lossy(&res.body()).into_owned();
         let stored = crate::build_store(&body, tick.now).map_err(extism_pdk::Error::msg)?;
@@ -214,6 +232,11 @@ END:VCALENDAR\r\n";
         let old = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:o\r\nSUMMARY:old\r\nDTSTART:20200101T100000Z\r\nDTEND:20200101T110000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let stored = build_store(old, ms(2026, 11, 1)).unwrap();
         assert_eq!(stored, "[]");
+    }
+
+    #[test]
+    fn the_login_is_a_basic_authorization() {
+        assert_eq!(basic_auth("ada", "pw"), "Basic YWRhOnB3");
     }
 
     #[test]

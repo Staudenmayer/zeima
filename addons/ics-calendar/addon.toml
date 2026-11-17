@@ -1,10 +1,11 @@
 # Shows the events of an ICS feed (Outlook, Google, Nextcloud, Apple and most
-# other calendars can publish one) in the timesheet. Read-only; no account.
+# other calendars can publish one) in the timesheet. Read-only. A calendar that wants
+# a user name and password (a Nextcloud, Radicale or Baikal export address) works too.
 id = "dev.zeima.ics-calendar"
 name = "ICS calendar"
 version = "1.0.0"
 author = "Zeima"
-description = "Shows the events of a calendar feed (an .ics link) in the timesheet. Click an event to track it."
+description = "Shows the events of a calendar feed (an .ics link, or a CalDAV calendar's export address) in the timesheet. Click an event to track it."
 min_app_version = "1.0.0"
 wasm = "ics_calendar.wasm"
 permissions = ["network"]
@@ -18,7 +19,18 @@ key = "url"
 label = "Calendar address (ICS link)"
 type = "text"
 required = true
-description = "The \"subscribe\" or \"publish\" link of your calendar, ending in .ics. webcal:// links work too. Anyone with the link can read the calendar, so treat it like a password."
+description = "The \"subscribe\" or \"publish\" link of your calendar, ending in .ics. webcal:// links work too. Anyone with the link can read the calendar, so treat it like a password. For a calendar on a CalDAV server (Nextcloud, Radicale, Baikal), use its export address, such as https://cloud.example.com/remote.php/dav/calendars/you/personal/?export, and fill in the user name and password."
+
+[[settings]]
+key = "username"
+label = "User name (only if the calendar asks for one)"
+type = "text"
+
+[[settings]]
+key = "password"
+label = "Password (only if the calendar asks for one)"
+type = "password"
+description = "Use an app password if the service offers them."
 
 [[settings]]
 key = "hide_cancelled"

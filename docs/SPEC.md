@@ -71,7 +71,7 @@ It runs fully offline for one person. A paid tier adds sync and organization fea
 │                            ├─ work-time calculator (schedules, balances)       │
 │                            ├─ event bus ──► addon host (WASM, Extism)          │
 │                            └─ change log (outbox) ──► sync client (paid)       │
-│    integrations: calendar (MS Graph / Google / ICS), keyring for secrets       │
+│    integrations: calendar (ICS), keyring for secrets       │
 └────────────────────────────────────────┬───────────────────────────────────────┘
              OIDC login (system browser,     │ HTTPS REST + WebSocket
              Auth Code + PKCE)               │ Bearer access token (paid tiers only)
@@ -233,7 +233,7 @@ Pauses are first-class records, not holes in entries, so auto-pause decisions ca
 **Meeting** — `title, organizer_id, start_at, end_at, tz, location / online_url, project_id, cost_center_id, recurrence (RRULE), calendar_ref`
 **MeetingAttendee** — `meeting_id, user_id | external_email, response (none|accepted|tentative|declined)`
 
-**CalendarAccount** — `provider (msgraph|google|caldav|ics), account_label, sync_cursor, enabled` (tokens live in the keychain)
+**CalendarAccount** — the address of an ICS feed and, if it needs one, a user name and password (the password lives in the keychain)
 **CalendarEvent** (cache) — `account_id, external_id, title, start_at, end_at, is_all_day, show_as (busy|free|oof), location, raw_json`
 **CalendarMapping** — rules that map events to projects/tags (e.g. title contains "Standup" → project INT, tag Meeting)
 
@@ -325,14 +325,10 @@ Reports page: filter by period, user(s), group, project, tag, cost center or bil
 
 ### 5.7 Calendar Integration
 Delivered as first-party **addons** (§5.12), not built into the app. The addon host provides the secret store, OAuth helper, scheduled sync and a timeline contribution they need.
-- Providers:
-  - **Microsoft 365 / Outlook** (Microsoft Graph, OAuth 2 PKCE, loopback redirect)
-  - **Google Calendar** (OAuth 2 PKCE)
-  - **CalDAV** and **ICS URL** (read-only)
+- Source: an **ICS URL** (read-only). Calendars on a CalDAV server are read through the server's `.ics` export address, with a user name and password if it asks for them.
 - **Read**: show events in the day timeline, suggest entries from events, auto-create entries via mapping rules (opt-in), and pause or switch the timer on meeting start (opt-in).
-- **Write** (org Meetings, §5.8): create, update and cancel events in the organizer's calendar and send invites through the provider.
-- **Out-of-office**: approved absences can create OOF events. Calendar OOF can suggest absences.
-- Sync runs every 5 min plus on window focus, with incremental delta tokens (Graph `delta`, Google `syncToken`).
+- Meetings (§5.8) export as `.ics` for any calendar program; they are not written into the organizer's calendar.
+- Sync runs every 15 min.
 
 ### 5.8 Meetings (Org)
 - Schedule a meeting with org users and/or external emails. Shows a free/busy grid from attendees' work schedules, absences, work location and calendar busy times.
@@ -557,7 +553,7 @@ The **cloud** (EU region, GDPR) is the primary product and gets features first. 
 | Concern | Rule |
 |---|---|
 | Dependencies | Only **Postgres** and **Keycloak** are required. Self-hosters can use the bundled Keycloak or an existing Keycloak 26+ (import our realm). Optional: S3-compatible object storage (else local disk), SMTP (else email features disabled), Redis-free. No managed cloud services (no SQS, no Cognito, etc.). |
-| Configuration | Everything via env vars: base URL, DB URL, `KEYCLOAK_URL` / realm / admin client secret, SMTP, storage, calendar OAuth client IDs (self-hosters register their own Microsoft/Google apps), log level. Validated at start-up. |
+| Configuration | Everything via env vars: base URL, DB URL, `KEYCLOAK_URL` / realm / admin client secret, SMTP, storage, log level. Validated at start-up. |
 | Mode flag | `deployment_mode = "cloud" \| "self_hosted"`. Cloud-only modules (billing, signup, multi-org admin, usage telemetry) are compiled in but disabled in self-hosted mode. |
 | Licensing | Cloud: entitlements come from billing. Self-hosted: an **offline license file** (same signed entitlement format: org, seats, features, expiry) is uploaded in the admin UI. No phone-home required; an optional online check gives automatic renewal. |
 | Tenancy | Cloud is multi-tenant (RLS). Self-hosted usually runs a single org, but uses the same schema. |
