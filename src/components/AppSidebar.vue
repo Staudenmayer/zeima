@@ -47,6 +47,10 @@ onMounted(async () => {
 })
 // A sync may have brought in an organization's workspace.
 watch(() => account.sync?.lastSyncedAt, () => void workspaces.load().catch(() => {}))
+// Signing out puts the person back in their own workspace; the list and the active one follow.
+watch(() => account.status.signedIn, (signedIn) => {
+  if (!signedIn) void workspaces.load().catch(() => {})
+})
 // What waits for the person's decision shows next to the Approvals entry.
 watch(
   () => [workspaces.active?.id, account.sync?.lastSyncedAt],

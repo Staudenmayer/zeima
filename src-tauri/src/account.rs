@@ -316,6 +316,7 @@ pub async fn account_set_server(
         sign_out_inner(&addons).await?;
         crate::license::clear(&app).await;
         crate::sync::reset_join(&app).await;
+        crate::workspaces::go_personal(&app).await;
     }
     state
         .core
@@ -404,6 +405,7 @@ pub async fn account_sign_out(
     sign_out_inner(&addons).await?;
     crate::license::clear(&app).await;
     crate::sync::reset_join(&app).await;
+    crate::workspaces::go_personal(&app).await;
     account_status(app, state).await
 }
 

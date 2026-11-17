@@ -145,9 +145,14 @@ pub async fn workspace_switch(app: AppHandle, state: State<'_, AppState>, id: St
         .core
         .set_meta(ACTIVE_KEY, if personal { "" } else { &id })
         .await?;
-    // Everything on screen belongs to the other workspace now.
+    workspace_changed(&app).await;
+    Ok(())
+}
+
+/// Everything on screen belongs to another workspace now.
+async fn workspace_changed(app: &AppHandle) {
     changed(
-        &app,
+        app,
         &[
             DataKind::Activity,
             DataKind::Project,
@@ -158,7 +163,19 @@ pub async fn workspace_switch(app: AppHandle, state: State<'_, AppState>, id: St
         ],
     )
     .await;
-    Ok(())
+}
+
+/// Back to the personal workspace, for when the account is gone: signing out
+/// (or choosing another server) must not leave the person in an organization's
+/// workspace they can no longer open. Does nothing if they are in their own.
+pub async fn go_personal(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    if state.data().ctx().workspace_id == state.core.ctx().workspace_id {
+        return;
+    }
+    state.set_active(None);
+    let _ = state.core.set_meta(ACTIVE_KEY, "").await;
+    workspace_changed(app).await;
 }
 
 /// Goes back to the workspace the person last worked in.
