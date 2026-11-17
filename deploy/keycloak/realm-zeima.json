@@ -46,6 +46,7 @@
   "otpPolicyPeriod": 30,
 
   "eventsEnabled": true,
+  "eventsListeners": ["jboss-logging", "zeima-webhook"],
   "eventsExpiration": 2592000,
   "adminEventsEnabled": true,
   "adminEventsDetailsEnabled": false,

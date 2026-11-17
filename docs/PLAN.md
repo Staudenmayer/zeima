@@ -119,7 +119,7 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 **5a. Keycloak setup**
 - [x] `deploy/keycloak/realm-zeima.json`: realm `zeima`, clients `zeima-desktop`, `zeima-api`, `zeima-api-admin`, `zeima-swagger`, `zeima-web` (SPEC §7.2), audience mapper, password/MFA/brute-force policy, Organizations on, self-registration, de/en. *Org roles come from the built-in group mapper with full paths (`/orgs/<orgId>/roles/<role>`) instead of a custom `orgs` claim mapper, so no Java extension is needed. Environment-specific values (secrets, URLs, SMTP) are `${VAR:default}` placeholders resolved at import. The names were `time-*` before the rename to Zeima.*
 - [x] Development stack `deploy/compose.dev.yml`: Postgres 17 (databases `zeima` and `keycloak`), Keycloak 26.8 with realm import, Mailpit, and the API as an optional profile. *First run done 2026-11-13 (Podman, Keycloak 26.8.1): the realm imports, the `${VAR}` placeholders resolve (SMTP host), and the desktop client accepts the loopback redirect on any port (`http://127.0.0.1:54321/callback` reaches the login page). Bind mounts use `:z` so they work with SELinux (Fedora).*
-- [ ] Event-listener extension → HMAC-signed webhook to the API. *Moved to Phase 6: it keeps the organization/group mirror current, which exists only with organizations. Individuals are covered by the token upsert (`identity.ts`).*
+- [x] Event-listener extension → HMAC-signed webhook to the API (`deploy/keycloak/listener`; Phase 6 in the end: it keeps the organization/group mirror current).
 - [x] Login theme (`deploy/keycloak/themes/zeima/login`, extends `keycloak.v2`: logo, colors, "Email" label; selected with `loginTheme` in the realm). Checked by screenshot against the self-hosted stack.
 - [x] `keycloak-config-cli`: `deploy/keycloak/apply.sh` applies the realm file to a running Keycloak (placeholders converted); tried against the dev Keycloak and run in CI (job `selfhosted`) before the sign-in test. `docs/keycloak.md`.
 
@@ -178,7 +178,7 @@ Order is by dependency:
 
 What 2.0 deliberately does not include, and why:
 - **Calendar write-through of meetings** is not built. Meetings export as `.ics` for any calendar program.
-- **Keycloak event listener.** The API accepts signed events (`POST /v1/internal/keycloak-events`) but the listener itself (a Keycloak provider) is not shipped; the nightly check and `POST /v1/orgs/:id/reconcile` keep the copy right meanwhile.
+- **Keycloak event listener.** `deploy/keycloak/listener` (a Keycloak provider, `zeima-webhook`) tells the API about user, group, membership and organization changes (`POST /v1/internal/keycloak-events`); the Keycloak image of the compose files contains it and the realm switches it on. The nightly check and `POST /v1/orgs/:id/reconcile` still back it up.
 - **Several API instances.** Presence is held in one process; a second instance needs a shared channel (Postgres `LISTEN/NOTIFY` or Redis).
 - **Auto-pause per department** is a suggested idle time (the shortest wins when shorter than the person's own), not a forced setting.
 - **Windows and macOS** builds of all this are untested here (only Linux); signing, billing and cloud hosting need the operator's accounts (see `docs/setup-server.md`).

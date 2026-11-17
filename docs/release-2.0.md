@@ -47,6 +47,10 @@ organization:
   Without `KEYCLOAK_ADMIN_CLIENT_SECRET` the organization routes answer 503.
   Keycloak needs working SMTP to send invitations. With Organizations in use,
   the sign-in page asks for the address first and the password second.
+- **Keycloak is built**: the compose files build the Keycloak image from
+  `deploy/keycloak/Dockerfile` (the standard image plus the event listener), so
+  update with `docker compose up -d --build`. Maven runs inside the build; nothing
+  is needed on the host.
 - **New settings**: `KEYCLOAK_ADMIN_CLIENT_SECRET` (the compose files set it
   from `API_ADMIN_SECRET`), `KEYCLOAK_WEBHOOK_SECRET` (optional),
   `RECONCILE_INTERVAL_HOURS` (default 24). See `server/README.md` and
@@ -76,5 +80,5 @@ organization:
 ## Known limits
 
 See "State for 2.0" in `docs/PLAN.md`: no calendar write-through for meetings
-(`.ics` instead), no shipped Keycloak event listener (nightly check instead),
+(`.ics` instead), Keycloak changes reach the API at once only when `KEYCLOAK_WEBHOOK_SECRET` is set (else the nightly check),
 presence on one API instance, auto-pause per department is a suggestion.

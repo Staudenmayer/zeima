@@ -96,6 +96,18 @@ jobs:
 
   # Boots the self-hosted stack (deploy/docker-compose.yml) and runs a real
   # sign-in and sync against it, so self-hosting cannot silently break.
+  keycloak-listener:
+    # The Keycloak event listener (deploy/keycloak/listener): a Maven project.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - run: mvn -B -f deploy/keycloak/listener/pom.xml verify
+
   selfhosted:
     runs-on: ubuntu-latest
     env:

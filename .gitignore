@@ -36,3 +36,4 @@ packages/core-wasm/pkg
 
 # Developer-local copy of deploy/dev.env.example
 deploy/dev.env
+deploy/keycloak/listener/target/

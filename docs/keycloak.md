@@ -69,15 +69,40 @@ and who is in them in its own database, and checks that copy against Keycloak:
 - when Keycloak says something changed: `POST /v1/internal/keycloak-events`,
   switched on by setting `KEYCLOAK_WEBHOOK_SECRET` (16 or more characters).
 
-The webhook is for an event listener you add to Keycloak (a small provider
-that posts the events of interest). The body is JSON like
-`{"type":"GROUP_MEMBERSHIP","orgId":"<uuid>"}` or `{"type":"UPDATE_PROFILE","userId":"<uuid>"}`,
-signed with HMAC-SHA256 of the exact bytes sent, in the header
+The webhook is called by the **event listener** that ships with the stack
+(`deploy/keycloak/listener`, a small Keycloak provider, id `zeima-webhook`). The
+Keycloak image built from `deploy/keycloak/Dockerfile` contains it, and the realm
+file switches it on (`eventsListeners`). It needs the API's address and the secret,
+which the compose files pass as `ZEIMA_WEBHOOK_URL` and `ZEIMA_WEBHOOK_SECRET`; the
+production stack sets them when `KEYCLOAK_WEBHOOK_SECRET` is set (16 characters or
+more, the same on the API), and without a secret the listener does nothing.
+
+It tells the API about:
+
+| In Keycloak | Sent |
+|---|---|
+| A person registers, changes their profile or email, verifies their email, deletes their account | `{"type":"UPDATE_PROFILE","userId":"…"}` |
+| An administrator changes a user, or their role mappings | `{"type":"USER","userId":"…"}` |
+| A group of an organization (department or role) is created, changed or deleted, or a person is added to or removed from one | `{"type":"GROUP_MEMBERSHIP","orgId":"…"}` (the organization comes from the group's path `/orgs/<orgId>/…`; a group that is already gone is reported by the person, if known) |
+| A Keycloak organization, its members or groups change | `{"type":"ORGANIZATION_MEMBERSHIP","orgId":"…"}` |
+
+Each body is JSON, signed with HMAC-SHA256 of the exact bytes sent, in the header
 `x-zeima-signature: sha256=<hex>`. The event only says where to look: the API
 re-reads that organization (or the person's organizations) from Keycloak, so a
-forged or replayed event can do no harm beyond an extra check. Without a
-listener the nightly check keeps the copy right. This repository does not ship
-the listener.
+forged or replayed event can do no harm beyond an extra check.
+
+The listener sends a notice only after Keycloak has committed the change (before
+that, the API would read the old state), once per change however often it is
+repeated in one transaction. It posts from its own thread, so Keycloak never waits
+for the API; it tries three times (a refusal such as a wrong secret is not
+repeated) and then gives up, and the nightly check catches up. The change was made
+in Keycloak, so a missed notice costs only time.
+
+Build and test it with `mvn -f deploy/keycloak/listener/pom.xml verify` (Java 21);
+CI does the same. For a Keycloak you run yourself, copy
+`target/zeima-keycloak-listener.jar` into its `providers/` folder, set the two
+variables, and add `zeima-webhook` to the realm's event listeners (Realm settings →
+Events). Admin events must be enabled for the realm (the realm file does).
 
 Invitations are sent by Keycloak, so it needs a working SMTP server
 (`ZEIMA_SMTP_*`; the dev stack uses Mailpit). With Organizations switched on,
