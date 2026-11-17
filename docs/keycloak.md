@@ -1,4 +1,4 @@
-# Keycloak: realm, social login, theme
+# Keycloak: realm and theme
 
 The realm lives in `deploy/keycloak/realm-zeima.json` (realm `zeima`, clients
 `zeima-desktop`, `zeima-api`, `zeima-api-admin`, `zeima-swagger`, `zeima-web`).
@@ -38,27 +38,13 @@ stack (`compose.dev.yml`) serves the folder directly, so a reload shows the
 change; an existing realm takes the theme names with `apply.sh` or in the admin
 console (Realm settings → Themes).
 
-## Google and Microsoft sign-in (cloud)
+## Other ways to sign in
 
-These need an OAuth client registered with each provider, which only the
-operator of the installation can do. Steps:
-
-1. Register an OAuth client with the provider:
-   - **Google**: Cloud console → APIs & Services → Credentials → OAuth client
-     (type Web). Redirect URI: `https://<ID_URL>/realms/zeima/broker/google/endpoint`.
-   - **Microsoft**: Entra ID → App registrations (multi-tenant + personal
-     accounts). Redirect URI: `https://<ID_URL>/realms/zeima/broker/microsoft/endpoint`.
-2. Keycloak admin console → realm `zeima` → Identity providers → add the
-   provider and enter the client id and secret. (Alternatively add an
-   `identityProviders` entry to the realm file with the secret as a
-   `${ZEIMA_GOOGLE_CLIENT_SECRET}` placeholder and apply it with
-   `apply.sh`; keep the secret out of the repository.)
-3. Set "Trust email" only for providers whose addresses are verified, and keep
-   "First login flow" on the default so a Google user with the same address as
-   an existing user is asked to link accounts instead of silently merged.
-
-Self-hosted installations use Keycloak's own user federation (LDAP/AD) or
-identity providers instead (SPEC §7.2).
+People sign in with an email address and a password (self-registration, with
+email verification, is on in the realm). Zeima does not ship Google or
+Microsoft sign-in. An installation that wants its own directory connects it in
+Keycloak: user federation (LDAP/AD) or identity providers (Entra ID, Google
+Workspace, SAML/OIDC); see SPEC §7.2.
 
 ## Organizations: roles, departments and the API's copy
 

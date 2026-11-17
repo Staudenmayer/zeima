@@ -103,7 +103,7 @@ It runs fully offline for one person. A paid tier adds sync and organization fea
 | Domain code | Separate crate **`crates/zeima-core`** with no Tauri dependency | Unit-testable. It is also compiled to **WASM** (`@zeima/core-wasm`) so the Node server uses exactly the same work-time math, country profiles and holiday rules as the desktop. That requires pure logic to stay I/O-free, with SQLite repositories behind a `db` cargo feature. |
 | Server | **Fastify** (TypeScript, Node 24 LTS) + TypeBox schemas | Fast, schema-first. Every route schema produces the OpenAPI document, request validation and response serialization from a single definition. |
 | API docs / contract | **@fastify/swagger** (OpenAPI 3.1) + **@fastify/swagger-ui** at `/docs` | The generated `openapi.json` is the contract. The desktop Rust sync client and the Vue API types are generated from it. |
-| Identity & access | **Keycloak** (OIDC) | Handles login, MFA, password reset, social login, enterprise SSO (Entra ID, Google, SAML, LDAP/AD) and org/role assignment without us building it. It is self-hostable, which matches §7.1. |
+| Identity & access | **Keycloak** (OIDC) | Handles login, MFA, password reset, enterprise SSO (Entra ID, Google, SAML, LDAP/AD) and org/role assignment without us building it. It is self-hostable, which matches §7.1. |
 | Server DB access | **Drizzle ORM** + drizzle-kit migrations (Postgres) | Typed SQL, plain SQL migration files, works with RLS. |
 | IDs | **UUIDv7** (time-sortable), generated client-side | Records can be created offline on any device without collisions. |
 | Time storage | UTC `INTEGER` unix-millis + IANA `tz` column on entries | Correct handling of DST, travel and cross-midnight entries. |
@@ -545,7 +545,7 @@ App tables need foreign keys to users and groups (entries, schedules, cost-cente
 
 Writes always go to Keycloak first (through the API's admin endpoints), then the mirror.
 
-**Pro (personal) users** register through Keycloak self-registration or Google/Microsoft social login. They have no organization; their data lives in their personal workspace.
+**Pro (personal) users** register through Keycloak self-registration. They have no organization; their data lives in their personal workspace.
 
 **Login theme**: a custom Keycloak login theme in app branding, translated de/en (Keycloakify or FreeMarker), in `deploy/keycloak/themes/zeima`.
 

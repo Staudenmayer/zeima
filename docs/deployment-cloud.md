@@ -34,7 +34,6 @@ Internet ─ CDN/WAF ─ load balancer (TLS) ─┬─ API ×2+      (server/Doc
 - **Billing**: Lemon Squeezy webhook → `POST /v1/billing/webhook`
   (`BILLING_WEBHOOK_SECRET`, `BILLING_STORE_URL`, `BILLING_PLANS`; see
   `server/README.md`). Only the cloud registers these routes.
-- **Social login**: `docs/keycloak.md`.
 - **Mail**: an SMTP relay for Keycloak (verification, password reset) with SPF,
   DKIM and DMARC set up for the sender domain.
 

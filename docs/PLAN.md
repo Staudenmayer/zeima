@@ -119,7 +119,6 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 **5a. Keycloak setup**
 - [x] `deploy/keycloak/realm-zeima.json`: realm `zeima`, clients `zeima-desktop`, `zeima-api`, `zeima-api-admin`, `zeima-swagger`, `zeima-web` (SPEC §7.2), audience mapper, password/MFA/brute-force policy, Organizations on, self-registration, de/en. *Org roles come from the built-in group mapper with full paths (`/orgs/<orgId>/roles/<role>`) instead of a custom `orgs` claim mapper, so no Java extension is needed. Environment-specific values (secrets, URLs, SMTP) are `${VAR:default}` placeholders resolved at import. The names were `time-*` before the rename to Zeima.*
 - [x] Development stack `deploy/compose.dev.yml`: Postgres 17 (databases `zeima` and `keycloak`), Keycloak 26.8 with realm import, Mailpit, and the API as an optional profile. *First run done 2026-11-13 (Podman, Keycloak 26.8.1): the realm imports, the `${VAR}` placeholders resolve (SMTP host), and the desktop client accepts the loopback redirect on any port (`http://127.0.0.1:54321/callback` reaches the login page). Bind mounts use `:z` so they work with SELinux (Fedora).*
-- [ ] Google/Microsoft social login (cloud). *Needs OAuth clients registered with each provider, which only the operator can do; the steps are in `docs/keycloak.md`.*
 - [ ] Event-listener extension → HMAC-signed webhook to the API. *Moved to Phase 6: it keeps the organization/group mirror current, which exists only with organizations. Individuals are covered by the token upsert (`identity.ts`).*
 - [x] Login theme (`deploy/keycloak/themes/zeima/login`, extends `keycloak.v2`: logo, colors, "Email" label; selected with `loginTheme` in the realm). Checked by screenshot against the self-hosted stack.
 - [x] `keycloak-config-cli`: `deploy/keycloak/apply.sh` applies the realm file to a running Keycloak (placeholders converted); tried against the dev Keycloak and run in CI (job `selfhosted`) before the sign-in test. `docs/keycloak.md`.
@@ -157,7 +156,7 @@ Goal: track time on projects with tags from the tray. A daily-driver for one use
 - [~] Cloud deployment: `docs/deployment-cloud.md` (architecture, Keycloak HA settings, backups, monitoring, secrets, pre-launch checks). *Provisioning the EU hosting, managed Postgres, Keycloak cluster and monitoring needs accounts that are not in the repository.*
 - [x] API versioning (`/v1`) + compatibility check: discovery lists `apiVersions` and `minClientVersion` (`MIN_CLIENT_VERSION`); the app refuses a server it is too old for and says so; CI fails pull requests that break the contract (`oasdiff`).
 
-> 🎯 **Release 1.1 (Pro)**: multi-device sync for individuals. *Code complete for 1.1, including sync of the work-time settings, except what needs outside accounts: social login (provider clients), the Lemon Squeezy store, signing certificates, the EU cloud environment, and the first calendar addons (Phase 4).*
+> 🎯 **Release 1.1 (Pro)**: multi-device sync for individuals. *Code complete for 1.1, including sync of the work-time settings, except what needs outside accounts: the Lemon Squeezy store, signing certificates, the EU cloud environment, and the first calendar addons (Phase 4).*
 
 ---
 
@@ -182,7 +181,7 @@ What 2.0 deliberately does not include, and why:
 - **Keycloak event listener.** The API accepts signed events (`POST /v1/internal/keycloak-events`) but the listener itself (a Keycloak provider) is not shipped; the nightly check and `POST /v1/orgs/:id/reconcile` keep the copy right meanwhile.
 - **Several API instances.** Presence is held in one process; a second instance needs a shared channel (Postgres `LISTEN/NOTIFY` or Redis).
 - **Auto-pause per department** is a suggested idle time (the shortest wins when shorter than the person's own), not a forced setting.
-- **Windows and macOS** builds of all this are untested here (only Linux); signing, billing, social login and cloud hosting need the operator's accounts (see `docs/setup-server.md`).
+- **Windows and macOS** builds of all this are untested here (only Linux); signing, billing and cloud hosting need the operator's accounts (see `docs/setup-server.md`).
 
 **Meetings and absences, follow-ups** (done, in the repository):
 

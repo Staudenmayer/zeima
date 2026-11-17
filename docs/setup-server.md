@@ -12,7 +12,6 @@ guides: [releasing.md](./releasing.md), [keycloak.md](./keycloak.md),
 | Entitlement public key (app builds trust it) | Done: GitHub variable `ZEIMA_ENTITLEMENT_KEYS` set |
 | Entitlement private key on a server | Needed only for a cloud server or for issuing licenses (below) |
 | macOS / Windows code signing | Later |
-| Google / Microsoft sign-in | Later |
 | Billing (Lemon Squeezy) | Later |
 | Cloud hosting | Later; the single-machine stack is `deploy/docker-compose.yml` |
 
@@ -160,8 +159,6 @@ app checks them offline against a public key built in.
 - **Billing** (cloud only): create a Lemon Squeezy store, add the webhook
   `POST /v1/billing/webhook` and set `BILLING_STORE_URL`, `BILLING_WEBHOOK_SECRET`
   and `BILLING_PLANS` on the cloud server. Details in `server/README.md`.
-- **Google / Microsoft sign-in**: register OAuth clients with the providers and add
-  them in Keycloak. Steps in [keycloak.md](./keycloak.md).
 - **Code signing**: macOS needs an Apple Developer ID certificate (secrets are
   already wired in the release workflow); Windows needs a certificate or Azure
   Trusted Signing. See [releasing.md](./releasing.md). Without signing the
