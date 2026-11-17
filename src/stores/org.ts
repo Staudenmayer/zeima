@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { commands, type OrgPolicy, type PolicySettings } from '@/bindings'
+import { api, ok } from '@/lib/api'
 import { call } from '@/lib/ipc'
 import i18n from '@/plugins/i18n'
 
@@ -140,12 +141,6 @@ export const useOrgStore = defineStore('org', () => {
   /** How wide: their own, their departments' or everyone's; null if not at all. */
   const scopeOf = (action: string): Scope | null => permissions.value[action] ?? null
 
-  /** Request to the server; the answer is parsed JSON, or null for "no content". */
-  async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const text = await call(commands.orgRequest(method, path, body === undefined ? null : JSON.stringify(body)))
-    return (text ? JSON.parse(text) : null) as T
-  }
-
   /** A person's name, from what the role may read of the members or else the names list. */
   function nameOf(id: string): string {
     const m = members.value.find((x) => x.id === id)
@@ -158,13 +153,15 @@ export const useOrgStore = defineStore('org', () => {
     return people.value.find((x) => x.id === id)?.avatar ?? directory.value.find((x) => x.id === id)?.avatar ?? null
   }
 
-  const base = () => `/v1/orgs/${activeId.value}`
+  /** The organization every call is about. */
+  const orgId = () => activeId.value as string
 
   async function loadOrgs() {
-    const me = await api<{ id: string; avatar: string | null; orgs: OrgSummary[] }>('GET', '/v1/me')
+    const me = ok(await api.GET('/v1/me'))
     myId.value = me.id
     myAvatar.value = me.avatar
-    orgs.value = me.orgs
+    // The contract types a scope as a string; the server only sends `own`, `group` or `org`.
+    orgs.value = me.orgs as OrgSummary[]
     if (!orgs.value.some((o) => o.id === activeId.value)) activeId.value = orgs.value[0]?.id ?? null
   }
 
@@ -173,13 +170,13 @@ export const useOrgStore = defineStore('org', () => {
     try {
       await loadOrgs()
       if (!activeId.value) return
-      info.value = await api<OrgInfo>('GET', base())
+      info.value = ok(await api.GET('/v1/orgs/{orgId}', { params: { path: { orgId: orgId() } } }))
       await loadRoles().catch(() => {})
-      people.value = await api<{ id: string; name: string | null; avatar: string | null }[]>('GET', `${base()}/people`).catch(() => [])
+      people.value = await loadPeople()
       const [m, g, i] = await Promise.all([
-        can('member.read') ? api<Member[]>('GET', `${base()}/members`) : Promise.resolve([] as Member[]),
-        api<Department[]>('GET', `${base()}/groups`),
-        can('member.invite') ? api<Invitation[]>('GET', `${base()}/invitations`) : Promise.resolve([]),
+        can('member.read') ? api.GET('/v1/orgs/{orgId}/members', { params: { path: { orgId: orgId() } } }).then(ok) : Promise.resolve([] as Member[]),
+        api.GET('/v1/orgs/{orgId}/groups', { params: { path: { orgId: orgId() } } }).then(ok),
+        can('member.invite') ? api.GET('/v1/orgs/{orgId}/invitations', { params: { path: { orgId: orgId() } } }).then(ok) : Promise.resolve([] as Invitation[]),
       ])
       members.value = m
       departments.value = g
@@ -209,40 +206,45 @@ export const useOrgStore = defineStore('org', () => {
   /** Names and presence only: what a widget needs, without loading the whole organization. */
   async function loadGlance(orgId: string) {
     activeId.value = orgId
-    people.value = await api<{ id: string; name: string | null; avatar: string | null }[]>('GET', `${base()}/people`).catch(() => [])
+    people.value = await loadPeople()
     await loadDirectory().catch(() => {})
     await loadPresence()
   }
 
+  /** Names (and pictures) of everyone in the organization; empty if they cannot be read. */
+  async function loadPeople() {
+    return ok(await api.GET('/v1/orgs/{orgId}/people', { params: { path: { orgId: orgId() } } })) ?? []
+  }
+
   async function loadDirectory() {
-    if (activeId.value) directory.value = await api<DirectoryEntry[]>('GET', `${base()}/directory`)
+    if (activeId.value) directory.value = ok(await api.GET('/v1/orgs/{orgId}/directory', { params: { path: { orgId: orgId() } } }))
   }
 
   async function loadJobs() {
-    if (activeId.value) jobs.value = await api<Job[]>('GET', `${base()}/jobs`)
+    if (activeId.value) jobs.value = ok(await api.GET('/v1/orgs/{orgId}/jobs', { params: { path: { orgId: orgId() } } }))
   }
   async function createJob(name: string, description: string) {
-    await api('POST', `${base()}/jobs`, { name, description })
+    await api.POST('/v1/orgs/{orgId}/jobs', { params: { path: { orgId: orgId() } }, body: { name, description } })
     await loadJobs()
   }
   async function updateJob(id: string, name: string, description: string) {
-    await api('PATCH', `${base()}/jobs/${id}`, { name, description })
+    await api.PATCH('/v1/orgs/{orgId}/jobs/{jobId}', { params: { path: { orgId: orgId(), jobId: id } }, body: { name, description } })
     await Promise.all([loadJobs(), loadDirectory()])
   }
   async function deleteJob(id: string) {
-    await api('DELETE', `${base()}/jobs/${id}`)
+    await api.DELETE('/v1/orgs/{orgId}/jobs/{jobId}', { params: { path: { orgId: orgId(), jobId: id } } })
     await Promise.all([loadJobs(), loadDirectory()])
   }
   /** Gives a person a job description from the list (owners and admins only). */
   async function setJob(userId: string, jobId: string | null) {
-    await api('PUT', `${base()}/members/${userId}/job`, { jobId })
+    await api.PUT('/v1/orgs/{orgId}/members/{userId}/job', { params: { path: { orgId: orgId(), userId } }, body: { jobId } })
     await Promise.all([loadJobs(), loadDirectory()])
   }
 
   /** Sets (a data URL from `shrinkPicture`) or removes (null) the signed-in person's profile picture. */
   async function setMyAvatar(image: string | null) {
-    if (image) await api('PUT', '/v1/me/avatar', { image })
-    else await api('DELETE', '/v1/me/avatar')
+    if (image) await api.PUT('/v1/me/avatar', { body: { image } })
+    else await api.DELETE('/v1/me/avatar')
     myAvatar.value = image
     const mine = people.value.find((x) => x.id === myId.value)
     if (mine) mine.avatar = image
@@ -251,54 +253,54 @@ export const useOrgStore = defineStore('org', () => {
   }
 
   async function loadPresence() {
-    if (activeId.value) presence.value = await api<PresenceItem[]>('GET', `${base()}/presence`)
+    if (activeId.value) presence.value = ok(await api.GET('/v1/orgs/{orgId}/presence', { params: { path: { orgId: orgId() } } }))
   }
 
   async function loadMoreAudit() {
     const before = audit.value[audit.value.length - 1]?.id
-    const page = await api<AuditEntry[]>('GET', `${base()}/audit?limit=50${before ? `&before=${before}` : ''}`)
+    const page = ok(await api.GET('/v1/orgs/{orgId}/audit', { params: { path: { orgId: orgId() }, query: { limit: 50, ...(before && { before }) } } }))
     audit.value.push(...page)
     auditDone.value = page.length < 50
   }
 
   async function create(name: string) {
-    const created = await api<{ id: string }>('POST', '/v1/orgs', { name })
+    const created = ok(await api.POST('/v1/orgs', { body: { name } }))
     activeId.value = created.id
     await load()
   }
 
   async function invite(email: string, inviteRole: Invitation['role'], groupIds: string[] = [], jobId: string | null = null) {
-    await api('POST', `${base()}/invitations`, { email, role: inviteRole, groupIds, jobId })
+    await api.POST('/v1/orgs/{orgId}/invitations', { params: { path: { orgId: orgId() } }, body: { email, role: inviteRole, groupIds, jobId } })
     await load()
   }
 
   /** Changes the departments and job description a pending invitation gives. */
   async function updateInvitation(invitationId: string, change: { groupIds?: string[]; jobId?: string | null }) {
-    await api('PATCH', `${base()}/invitations/${invitationId}`, change)
+    await api.PATCH('/v1/orgs/{orgId}/invitations/{invitationId}', { params: { path: { orgId: orgId(), invitationId } }, body: change })
     await load()
   }
 
   async function withdraw(invitationId: string) {
-    await api('DELETE', `${base()}/invitations/${invitationId}`)
+    await api.DELETE('/v1/orgs/{orgId}/invitations/{invitationId}', { params: { path: { orgId: orgId(), invitationId } } })
     await load()
   }
 
   async function loadRoles() {
     if (!activeId.value) return
-    const answer = await api<{ roles: Role[]; catalog: PermissionDef[] }>('GET', `${base()}/roles`)
-    roles.value = answer.roles
+    const answer = ok(await api.GET('/v1/orgs/{orgId}/roles', { params: { path: { orgId: orgId() } } }))
+    roles.value = answer.roles as Role[]
     catalog.value = answer.catalog
   }
   async function createRole(input: { name: string; description: string; permissions: Permissions }) {
-    await api('POST', `${base()}/roles`, input)
+    await api.POST('/v1/orgs/{orgId}/roles', { params: { path: { orgId: orgId() } }, body: input })
     await Promise.all([loadRoles(), loadOrgs()])
   }
   async function updateRole(key: string, input: { name?: string; description?: string; permissions?: Permissions }) {
-    await api('PATCH', `${base()}/roles/${key}`, input)
+    await api.PATCH('/v1/orgs/{orgId}/roles/{roleKey}', { params: { path: { orgId: orgId(), roleKey: key } }, body: input })
     await Promise.all([loadRoles(), loadOrgs()])
   }
   async function deleteRole(key: string) {
-    await api('DELETE', `${base()}/roles/${key}`)
+    await api.DELETE('/v1/orgs/{orgId}/roles/{roleKey}', { params: { path: { orgId: orgId(), roleKey: key } } })
     await load()
   }
   /** A role's name: the built-in ones in the person's language, the organization's own as written. */
@@ -309,37 +311,39 @@ export const useOrgStore = defineStore('org', () => {
   }
 
   async function updateMember(userId: string, change: { role?: OrgRole; active?: boolean }) {
-    await api('PATCH', `${base()}/members/${userId}`, change)
+    await api.PATCH('/v1/orgs/{orgId}/members/{userId}', { params: { path: { orgId: orgId(), userId } }, body: change })
     await load()
   }
 
   async function removeMember(userId: string) {
-    await api('DELETE', `${base()}/members/${userId}`)
+    await api.DELETE('/v1/orgs/{orgId}/members/{userId}', { params: { path: { orgId: orgId(), userId } } })
     await load()
   }
 
   async function createDepartment(name: string, parentId: string | null) {
-    await api('POST', `${base()}/groups`, { name, ...(parentId && { parentId }) })
+    await api.POST('/v1/orgs/{orgId}/groups', { params: { path: { orgId: orgId() } }, body: { name, ...(parentId && { parentId }) } })
     await load()
   }
 
   async function renameDepartment(id: string, name: string) {
-    await api('PATCH', `${base()}/groups/${id}`, { name })
+    await api.PATCH('/v1/orgs/{orgId}/groups/{groupId}', { params: { path: { orgId: orgId(), groupId: id } }, body: { name } })
     await load()
   }
 
   async function deleteDepartment(id: string) {
-    await api('DELETE', `${base()}/groups/${id}`)
+    await api.DELETE('/v1/orgs/{orgId}/groups/{groupId}', { params: { path: { orgId: orgId(), groupId: id } } })
     await load()
   }
 
   async function setDepartmentMember(groupId: string, userId: string, member: boolean) {
-    await api(member ? 'PUT' : 'DELETE', `${base()}/groups/${groupId}/members/${userId}`)
+    const at = { params: { path: { orgId: orgId(), groupId, userId } } }
+    if (member) await api.PUT('/v1/orgs/{orgId}/groups/{groupId}/members/{userId}', at)
+    else await api.DELETE('/v1/orgs/{orgId}/groups/{groupId}/members/{userId}', at)
     await load()
   }
 
   async function deleteOrganization() {
-    await api('DELETE', base())
+    await api.DELETE('/v1/orgs/{orgId}', { params: { path: { orgId: orgId() } } })
     activeId.value = null
     info.value = null
     await load()

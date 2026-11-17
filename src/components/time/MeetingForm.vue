@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { api, ok } from '@/lib/api'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
@@ -166,10 +167,8 @@ watch(
     const mine = ++ticket
     const from = fromInputs(day, '00:00')
     try {
-      const text = await call(
-        commands.orgRequest('POST', `/v1/orgs/${orgId}/freebusy`, JSON.stringify({ userIds: form.value.attendees, from, to: from + 86_400_000, timezone: getTimeZone() })),
-      )
-      if (mine === ticket && text) busy.value = JSON.parse(text)
+      const answer = ok(await api.POST('/v1/orgs/{orgId}/freebusy', { params: { path: { orgId } }, body: { userIds: form.value.attendees, from, to: from + 86_400_000, timezone: getTimeZone() } }))
+      if (mine === ticket && answer) busy.value = answer
     } catch {
       busy.value = {}
     }
@@ -193,10 +192,13 @@ watch(
         roomBooked.value = new Set()
         return
       }
-      const text = await call(
-        commands.orgRequest('POST', `/v1/orgs/${orgId}/rooms/bookings`, JSON.stringify({ from: startAt.value, to: endAt.value > startAt.value ? endAt.value : startAt.value + 3_600_000, ...(props.meeting ? { exclude: props.meeting.id } : {}) })),
+      const bookings = ok(
+        await api.POST('/v1/orgs/{orgId}/rooms/bookings', {
+          params: { path: { orgId } },
+          body: { from: startAt.value, to: endAt.value > startAt.value ? endAt.value : startAt.value + 3_600_000, ...(props.meeting ? { exclude: props.meeting.id } : {}) },
+        }),
       )
-      if (mine === roomTicket) roomBooked.value = new Set(Object.keys(JSON.parse(text || '{}')))
+      if (mine === roomTicket) roomBooked.value = new Set(Object.keys(bookings ?? {}))
     } catch {
       if (mine === roomTicket) roomBooked.value = new Set()
     }
