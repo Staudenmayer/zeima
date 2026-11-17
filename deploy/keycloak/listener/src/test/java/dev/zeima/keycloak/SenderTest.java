@@ -28,6 +28,12 @@ class SenderTest {
     void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/internal/keycloak-events", exchange -> {
+            // Node's server refuses a request that asks to upgrade to HTTP/2 (the client's default).
+            if (exchange.getRequestHeaders().getFirst("Upgrade") != null) {
+                exchange.sendResponseHeaders(405, -1);
+                exchange.close();
+                return;
+            }
             bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             signatures.add(exchange.getRequestHeaders().getFirst("x-zeima-signature"));
             int status = failuresLeft.getAndUpdate(n -> Math.max(0, n - 1)) > 0 ? failureStatus : 202;

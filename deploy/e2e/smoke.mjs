@@ -90,16 +90,28 @@ const cookies = () => [...jar.values()].join('; ')
 const page = await fetch(authUrl, { redirect: 'manual' })
 remember(page)
 const html = await page.text()
-const form = html.match(/<form[^>]*id="kc-form-login"[^>]*>/)?.[0] ?? ''
-const action = form.match(/\saction="([^"]+)"/)?.[1]?.replaceAll('&amp;', '&')
+const formAction = (page) => page.match(/<form[^>]*id="kc-form-login"[^>]*>/)?.[0]?.match(/\saction="([^"]+)"/)?.[1]?.replaceAll('&amp;', '&')
+let action = formAction(html)
 must(action, 'the login page has a form')
-const login = await fetch(action, {
-  method: 'POST',
-  redirect: 'manual',
-  headers: { cookie: cookies(), 'content-type': 'application/x-www-form-urlencoded' },
-  // The realm uses the email address as the user name.
-  body: new URLSearchParams({ username: `${username}@example.com`, password }),
-})
+const postForm = (to, fields) =>
+  fetch(to, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { cookie: cookies(), 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(fields),
+  })
+// The realm uses the email address as the user name. Once an organization exists, Keycloak asks for
+// the address first and the password on a second page.
+let login
+if (/name="password"/.test(html)) {
+  login = await postForm(action, { username: `${username}@example.com`, password })
+} else {
+  const first = await postForm(action, { username: `${username}@example.com` })
+  remember(first)
+  action = formAction(await first.text())
+  must(action, 'there is a password page after the address')
+  login = await postForm(action, { password })
+}
 const location = login.headers.get('location') ?? ''
 const loginBody = location ? '' : await login.text()
 // Keycloak shows why a sign-in failed in an alert on the form.

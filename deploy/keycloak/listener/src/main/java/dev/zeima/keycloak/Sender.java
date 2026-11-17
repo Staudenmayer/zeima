@@ -34,7 +34,9 @@ public class Sender {
         this.url = url;
         this.secret = secret;
         this.retryMillis = retryMillis;
-        this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
+        // HTTP/1.1 only: the client's attempt to upgrade a plain connection to HTTP/2 makes Node's
+        // server (the API) answer 405.
+        this.http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(3)).build();
     }
 
     /** Queues a notice; returns at once. */
