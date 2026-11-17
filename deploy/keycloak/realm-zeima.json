@@ -3,6 +3,8 @@
   "displayName": "Zeima",
   "enabled": true,
   "loginTheme": "zeima",
+  "accountTheme": "zeima",
+  "emailTheme": "zeima",
   "sslRequired": "${ZEIMA_SSL_REQUIRED:external}",
 
   "registrationAllowed": true,

@@ -1,0 +1,360 @@
+/*
+ * Zeima for the Keycloak account console (keycloak.v3, PatternFly 5): the look of the app —
+ * Roboto, neutral surfaces, one dark primary, 10 px rounding — light and dark (the page
+ * follows the visitor's system setting). The colors are the app's (src/style.css).
+ */
+
+@font-face {
+  font-family: "Roboto";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/roboto-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Roboto";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/roboto-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Roboto";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../fonts/roboto-latin-700-normal.woff2") format("woff2");
+}
+
+:root {
+  --keycloak-logo-url: url("../img/zeima.svg");
+  --keycloak-logo-height: 32px;
+  --keycloak-logo-width: 32px;
+  --pf-v5-global--FontFamily--text: "Roboto", ui-sans-serif, system-ui, sans-serif;
+  --pf-v5-global--FontFamily--heading: "Roboto", ui-sans-serif, system-ui, sans-serif;
+
+  --zeima-radius: 10px;
+  --zeima-radius-sm: 8px;
+  --zeima-page: oklch(1 0 0);
+  --zeima-sidebar: oklch(0.985 0 0);
+  --zeima-card: oklch(1 0 0);
+  --zeima-fg: oklch(0.145 0 0);
+  --zeima-muted: oklch(0.556 0 0);
+  --zeima-border: oklch(0.922 0 0);
+  --zeima-input: oklch(0.922 0 0);
+  --zeima-ring: oklch(0.708 0 0);
+  --zeima-accent: oklch(0.97 0 0);
+  --zeima-primary: oklch(0.205 0 0);
+  --zeima-primary-fg: oklch(0.985 0 0);
+  --zeima-primary-hover: oklch(0.205 0 0 / 90%);
+  --zeima-destructive: oklch(0.577 0.245 27.325);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --zeima-page: oklch(0.145 0 0);
+    --zeima-sidebar: oklch(0.205 0 0);
+    --zeima-card: oklch(0.205 0 0);
+    --zeima-fg: oklch(0.985 0 0);
+    --zeima-muted: oklch(0.708 0 0);
+    --zeima-border: oklch(1 0 0 / 10%);
+    --zeima-input: oklch(1 0 0 / 15%);
+    --zeima-ring: oklch(0.556 0 0);
+    --zeima-accent: oklch(0.269 0 0);
+    --zeima-primary: oklch(0.922 0 0);
+    --zeima-primary-fg: oklch(0.205 0 0);
+    --zeima-primary-hover: oklch(0.922 0 0 / 90%);
+    --zeima-destructive: oklch(0.704 0.191 22.216);
+  }
+}
+
+html,
+body {
+  font-family: "Roboto", ui-sans-serif, system-ui, sans-serif;
+  color: var(--zeima-fg);
+}
+
+/* The page: header and navigation as the app has them. */
+.pf-v5-c-page {
+  --pf-v5-c-page--BackgroundColor: var(--zeima-page);
+  background-color: var(--zeima-page);
+}
+.pf-v5-c-page__header,
+.pf-v5-c-masthead {
+  --pf-v5-c-masthead--BackgroundColor: var(--zeima-card);
+  --pf-v5-c-masthead--m-display-inline--BackgroundColor: var(--zeima-card);
+  background-color: var(--zeima-card) !important;
+  color: var(--zeima-fg);
+  border-bottom: 1px solid var(--zeima-border);
+  box-shadow: none;
+}
+.pf-v5-c-masthead .pf-v5-c-menu-toggle,
+.pf-v5-c-masthead .pf-v5-c-button,
+.pf-v5-c-masthead a,
+.pf-v5-c-masthead .pf-v5-c-menu-toggle__text,
+.pf-v5-c-masthead .pf-v5-c-menu-toggle__controls {
+  color: var(--zeima-fg) !important;
+}
+.pf-v5-c-masthead .pf-v5-c-menu-toggle::before {
+  border-color: var(--zeima-border) !important;
+  border-radius: var(--zeima-radius-sm);
+}
+.pf-v5-c-page__sidebar {
+  --pf-v5-c-page__sidebar--BackgroundColor: var(--zeima-sidebar);
+  background-color: var(--zeima-sidebar);
+  border-right: 1px solid var(--zeima-border);
+  box-shadow: none;
+}
+.pf-v5-c-page__sidebar .pf-v5-c-nav {
+  --pf-v5-c-nav--BackgroundColor: transparent;
+  --pf-v5-c-nav__link--Color: var(--zeima-fg);
+  --pf-v5-c-nav__link--hover--Color: var(--zeima-fg);
+  --pf-v5-c-nav__link--m-current--Color: var(--zeima-fg);
+  --pf-v5-c-nav__link--BackgroundColor: transparent;
+  --pf-v5-c-nav__link--hover--BackgroundColor: var(--zeima-accent);
+  --pf-v5-c-nav__link--m-current--BackgroundColor: var(--zeima-accent);
+  --pf-v5-c-nav__link--before--BorderColor: transparent;
+  --pf-v5-c-nav__link--hover--before--BorderBottomColor: transparent;
+  --pf-v5-c-nav__link--m-current--before--BorderBottomColor: transparent;
+  --pf-v5-c-nav__item--before--BorderColor: transparent;
+  padding: 12px 8px;
+}
+.pf-v5-c-nav__link {
+  color: var(--zeima-fg);
+  border-radius: var(--zeima-radius-sm);
+  font-size: 0.875rem;
+}
+.pf-v5-c-nav__link.pf-m-current,
+.pf-v5-c-nav__link[aria-current="page"] {
+  background-color: var(--zeima-accent);
+  font-weight: 500;
+}
+.pf-v5-c-nav__link::after,
+.pf-v5-c-nav__link::before,
+.pf-v5-c-nav__item::before {
+  display: none !important;
+}
+.pf-v5-c-nav__link:hover {
+  background-color: var(--zeima-accent);
+}
+.pf-v5-c-nav__toggle-icon,
+.pf-v5-c-nav__link .pf-v5-c-nav__toggle {
+  color: var(--zeima-muted);
+}
+
+.pf-v5-c-masthead .pf-v5-c-toolbar,
+.pf-v5-c-masthead__main,
+.pf-v5-c-masthead__brand,
+.pf-v5-c-masthead__content,
+.pf-v5-c-masthead__toggle {
+  background-color: transparent !important;
+}
+
+/* The brand in the header: the Zeima mark and name. */
+.pf-v5-c-masthead__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+.pf-v5-c-masthead__brand img {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+.pf-v5-c-masthead__brand::after {
+  content: "Zeima";
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--zeima-fg);
+}
+
+/* The content. */
+.pf-v5-c-page__main,
+.pf-v5-c-page__main-section {
+  background-color: var(--zeima-page);
+  --pf-v5-c-page__main-section--BackgroundColor: var(--zeima-page);
+}
+.pf-v5-c-title,
+.pf-v5-c-page__main-section h1,
+.pf-v5-c-page__main-section h2 {
+  font-family: inherit;
+  font-weight: 700 !important;
+  letter-spacing: -0.015em;
+  color: var(--zeima-fg);
+}
+.pf-v5-c-content,
+.pf-v5-c-content p,
+.pf-v5-c-form__label-text,
+.pf-v5-c-form__label {
+  color: var(--zeima-fg);
+}
+.pf-v5-c-form__label-text {
+  font-weight: 500;
+}
+.pf-v5-c-content small,
+.pf-v5-c-form__helper-text,
+.pf-v5-c-helper-text__item-text {
+  color: var(--zeima-muted);
+}
+a,
+.pf-v5-c-button.pf-m-link {
+  --pf-v5-global--link--Color: var(--zeima-fg);
+  --pf-v5-global--link--Color--hover: var(--zeima-fg);
+  --pf-v5-c-button--m-link--Color: var(--zeima-fg);
+  --pf-v5-c-button--m-link--hover--Color: var(--zeima-fg);
+}
+.pf-v5-c-card,
+.pf-v5-c-data-list,
+.pf-v5-c-table {
+  background-color: var(--zeima-card);
+  color: var(--zeima-fg);
+  border-radius: var(--zeima-radius);
+  --pf-v5-c-card--BackgroundColor: var(--zeima-card);
+}
+.pf-v5-c-card {
+  border: 1px solid var(--zeima-border);
+  box-shadow: none;
+}
+.pf-v5-c-card::before {
+  display: none;
+}
+.pf-v5-c-data-list__item,
+.pf-v5-c-table tr,
+.pf-v5-c-table td,
+.pf-v5-c-table th {
+  border-color: var(--zeima-border);
+  color: var(--zeima-fg);
+}
+.pf-v5-c-jump-links__link,
+.pf-v5-c-jump-links__link-text {
+  color: var(--zeima-fg);
+}
+.pf-v5-c-jump-links__item.pf-m-current .pf-v5-c-jump-links__link::before,
+.pf-v5-c-jump-links__link::before {
+  border-color: var(--zeima-primary) !important;
+}
+
+/* Fields: a plain bordered box with a soft focus ring. */
+.pf-v5-c-form-control {
+  --pf-v5-c-form-control--BackgroundColor: transparent;
+  --pf-v5-c-form-control--Color: var(--zeima-fg);
+  background-color: transparent;
+  border-radius: var(--zeima-radius-sm);
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 5%);
+}
+.pf-v5-c-form-control::before {
+  border: 1px solid var(--zeima-input) !important;
+  border-radius: var(--zeima-radius-sm) !important;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.pf-v5-c-form-control::after {
+  display: none !important;
+}
+.pf-v5-c-form-control:focus-within::before {
+  border-color: var(--zeima-ring) !important;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--zeima-ring) 50%, transparent);
+}
+.pf-v5-c-form-control input,
+.pf-v5-c-form-control select,
+.pf-v5-c-form-control textarea {
+  min-height: 36px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--zeima-fg);
+  background: transparent;
+}
+.pf-v5-c-form-control[disabled],
+.pf-v5-c-form-control:has(input:disabled),
+.pf-v5-c-form-control:has(select:disabled) {
+  background-color: var(--zeima-accent);
+}
+.pf-v5-c-form-control input:disabled {
+  color: var(--zeima-muted);
+  background: transparent;
+}
+.pf-v5-c-form__label-required,
+.pf-v5-c-form__helper-text .pf-m-error,
+.pf-v5-c-helper-text__item.pf-m-error .pf-v5-c-helper-text__item-text {
+  color: var(--zeima-destructive);
+}
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--zeima-primary);
+}
+
+/* Drop-downs (language, user): bordered like the fields. */
+.pf-v5-c-menu-toggle:not(.pf-m-plain) {
+  --pf-v5-c-menu-toggle--Color: var(--zeima-fg);
+  color: var(--zeima-fg);
+  background-color: transparent;
+  border-radius: var(--zeima-radius-sm);
+}
+.pf-v5-c-menu-toggle:not(.pf-m-plain)::before {
+  border: 1px solid var(--zeima-input) !important;
+  border-radius: var(--zeima-radius-sm) !important;
+}
+.pf-v5-c-menu-toggle::after {
+  display: none !important;
+}
+
+/* Menus. */
+.pf-v5-c-menu,
+.pf-v5-c-dropdown__menu {
+  background-color: var(--zeima-card);
+  color: var(--zeima-fg);
+  border: 1px solid var(--zeima-border);
+  border-radius: var(--zeima-radius-sm);
+  box-shadow: 0 4px 16px -4px rgb(0 0 0 / 12%);
+}
+.pf-v5-c-menu__item,
+.pf-v5-c-menu__item-text {
+  color: var(--zeima-fg);
+}
+.pf-v5-c-menu__list-item:hover,
+.pf-v5-c-menu__item:hover {
+  background-color: var(--zeima-accent);
+}
+
+/* Buttons. */
+.pf-v5-c-button {
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: var(--zeima-radius-sm);
+  box-shadow: none;
+}
+.pf-v5-c-button::after {
+  display: none;
+}
+.pf-v5-c-button.pf-m-primary {
+  --pf-v5-c-button--m-primary--Color: var(--zeima-primary-fg);
+  --pf-v5-c-button--m-primary--BackgroundColor: var(--zeima-primary);
+  --pf-v5-c-button--m-primary--hover--Color: var(--zeima-primary-fg);
+  --pf-v5-c-button--m-primary--hover--BackgroundColor: var(--zeima-primary-hover);
+  --pf-v5-c-button--m-primary--focus--Color: var(--zeima-primary-fg);
+  --pf-v5-c-button--m-primary--focus--BackgroundColor: var(--zeima-primary-hover);
+  --pf-v5-c-button--m-primary--active--Color: var(--zeima-primary-fg);
+  --pf-v5-c-button--m-primary--active--BackgroundColor: var(--zeima-primary-hover);
+  color: var(--zeima-primary-fg);
+  background-color: var(--zeima-primary);
+}
+.pf-v5-c-button.pf-m-primary:hover,
+.pf-v5-c-button.pf-m-primary:focus {
+  background-color: var(--zeima-primary-hover);
+}
+.pf-v5-c-button.pf-m-secondary {
+  --pf-v5-c-button--m-secondary--Color: var(--zeima-fg);
+  --pf-v5-c-button--m-secondary--BorderColor: var(--zeima-input);
+  color: var(--zeima-fg);
+  border: 1px solid var(--zeima-input);
+  background-color: transparent;
+}
+.pf-v5-c-button.pf-m-secondary:hover {
+  background-color: var(--zeima-accent);
+}
+.pf-v5-c-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--zeima-ring) 50%, transparent);
+}

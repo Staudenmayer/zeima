@@ -14,12 +14,29 @@ running installation with `deploy/keycloak/apply.sh`, which runs
 with the same `ZEIMA_*` values the Keycloak container has. CI does this against
 the self-hosted stack and then signs in (job `selfhosted`).
 
-## Sign-in page theme
+## Theme
 
-`deploy/keycloak/themes/zeima/login` is mounted into Keycloak
-(`/opt/keycloak/themes/zeima`) and selected with `"loginTheme": "zeima"`. It
-extends the standard theme (`keycloak.v2`) with the Zeima logo, colors and
-clearer texts; German and English come from the realm's locales.
+`deploy/keycloak/themes/zeima` is mounted into Keycloak
+(`/opt/keycloak/themes/zeima`) and selected by the realm
+(`loginTheme`, `accountTheme` and `emailTheme` in `realm-zeima.json`). All
+three give Keycloak the look of the app: Roboto, the neutral surfaces, the dark
+primary button and the 10 px rounding from `src/style.css`, light and dark
+(the pages follow the visitor's system setting), with the Zeima mark and name
+in the header.
+
+| Type | Folder | Based on | What it changes |
+|---|---|---|---|
+| Sign-in | `login` | `keycloak.v2` | The pages for sign-in, registration, password reset and so on: logo, card, fields, buttons; clearer texts in `messages/`. |
+| Account | `account` | `keycloak.v3` | The account console (profile, security, sessions): header, navigation, fields, buttons. |
+| Email | `email` | `base` | A Zeima frame around Keycloak's emails (verification, password reset). The texts stay Keycloak's. |
+
+The styles are plain CSS (`resources/css/zeima.css` in `login` and `account`)
+on top of the parent theme; the Roboto font files and the logo are bundled, so
+no page loads anything from another server. To change the colors, edit the
+variables at the top of those two files (they mirror `src/style.css`). The dev
+stack (`compose.dev.yml`) serves the folder directly, so a reload shows the
+change; an existing realm takes the theme names with `apply.sh` or in the admin
+console (Realm settings → Themes).
 
 ## Google and Microsoft sign-in (cloud)
 
