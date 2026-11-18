@@ -33,6 +33,10 @@ function roleOf(userId: string, roles: Record<RoleKey, string[]>): RoleKey | nul
 }
 
 export async function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: string, opts: ReconcileOptions = {}): Promise<ReconcileResult> {
+  // Keycloak announces a new organization before the API has stored it (it is still being created):
+  // there is nothing to compare yet, and the creation fills the copy itself.
+  const [known] = await db.select({ id: schema.organization.id }).from(schema.organization).where(eq(schema.organization.id, orgId))
+  if (!known) return { members: 0, addedMembers: 0, removedMembers: 0, groups: 0, rejectedMembers: 0, signedOut: 0 }
   const [listed, roles, departments] = await Promise.all([kc.listMembers(orgId), kc.listRoleMembers(orgId), kc.listDepartments(orgId)])
   const before = await db
     .select({ userId: schema.kcOrgMember.userId, active: schema.kcUser.active })

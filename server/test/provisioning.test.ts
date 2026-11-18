@@ -266,3 +266,18 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
     })
   })
 })
+
+describe.skipIf(!(await reachable()))('an organization Keycloak announces before the API has stored it', () => {
+  it('is skipped, not an error', async () => {
+    const db = await createTestDatabase()
+    try {
+      const kc = new FakeKeycloak()
+      kc.members = [{ id: id(1), email: 'a@example.com', name: 'A', enabled: true }]
+      const result = await reconcileOrganization(db.db, kc, id(777))
+      expect(result).toMatchObject({ members: 0, addedMembers: 0 })
+      expect((await db.db.select().from(schema.kcOrgMember)).length).toBe(0)
+    } finally {
+      await db.drop()
+    }
+  })
+})
