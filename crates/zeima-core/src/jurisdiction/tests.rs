@@ -135,3 +135,77 @@ fn json_schema_is_up_to_date() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/jurisdictions/profile.schema.json");
     std::fs::write(path, json_schema()).unwrap();
 }
+
+mod extra {
+    use super::super::*;
+
+    const SRC: &str = r#"
+schema_version = 1
+id = "LU"
+version = "2026.1"
+maintainer = "Acme IT"
+sources = ["https://example.com/law"]
+default_locale = "fr"
+week_start = "mon"
+name = { en = "Luxembourg", fr = "Luxembourg" }
+
+[work_time]
+max_daily_minutes = 600
+standard_weekly_minutes = 2400
+standard_workdays = ["mon", "tue", "wed", "thu", "fri"]
+
+[[breaks]]
+after_minutes = 360
+break_minutes = 30
+min_part_minutes = 15
+mode = "required"
+
+[vacation]
+default_days = 25
+unit = "workdays"
+
+[[holidays]]
+id = "new-year"
+name = { en = "New Year" }
+rule = { fixed = "01-01" }
+"#;
+
+    // The extra profiles are process-wide, so everything that touches them is one test.
+    #[test]
+    fn extra_profiles_are_added_replace_and_are_checked() {
+        let none = set_extra(&[]);
+        assert!(none.is_empty());
+        assert!(load("LU", None).is_err());
+
+        let problems = set_extra(&[
+            ("LU.toml".into(), SRC.into()),
+            ("broken.toml".into(), "id = 1".into()),
+            ("BAD.toml".into(), SRC.replace("id = \"LU\"", "id = \"lu\"")),
+            ("NOSRC.toml".into(), SRC.replace("id = \"LU\"", "id = \"XX\"").replace("sources = [\"https://example.com/law\"]", "sources = []")),
+            ("LU2.toml".into(), SRC.into()),
+        ]);
+        assert_eq!(problems.len(), 4, "{problems:?}");
+        assert!(problems.iter().any(|p| p.starts_with("broken.toml")));
+        assert!(problems.iter().any(|p| p.contains("defined twice")));
+
+        let lu = load("LU", None).unwrap();
+        assert_eq!(lu.holidays(2026).len(), 1);
+        assert!(list().iter().any(|p| p.id == "LU"));
+        assert!(is_extra("lu"));
+        assert!(!is_extra("AT"));
+
+        // Back to what the app ships.
+        set_extra(&[]);
+        assert!(load("LU", None).is_err());
+    }
+
+    #[test]
+    fn an_extra_profile_with_a_bundled_id_replaces_it() {
+        let mut replacement = parse(&SRC.replace("id = \"LU\"", "id = \"AT\"")).unwrap();
+        replacement.version = "acme.1".into();
+        let merged = merge(bundled(), &[replacement]);
+        assert_eq!(merged.iter().filter(|p| p.id == "AT").count(), 1);
+        assert_eq!(merged.iter().find(|p| p.id == "AT").unwrap().version, "acme.1");
+        assert!(merged.iter().any(|p| p.id == "DE"));
+    }
+}

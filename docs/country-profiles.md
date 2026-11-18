@@ -46,6 +46,27 @@ Rust or Vue changes. See also [SPEC §5.13](SPEC.md).
 Add `valid_from_year` / `valid_to_year` when a holiday was introduced or
 abolished (e.g. Berlin's Women's Day from 2019).
 
+## Extra profiles on an installation
+
+A company can add profiles without a new app release, or replace a bundled one with its own
+(a works agreement that differs from the statutory default, a country that is missing). Put
+`<ID>.toml` files, in the format above, in a folder:
+
+- **On the server** (self-hosted): `JURISDICTIONS_DIR` (the folder `deploy/jurisdictions` with the
+  compose file, `jurisdictions.files` or `jurisdictions.existingConfigMap` with the Helm chart). The
+  apps download them at start-up and every few hours (`GET /v1/jurisdictions`) and keep a copy for
+  offline use.
+- **On a machine**: the folder `jurisdictions` in the app's data folder (on Linux
+  `~/.local/share/com.zeima.zeima/jurisdictions`). Files here win over the server's with the same id.
+
+The app checks every file when it loads it: it must parse (unknown fields are refused), have an id of 2 to
+8 capital letters or digits (an ISO code for a country), an English name, sources, unique holiday ids,
+regions that start with `<ID>-`, and every holiday rule has to produce dates. A file that fails is
+skipped, the others are used, and the reason is in the log (`country profile skipped: …`). A profile
+with the id of a bundled one replaces it; bump its `version` so cached days are recalculated.
+Fixtures (`<ID>.fixtures.toml`) are not read at run time; check your values against an official source
+before you roll a profile out.
+
 ## Known gaps
 
 - **Switzerland**: only the federal days and the cantons of Zurich and Bern.

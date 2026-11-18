@@ -2,12 +2,14 @@
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
-import { AlertTriangle, CircleCheck, Globe, KeyRound, Loader2, Plus, Puzzle, Settings2, Trash2 } from '@lucide/vue'
-import { commands, type AddonInfo, type AddonPackage, type OAuthProvider } from '@/bindings'
+import { AlertTriangle, CircleCheck, Download, Globe, KeyRound, Loader2, Lock, Plus, Puzzle, Settings2, Trash2 } from '@lucide/vue'
+import { commands, type AddonInfo, type AddonPackage, type OAuthProvider, type OrgRule, type RegistryAddon } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import AddonConsentDialog from '@/components/time/AddonConsentDialog.vue'
+import RegistryDialog from '@/components/time/RegistryDialog.vue'
+import SignatureBadge from '@/components/time/SignatureBadge.vue'
 import AddonSettingsDialog from '@/components/time/AddonSettingsDialog.vue'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
@@ -41,7 +43,43 @@ async function load() {
     toast.error(errorMessage(err))
   }
 }
-onMounted(load)
+
+// What the server offers, and what the person's organizations allow.
+const available = ref<RegistryAddon[]>([])
+const registryError = ref<string | null>(null)
+const rules = ref<OrgRule[]>([])
+async function loadRegistry() {
+  try {
+    const view = await call(commands.addonRegistry())
+    available.value = view.addons
+    registryError.value = view.error
+  } catch (err) {
+    registryError.value = errorMessage(err)
+  }
+}
+async function loadRules() {
+  try {
+    rules.value = await call(commands.addonRules())
+    await load()
+  } catch {
+    // the rules of last time stay
+  }
+}
+onMounted(() => {
+  void load().then(() => Promise.all([loadRegistry(), loadRules()]))
+})
+
+const offering = ref<RegistryAddon | null>(null)
+const offeringOpen = ref(false)
+function offer(addon: RegistryAddon) {
+  offering.value = addon
+  offeringOpen.value = true
+}
+async function offeredInstalled(name: string) {
+  await load()
+  await loadRegistry()
+  toast.success(t('addons.installed', { name }))
+}
 
 // Install: pick a file, show what it asks for, then install.
 const pkg = ref<AddonPackage | null>(null)
@@ -138,6 +176,14 @@ async function remove() {
     <Button @click="pick"><Plus /> {{ $t('addons.installFromFile') }}</Button>
   </PageHeader>
 
+  <div v-if="rules.length" class="mb-3 grid max-w-4xl gap-1 rounded-lg border bg-muted/30 p-3 text-sm">
+    <p class="flex items-center gap-2 font-medium"><Lock class="size-4" /> {{ $t('addons.rulesTitle') }}</p>
+    <p v-for="r in rules" :key="r.orgId" class="text-muted-foreground">
+      {{ $t(r.mode === 'allowlist' ? 'addons.ruleAllowlist' : 'addons.ruleOpen', { org: r.orgName }) }}
+      <template v-if="r.requireSigned"> {{ $t('addons.ruleSigned') }}</template>
+    </p>
+  </div>
+
   <EmptyState v-if="addons.length === 0" :icon="Puzzle" :text="$t('addons.empty')">
     <Button variant="outline" @click="pick"><Plus /> {{ $t('addons.installFromFile') }}</Button>
   </EmptyState>
@@ -154,6 +200,7 @@ async function remove() {
             {{ $t('addons.byAuthor', { version: addon.record.version, author: addon.manifest?.author ?? '?' }) }}
             · <span class="font-mono">{{ addon.record.id }}</span>
           </p>
+          <SignatureBadge :signature="addon.signature" class="mt-0.5" />
           <p v-if="addon.manifest?.description" class="mt-1 text-sm">{{ addon.manifest.description }}</p>
         </div>
         <div class="flex items-center gap-1">
@@ -215,7 +262,11 @@ async function remove() {
         </div>
       </section>
 
-      <p v-if="addon.error" class="flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-sm text-destructive">
+      <p v-if="addon.blocked" class="flex items-start gap-2 rounded-md bg-amber-500/10 p-2 text-sm text-amber-800 dark:text-amber-300">
+        <Lock class="mt-0.5 size-4 shrink-0" />
+        <span>{{ addon.blocked }}</span>
+      </p>
+      <p v-else-if="addon.error" class="flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-sm text-destructive">
         <AlertTriangle class="mt-0.5 size-4 shrink-0" />
         <span class="break-all">{{ addon.error }}</span>
       </p>
@@ -223,6 +274,33 @@ async function remove() {
     <p class="text-xs text-muted-foreground">{{ $t('addons.sandboxHint') }}</p>
   </div>
 
+  <section v-if="available.length" class="mt-8 grid max-w-4xl gap-3">
+    <h2 class="text-sm font-medium">{{ $t('addons.fromServer') }}</h2>
+    <article v-for="a in available" :key="a.id" class="flex items-start gap-3 rounded-lg border p-4">
+      <div class="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"><Puzzle class="size-4 text-muted-foreground" /></div>
+      <div class="min-w-0 flex-1">
+        <h3 class="font-medium">{{ a.name }}</h3>
+        <p class="text-xs text-muted-foreground">
+          {{ $t('addons.byAuthor', { version: a.version, author: a.author || '?' }) }}
+          <template v-if="a.signer"> · {{ $t('addons.signature.trusted', { signer: a.signer }) }}</template>
+          <template v-else> · {{ $t('addons.signature.unsigned') }}</template>
+        </p>
+        <p v-if="a.description" class="mt-1 text-sm">{{ a.description }}</p>
+        <p v-if="a.blocked" class="mt-1 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400"><Lock class="mt-0.5 size-3.5 shrink-0" /> {{ a.blocked }}</p>
+      </div>
+      <Button
+        size="sm"
+        :variant="a.installedVersion === a.version ? 'ghost' : 'outline'"
+        :disabled="a.installedVersion === a.version || !a.compatible || !!a.blocked"
+        @click="offer(a)"
+      >
+        <Download />
+        {{ a.installedVersion === a.version ? $t('addons.alreadyInstalled') : a.installedVersion ? $t('addons.update') : $t('addons.install') }}
+      </Button>
+    </article>
+  </section>
+
+  <RegistryDialog v-model:open="offeringOpen" :addon="offering" @installed="offeredInstalled" />
   <AddonConsentDialog v-model:open="consentOpen" :pkg="pkg" @installed="installed" />
   <AddonSettingsDialog v-model:open="settingsOpen" :addon="settingsFor" @saved="load" />
   <ConfirmDialog

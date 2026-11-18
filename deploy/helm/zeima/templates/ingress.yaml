@@ -1,0 +1,34 @@
+{{- if .Values.ingress.enabled }}
+{{- $api := include "zeima.url.host" (required "publicUrl is required" .Values.publicUrl) }}
+{{- $id := include "zeima.url.host" (required "idUrl is required" .Values.idUrl) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if .Values.ingress.tlsSecretName }}
+  tls:
+    - hosts: [{{ $api | quote }}, {{ $id | quote }}]
+      secretName: {{ .Values.ingress.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ $api | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: {{ .Release.Name }}-api, port: { name: http } } }
+    - host: {{ $id | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: {{ .Release.Name }}-keycloak, port: { name: http } } }
+{{- end }}

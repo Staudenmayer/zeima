@@ -1,0 +1,101 @@
+# Zeima for Kubernetes (docs/helm.md). The two addresses are required; everything else has a default
+# that works for a trial. The images are built from this repository (docs/helm.md, "Images").
+
+# Where the apps reach the API, and the sign-in service. Two host names that point at the ingress.
+publicUrl: ""    # https://zeima.example.com
+idUrl: ""        # https://id.zeima.example.com
+
+api:
+  image:
+    repository: zeima-api
+    tag: ""            # defaults to the chart's appVersion
+    pullPolicy: IfNotPresent
+  # The API keeps live connections (presence, sync notifications) in memory: run one copy.
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  docsEnabled: false
+  # Prometheus metrics at /metrics. The ingress routes everything to the API, so leave this off unless
+  # your ingress blocks /metrics or you scrape from inside the cluster only.
+  metricsEnabled: false
+  # Hours between the checks of the member copy against Keycloak (0 = off).
+  reconcileIntervalHours: 24
+  # Vendor keys whose license tokens are accepted (server/README.md).
+  entitlementPublicKeys: ""
+  # Extra environment variables, as a map.
+  extraEnv: {}
+
+keycloak:
+  image:
+    repository: zeima-keycloak
+    tag: "26.8.1"
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: 250m, memory: 768Mi }
+    limits: { memory: 1536Mi }
+  # Keycloak stops the sign-in for everyone if this is wrong: keep verifyEmail on once mail works.
+  verifyEmail: false
+
+smtp:
+  host: ""
+  port: 25
+  from: no-reply@zeima.local
+  starttls: false
+  auth: false
+  user: ""
+  password: ""
+
+# The database. The chart can run a single PostgreSQL itself (fine for a trial and small installs;
+# back it up) or use yours: create two databases and users, one for the API and one for Keycloak.
+postgres:
+  enabled: true
+  image: { repository: docker.io/library/postgres, tag: "17" }
+  persistence:
+    size: 10Gi
+    storageClassName: ""
+    existingClaim: ""
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+externalDatabase:
+  host: ""
+  port: 5432
+  api: { database: zeima, user: zeima }
+  keycloak: { database: keycloak, user: keycloak }
+
+# Passwords and secrets. Leave a value empty to have the chart make one (kept when you upgrade).
+# Or point `existingSecret` at a Secret that has the keys listed in docs/helm.md.
+secrets:
+  existingSecret: ""
+  postgresPassword: ""        # the API's database user (and the bundled PostgreSQL's)
+  keycloakDbPassword: ""
+  keycloakAdminPassword: ""   # Keycloak's `admin` user
+  apiAdminSecret: ""          # the API's service account in Keycloak
+  webhookSecret: ""           # signs Keycloak's calls to the API
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  # TLS: name of a Secret with the certificate for both host names, or leave empty for no TLS block
+  # (cert-manager and the like add it through annotations).
+  tlsSecretName: ""
+
+# The addons this installation offers (signed packages and index.json, made by
+# `node scripts/addons.mjs publish`). Copy the folder into the volume: docs/helm.md.
+addonRegistry:
+  enabled: false
+  persistence:
+    size: 1Gi
+    storageClassName: ""
+    existingClaim: ""
+
+# Extra country profiles the apps download (docs/country-profiles.md): file name to content, or an
+# existing ConfigMap whose keys are the files.
+jurisdictions:
+  existingConfigMap: ""
+  files: {}
+
+nodeSelector: {}
+tolerations: []
+imagePullSecrets: []

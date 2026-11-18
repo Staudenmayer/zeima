@@ -1,0 +1,77 @@
+{
+  "description": "Addon signatures: the same cases run in crates/zeima-core/src/addon_sig.rs and scripts/addons.test.mjs. The key is a throwaway test key.",
+  "key": {
+    "keyId": "test-1",
+    "name": "Zeima test publisher",
+    "publicKey": "I2S3UrJ3ZMdA8OKwIsTC8gnxklHf7cspjNVTu35oIbA"
+  },
+  "cases": [
+    {
+      "name": "good signature",
+      "manifest": "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"1.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\n",
+      "wasmBase64": "AGFzbQEAAAAHBwc=",
+      "signature": {
+        "keyId": "test-1",
+        "signature": "_6Pcryydtm-vMPG3iAeDrdy1fQRZuQYLW2LbyzcQWUQJXNdxk5IDcuBT0KcG_27Y5Grxy-C5AHqLwAv9LqntAA"
+      },
+      "expect": "trusted"
+    },
+    {
+      "name": "no signature",
+      "manifest": "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"1.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\n",
+      "wasmBase64": "AGFzbQEAAAAHBwc=",
+      "signature": null,
+      "expect": "unsigned"
+    },
+    {
+      "name": "module changed after signing",
+      "manifest": "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"1.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\n",
+      "wasmBase64": "AGFzbQEAAAAHBwcB",
+      "signature": {
+        "keyId": "test-1",
+        "signature": "_6Pcryydtm-vMPG3iAeDrdy1fQRZuQYLW2LbyzcQWUQJXNdxk5IDcuBT0KcG_27Y5Grxy-C5AHqLwAv9LqntAA"
+      },
+      "expect": "invalid"
+    },
+    {
+      "name": "manifest changed after signing (more permissions)",
+      "manifest": "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"1.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\npermissions = [\"entries:read\"]\n",
+      "wasmBase64": "AGFzbQEAAAAHBwc=",
+      "signature": {
+        "keyId": "test-1",
+        "signature": "_6Pcryydtm-vMPG3iAeDrdy1fQRZuQYLW2LbyzcQWUQJXNdxk5IDcuBT0KcG_27Y5Grxy-C5AHqLwAv9LqntAA"
+      },
+      "expect": "invalid"
+    },
+    {
+      "name": "damaged signature",
+      "manifest": "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"1.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\n",
+      "wasmBase64": "AGFzbQEAAAAHBwc=",
+      "signature": {
+        "keyId": "test-1",
+        "signature": "A6Pcryydtm-vMPG3iAeDrdy1fQRZuQYLW2LbyzcQWUQJXNdxk5IDcuBT0KcG_27Y5Grxy-C5AHqLwAv9LqntAA"
+      },
+      "expect": "invalid"
+    },
+    {
+      "name": "signature is not base64",
+      "manifest": "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"1.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\n",
+      "wasmBase64": "AGFzbQEAAAAHBwc=",
+      "signature": {
+        "keyId": "test-1",
+        "signature": "***"
+      },
+      "expect": "invalid"
+    },
+    {
+      "name": "key the app does not know",
+      "manifest": "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"1.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\n",
+      "wasmBase64": "AGFzbQEAAAAHBwc=",
+      "signature": {
+        "keyId": "other",
+        "signature": "_6Pcryydtm-vMPG3iAeDrdy1fQRZuQYLW2LbyzcQWUQJXNdxk5IDcuBT0KcG_27Y5Grxy-C5AHqLwAv9LqntAA"
+      },
+      "expect": "unknown_key"
+    }
+  ]
+}

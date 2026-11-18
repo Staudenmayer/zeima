@@ -2,6 +2,9 @@
 # DOMAIN comes from the environment; certificates are automatic.
 
 {$DOMAIN} {
+	# Metrics are for the monitoring inside the network (api:3000/metrics), not for the internet.
+	@metrics path /metrics
+	respond @metrics 404
 	reverse_proxy api:3000
 }
 

@@ -18,6 +18,7 @@ import PolicyDialog from '@/components/time/PolicyDialog.vue'
 import MultiSelect from '@/components/time/MultiSelect.vue'
 import PresenceDot from '@/components/time/PresenceDot.vue'
 import RoleDialog from '@/components/time/RoleDialog.vue'
+import AddonRulesPanel from '@/components/time/AddonRulesPanel.vue'
 import DirectoryPanel from '@/components/time/DirectoryPanel.vue'
 import ScimPanel from '@/components/time/ScimPanel.vue'
 import SsoPanel from '@/components/time/SsoPanel.vue'
@@ -429,6 +430,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(shownAudit, {
         <TabsTrigger v-if="canSeeRoles" value="roles">{{ $t('org.tabs.roles') }}</TabsTrigger>
         <TabsTrigger v-if="org.can('policy.write')" value="policies">{{ $t('org.tabs.policies') }}</TabsTrigger>
         <TabsTrigger v-if="org.can('org.settings')" value="sso">{{ $t('org.tabs.sso') }}</TabsTrigger>
+        <TabsTrigger v-if="org.can('org.settings')" value="addons">{{ $t('org.tabs.addons') }}</TabsTrigger>
         <TabsTrigger v-if="org.can('audit.read')" value="activity">{{ $t('org.tabs.activity') }}</TabsTrigger>
       </TabsList>
 
@@ -658,6 +660,9 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(shownAudit, {
         <p class="mt-3 text-xs text-muted-foreground">{{ $t('org.policy.hint') }}</p>
       </TabsContent>
 
+      <TabsContent v-if="org.can('org.settings')" value="addons" class="pt-4">
+        <AddonRulesPanel />
+      </TabsContent>
       <TabsContent v-if="org.can('org.settings')" value="sso" class="pt-4">
         <div class="grid gap-6">
           <SsoPanel />

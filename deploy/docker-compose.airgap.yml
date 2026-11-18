@@ -1,0 +1,11 @@
+# Added to docker-compose.yml on a machine without internet access (docs/airgap.md):
+#
+#   docker compose -f docker-compose.yml -f docker-compose.airgap.yml --env-file .env up -d --no-build
+#
+# The images come from the bundle (`docker load`), and Caddy uses your own certificate.
+services:
+  caddy:
+    volumes:
+      - ./Caddyfile.airgap:/etc/caddy/Caddyfile:ro,z
+      - ./certs:/certs:ro,z
+      - caddy-data:/data

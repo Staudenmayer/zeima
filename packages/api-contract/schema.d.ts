@@ -3937,6 +3937,325 @@ export interface paths {
         };
         trace?: never;
     };
+    "/v1/addons/registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The addons this server offers */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description What the server offers; an empty list when no registry folder is set up */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            publishers: {
+                                keyId: string;
+                                name: string;
+                                /** @description Ed25519, 32 bytes, base64url */
+                                publicKey: string;
+                            }[];
+                            addons: {
+                                id: string;
+                                name: string;
+                                version: string;
+                                description: string;
+                                author: string;
+                                minAppVersion: string | null;
+                                permissions: string[];
+                                hooks: string[];
+                                file: string;
+                                sha256: string;
+                                size: number;
+                                /** @description The publisher key that signed the package, if signed */
+                                keyId: string | null;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/addons/registry/files/{file}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One addon package
+         * @description A .zip; only files listed in the registry are served.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    file: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": unknown;
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/orgs/{orgId}/addons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Which addons the organization allows */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The addons an organization lets its people use */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description `open`: any addon; `allowlist`: only `allowed` */
+                            mode: "open" | "allowlist";
+                            /** @description Only addons signed by a publisher the app trusts */
+                            requireSigned: boolean;
+                            /** @description Addon ids (used when mode is `allowlist`) */
+                            allowed: string[];
+                        };
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        /** Changes which addons the organization allows */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    orgId: string;
+                };
+                cookie?: never;
+            };
+            /** @description The addons an organization lets its people use */
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description `open`: any addon; `allowlist`: only `allowed` */
+                        mode: "open" | "allowlist";
+                        /** @description Only addons signed by a publisher the app trusts */
+                        requireSigned: boolean;
+                        /** @description Addon ids (used when mode is `allowlist`) */
+                        allowed: string[];
+                    };
+                };
+            };
+            responses: {
+                /** @description The addons an organization lets its people use */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description `open`: any addon; `allowlist`: only `allowed` */
+                            mode: "open" | "allowlist";
+                            /** @description Only addons signed by a publisher the app trusts */
+                            requireSigned: boolean;
+                            /** @description Addon ids (used when mode is `allowlist`) */
+                            allowed: string[];
+                        };
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jurisdictions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Extra country profiles this installation adds
+         * @description Profile files as TOML text. Empty unless the administrator mounted a `JURISDICTIONS_DIR`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            profiles: {
+                                file: string;
+                                source: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces": {
         parameters: {
             query?: never;

@@ -28,6 +28,7 @@ specta = { workspace = true, optional = true }
 specta-typescript = { workspace = true, optional = true }
 base64 = "0.22"
 ed25519-dalek = "3.0.0"
+sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { workspace = true }

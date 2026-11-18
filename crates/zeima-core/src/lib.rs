@@ -5,6 +5,7 @@
 //! persistence and services live behind the `db` feature.
 
 pub mod addon;
+pub mod addon_sig;
 pub mod autopause;
 pub mod clock;
 pub mod entitlement;

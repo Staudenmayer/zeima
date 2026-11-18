@@ -12,11 +12,13 @@ mod commands_import;
 mod commands_report;
 mod commands_work;
 mod events;
+mod extras;
 mod instance;
 mod license;
 mod meeting_follow;
 mod meeting_prompt;
 mod oauth;
+mod registry;
 mod org;
 mod os;
 mod presence;
@@ -129,6 +131,9 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands_report::backup_open_dir,
             commands_addons::addon_list,
             commands_addons::addon_pick,
+            registry::addon_registry,
+            registry::addon_registry_install,
+            registry::addon_rules,
             commands_addons::addon_install,
             commands_addons::addon_set_enabled,
             commands_addons::addon_save_settings,
@@ -284,6 +289,8 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move { windows::show_main(&handle, None).await });
             }
+            registry::spawn(app.handle().clone());
+            extras::spawn(app.handle().clone());
             background::spawn(app.handle().clone());
             sync::spawn_listener(app.handle().clone());
             sync::spawn_push_watcher(app.handle().clone());

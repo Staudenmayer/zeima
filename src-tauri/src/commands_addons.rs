@@ -12,6 +12,7 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use zeima_addon_sdk as sdk;
 use zeima_core::addon::{AddonManifest, SettingType};
+use zeima_core::addon_sig::SignatureCheck;
 use zeima_core::report::ReportQuery;
 use zeima_core::AddonRecord;
 
@@ -35,6 +36,10 @@ pub struct AddonInfo {
     pub error: Option<String>,
     /// `[[oauth]]` providers with a connected account.
     pub connected: Vec<String>,
+    /// Who made it, as far as the app can tell.
+    pub signature: SignatureCheck,
+    /// Why an organization the person belongs to does not let it run (and it is not running).
+    pub blocked: Option<String>,
 }
 
 /// A package the user picked, before installing.
@@ -47,6 +52,10 @@ pub struct AddonPackage {
     pub installed_version: Option<String>,
     /// The app is new enough (`min_app_version`).
     pub compatible: bool,
+    /// Who made it.
+    pub signature: SignatureCheck,
+    /// Why this device may not install it (an organization's rules, or a signature that does not match).
+    pub blocked: Option<String>,
 }
 
 fn io_err(e: impl ToString) -> CmdError {
@@ -73,7 +82,12 @@ async fn info(app: &AppHandle, addons: &Addons, record: AddonRecord) -> AddonInf
         .into_iter()
         .filter_map(|n| n.strip_prefix("oauth:").map(str::to_string))
         .collect();
+    let dir = addons_dir(app).ok().map(|d| d.join(&record.id));
+    let signature = dir.as_deref().map(crate::registry::installed_signature).unwrap_or_else(SignatureCheck::unsigned);
+    let blocked = addons.blocked(&record.id, &signature);
     AddonInfo {
+        signature,
+        blocked,
         connected,
         loaded: addons.is_loaded(&record.id),
         error: addons.error(&record.id),
@@ -87,8 +101,17 @@ async fn info(app: &AppHandle, addons: &Addons, record: AddonRecord) -> AddonInf
 // to its module (handy while developing).
 // --------------------------------------------------------------------------
 
+/// What a package holds: the manifest (as written, the signature covers its bytes), the module and the
+/// signature file if it has one.
+pub(crate) struct Package {
+    pub manifest: AddonManifest,
+    pub manifest_src: Vec<u8>,
+    pub wasm: Vec<u8>,
+    pub signature: Option<String>,
+}
+
 /// Manifest and module bytes of a package.
-pub(crate) fn read_package(path: &Path) -> Result<(AddonManifest, Vec<u8>), CmdError> {
+pub(crate) fn read_package(path: &Path) -> Result<Package, CmdError> {
     if path.file_name().is_some_and(|n| n == MANIFEST_FILE) {
         let dir = path.parent().ok_or_else(|| invalid("no folder"))?;
         let manifest = read_manifest(dir).map_err(invalid)?;
@@ -100,7 +123,9 @@ pub(crate) fn read_package(path: &Path) -> Result<(AddonManifest, Vec<u8>), CmdE
             return Err(invalid("the module is larger than 50 MB"));
         }
         let wasm = std::fs::read(&wasm_path).map_err(io_err)?;
-        return Ok((manifest, wasm));
+        // A manifest next to its module (development) is never signed.
+        let manifest_src = std::fs::read(dir.join(MANIFEST_FILE)).map_err(io_err)?;
+        return Ok(Package { manifest, manifest_src, wasm, signature: None });
     }
 
     let file = std::fs::File::open(path).map_err(io_err)?;
@@ -115,11 +140,13 @@ pub(crate) fn read_package(path: &Path) -> Result<(AddonManifest, Vec<u8>), CmdE
         .ok_or_else(|| invalid(format!("{MANIFEST_FILE} not found in the package")))?;
     let prefix = manifest_name.trim_end_matches(MANIFEST_FILE).to_string();
     let mut src = String::new();
+    let mut manifest_src = Vec::new();
     zip.by_name(&manifest_name)
         .map_err(io_err)?
         .take(1024 * 1024)
-        .read_to_string(&mut src)
+        .read_to_end(&mut manifest_src)
         .map_err(io_err)?;
+    src.push_str(&String::from_utf8(manifest_src.clone()).map_err(|_| invalid("addon.toml is not text"))?);
     let manifest = AddonManifest::parse(&src).map_err(|e| invalid(e.to_string()))?;
     // Only the two named files are read, so nothing else in the archive
     // (paths like ../x) is ever written to disk.
@@ -138,7 +165,13 @@ pub(crate) fn read_package(path: &Path) -> Result<(AddonManifest, Vec<u8>), CmdE
     if !wasm.starts_with(b"\0asm") {
         return Err(invalid(format!("{} is not a WASM module", manifest.wasm)));
     }
-    Ok((manifest, wasm))
+    drop(entry);
+    let mut signature = String::new();
+    let signed = zip
+        .by_name(&format!("{prefix}{}", zeima_core::addon_sig::SIGNATURE_FILE))
+        .ok()
+        .map(|f| f.take(16 * 1024).read_to_string(&mut signature).is_ok());
+    Ok(Package { manifest, manifest_src, wasm, signature: signed.unwrap_or(false).then_some(signature) })
 }
 
 fn manifest_toml(manifest: &AddonManifest) -> Result<String, CmdError> {
@@ -148,7 +181,7 @@ fn manifest_toml(manifest: &AddonManifest) -> Result<String, CmdError> {
 /// Lets the user pick a package and shows what it asks for.
 #[tauri::command]
 #[specta::specta]
-pub async fn addon_pick(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Option<AddonPackage>> {
+pub async fn addon_pick(app: AppHandle, state: State<'_, AppState>, addons: State<'_, Addons>) -> CmdResult<Option<AddonPackage>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
@@ -159,12 +192,17 @@ pub async fn addon_pick(app: AppHandle, state: State<'_, AppState>) -> CmdResult
     let Some(path) = rx.await.ok().flatten().and_then(|p| p.into_path().ok()) else {
         return Ok(None);
     };
-    let (manifest, _) = read_package(&path)?;
+    let package = read_package(&path)?;
+    let signature = addons.signature_of(&package);
+    let blocked = addons.install_blocked(&package.manifest.id, &signature);
+    let manifest = package.manifest;
     let installed_version = state.core.get_addon(&manifest.id).await.ok().map(|r| r.version);
     Ok(Some(AddonPackage {
         path: path.display().to_string(),
         compatible: manifest.supports_app(&app.package_info().version.to_string()),
         installed_version,
+        signature,
+        blocked,
         manifest,
     }))
 }
@@ -179,14 +217,30 @@ pub async fn addon_install(
     addons: State<'_, Addons>,
     path: String,
 ) -> CmdResult<AddonInfo> {
-    let (manifest, wasm) = read_package(&PathBuf::from(&path))?;
+    let package = read_package(&PathBuf::from(&path))?;
+    install_package(&app, &state, &addons, package).await
+}
+
+/// Checks a package against what this device allows and installs it (enabled, all requested
+/// permissions granted).
+pub(crate) async fn install_package(
+    app: &AppHandle,
+    state: &AppState,
+    addons: &Addons,
+    package: Package,
+) -> CmdResult<AddonInfo> {
+    let signature = addons.signature_of(&package);
+    if let Some(reason) = addons.install_blocked(&package.manifest.id, &signature) {
+        return Err(invalid(reason));
+    }
+    let Package { manifest, wasm, .. } = package;
     if !manifest.supports_app(&app.package_info().version.to_string()) {
         return Err(invalid(format!(
             "needs app version {} or newer",
             manifest.min_app_version.clone().unwrap_or_default()
         )));
     }
-    let root = addons_dir(&app).map_err(io_err)?;
+    let root = addons_dir(app).map_err(io_err)?;
     let target = root.join(&manifest.id);
     let staging = root.join(format!("{}.installing", manifest.id));
     let _ = std::fs::remove_dir_all(&staging);
@@ -194,6 +248,7 @@ pub async fn addon_install(
     std::fs::create_dir_all(wasm_path.parent().unwrap_or(&staging)).map_err(io_err)?;
     std::fs::write(&wasm_path, &wasm).map_err(io_err)?;
     std::fs::write(staging.join(MANIFEST_FILE), manifest_toml(&manifest)?).map_err(io_err)?;
+    crate::registry::write_signature(&staging, &signature).map_err(io_err)?;
     addons.unload(&manifest.id);
     let _ = std::fs::remove_dir_all(&target);
     std::fs::rename(&staging, &target).map_err(io_err)?;
@@ -203,8 +258,8 @@ pub async fn addon_install(
         .save_addon(&manifest.id, &manifest.version, &manifest.permissions)
         .await?;
     let record = state.core.set_addon_enabled(&manifest.id, true).await?;
-    addons.reload(&app, &record);
-    Ok(info(&app, &addons, record).await)
+    addons.reload(app, &record);
+    Ok(info(app, addons, record).await)
 }
 
 #[tauri::command]
@@ -681,4 +736,66 @@ pub async fn addon_suggest(addons: State<'_, Addons>, query: String) -> CmdResul
             note: s.note,
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use base64::Engine;
+    use zeima_core::addon_sig::{check, parse_public_key, SignatureStatus, TrustedKey};
+
+    use super::*;
+
+    /// A signed package built the way `scripts/addons.mjs` makes it is read, and its signature checks out;
+    /// changing the module afterwards does not.
+    #[test]
+    fn a_signed_package_is_read_and_checked() {
+        let v: serde_json::Value =
+            serde_json::from_str(include_str!("../../packages/shared-fixtures/addons/vectors.json")).unwrap();
+        let good = &v["cases"][0];
+        let manifest = good["manifest"].as_str().unwrap();
+        let wasm = base64::engine::general_purpose::STANDARD.decode(good["wasmBase64"].as_str().unwrap()).unwrap();
+        let signature = good["signature"].to_string();
+        let trusted = [TrustedKey {
+            key_id: v["key"]["keyId"].as_str().unwrap().into(),
+            name: "Test".into(),
+            key: parse_public_key(v["key"]["publicKey"].as_str().unwrap()).unwrap(),
+        }];
+
+        let write = |name: &str, wasm: &[u8], sig: Option<&str>| {
+            let path = std::env::temp_dir().join(format!("zeima-pkg-{}-{name}.zip", std::process::id()));
+            let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("addon.toml", opts).unwrap();
+            zip.write_all(manifest.as_bytes()).unwrap();
+            zip.start_file("demo.wasm", opts).unwrap();
+            zip.write_all(wasm).unwrap();
+            if let Some(sig) = sig {
+                zip.start_file("addon.sig", opts).unwrap();
+                zip.write_all(sig.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+            path
+        };
+
+        let path = write("good", &wasm, Some(&signature));
+        let p = read_package(&path).unwrap();
+        assert_eq!(p.manifest.id, "dev.example.demo");
+        assert_eq!(check(&p.manifest_src, &p.wasm, p.signature.as_deref(), &trusted).status, SignatureStatus::Trusted);
+
+        let mut changed = wasm.clone();
+        changed.push(1);
+        let path2 = write("changed", &changed, Some(&signature));
+        let p = read_package(&path2).unwrap();
+        assert_eq!(check(&p.manifest_src, &p.wasm, p.signature.as_deref(), &trusted).status, SignatureStatus::Invalid);
+
+        let path3 = write("unsigned", &wasm, None);
+        let p = read_package(&path3).unwrap();
+        assert!(p.signature.is_none());
+        assert_eq!(check(&p.manifest_src, &p.wasm, p.signature.as_deref(), &trusted).status, SignatureStatus::Unsigned);
+        for f in [path, path2, path3] {
+            let _ = std::fs::remove_file(f);
+        }
+    }
 }

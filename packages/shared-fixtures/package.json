@@ -8,6 +8,7 @@
     "./permissions.yaml": "./permissions.yaml",
     "./sync/merge.json": "./sync/merge.json",
     "./entitlement/vectors.json": "./entitlement/vectors.json",
-    "./entitlement/dev-key.json": "./entitlement/dev-key.json"
+    "./entitlement/dev-key.json": "./entitlement/dev-key.json",
+    "./addons/vectors.json": "./addons/vectors.json"
   }
 }

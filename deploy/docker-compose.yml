@@ -82,6 +82,8 @@ services:
     build:
       context: ..
       dockerfile: server/Dockerfile
+    # The name the air-gapped bundle loads the image under (docs/airgap.md).
+    image: zeima-api:${ZEIMA_VERSION:-latest}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -99,6 +101,13 @@ services:
       RECONCILE_INTERVAL_HOURS: ${RECONCILE_INTERVAL_HOURS:-24}
       # Vendor keys whose license tokens are accepted (see server/README.md).
       ENTITLEMENT_PUBLIC_KEYS: ${ENTITLEMENT_PUBLIC_KEYS:-}
+      # Addons this installation offers, and extra country profiles (the folders next to this file;
+      # empty or missing folders offer nothing).
+      ADDON_REGISTRY_DIR: /data/addon-registry
+      JURISDICTIONS_DIR: /data/jurisdictions
+    volumes:
+      - ./addon-registry:/data/addon-registry:ro,z
+      - ./jurisdictions:/data/jurisdictions:ro,z
     depends_on:
       postgres:
         condition: service_healthy

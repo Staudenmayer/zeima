@@ -1,0 +1,18 @@
+# HTTPS without the internet (docs/airgap.md): Caddy cannot get certificates from Let's Encrypt, so it
+# uses a certificate you provide, for DOMAIN and id.DOMAIN (one certificate with both names, or a
+# wildcard). Put certs/zeima.crt (with the chain) and certs/zeima.key next to docker-compose.yml.
+# Used by deploy/docker-compose.airgap.yml.
+
+{$DOMAIN} {
+	tls /certs/zeima.crt /certs/zeima.key
+	@metrics path /metrics
+	respond @metrics 404
+	reverse_proxy api:3000
+}
+
+id.{$DOMAIN} {
+	tls /certs/zeima.crt /certs/zeima.key
+	@metrics path /metrics
+	respond @metrics 404
+	reverse_proxy keycloak:8080
+}

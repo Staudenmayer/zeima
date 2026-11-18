@@ -1,0 +1,30 @@
+{{- if and .Values.addonRegistry.enabled (not .Values.addonRegistry.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-addon-registry
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.addonRegistry.persistence.storageClassName }}
+  storageClassName: {{ .Values.addonRegistry.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.addonRegistry.persistence.size }}
+{{- end }}
+{{- if and .Values.jurisdictions.files (not .Values.jurisdictions.existingConfigMap) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-jurisdictions
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+data:
+  {{- range $name, $content := .Values.jurisdictions.files }}
+  {{ $name }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+{{- end }}

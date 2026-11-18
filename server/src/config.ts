@@ -55,6 +55,14 @@ export const EnvSchema = Type.Object({
   /** Hours between checks of the member and department mirror against Keycloak; 0 turns the check off. */
   RECONCILE_INTERVAL_HOURS: Type.Integer({ minimum: 0, maximum: 720, default: 24 }),
 
+  /**
+   * A folder with the addons this server offers: signed packages and an `index.json`
+   * (made by `node scripts/addons.mjs publish`). Without it the registry is empty.
+   */
+  ADDON_REGISTRY_DIR: Type.Optional(Type.String({ minLength: 1 })),
+  /** A folder of extra country profiles (`<ID>.toml`, docs/country-profiles.md) the apps download. */
+  JURISDICTIONS_DIR: Type.Optional(Type.String({ minLength: 1 })),
+
   DOCS_ENABLED: Type.Boolean({ default: true }),
   METRICS_ENABLED: Type.Boolean({ default: true }),
   /** Browser origins allowed by CORS, comma-separated (the desktop app needs none). */
@@ -103,6 +111,8 @@ export interface Config {
   keycloakWebhookSecret: string | null
   sso: { allowPrivateUrls: boolean; verifyDomains: boolean }
   reconcileIntervalHours: number
+  addonRegistryDir: string | null
+  jurisdictionsDir: string | null
   allowedClients: string[]
   docsClientId: string
   docsEnabled: boolean
@@ -214,6 +224,8 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     keycloakWebhookSecret: env.KEYCLOAK_WEBHOOK_SECRET ?? null,
     sso: { allowPrivateUrls: env.SSO_ALLOW_PRIVATE_URLS, verifyDomains: env.SSO_VERIFY_DOMAINS ?? env.DEPLOYMENT_MODE === 'cloud' },
     reconcileIntervalHours: env.RECONCILE_INTERVAL_HOURS,
+    addonRegistryDir: env.ADDON_REGISTRY_DIR ?? null,
+    jurisdictionsDir: env.JURISDICTIONS_DIR ?? null,
     allowedClients: list(env.ALLOWED_CLIENTS),
     docsClientId: env.DOCS_CLIENT_ID,
     docsEnabled: env.DOCS_ENABLED,

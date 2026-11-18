@@ -63,6 +63,10 @@ pub struct Addons {
     pub tokens: Arc<TokenCache>,
     /// Running account sign-ins by addon id; sending cancels.
     sign_ins: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    /// Publishers the server's registry names (their keys are trusted next to the built-in ones).
+    publishers: Mutex<Vec<crate::registry::Publisher>>,
+    /// What the person's organizations allow.
+    rules: Mutex<Vec<crate::registry::OrgRule>>,
 }
 
 /// Folder with one sub-folder per installed addon.
@@ -607,6 +611,51 @@ fn build_plugin(
 }
 
 impl Addons {
+    pub fn set_trust(&self, publishers: Vec<crate::registry::Publisher>, rules: Vec<crate::registry::OrgRule>) {
+        *self.publishers.lock().unwrap_or_else(|e| e.into_inner()) = publishers;
+        *self.rules.lock().unwrap_or_else(|e| e.into_inner()) = rules;
+    }
+
+    pub fn set_publishers(&self, publishers: Vec<crate::registry::Publisher>) {
+        *self.publishers.lock().unwrap_or_else(|e| e.into_inner()) = publishers;
+    }
+
+    pub fn set_rules(&self, rules: Vec<crate::registry::OrgRule>) {
+        *self.rules.lock().unwrap_or_else(|e| e.into_inner()) = rules;
+    }
+
+    pub fn trust_snapshot(&self) -> (Vec<crate::registry::Publisher>, Vec<crate::registry::OrgRule>) {
+        (
+            self.publishers.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            self.rules.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+        )
+    }
+
+    /// Who signed this package, if the app trusts them.
+    pub fn signature_of(&self, package: &crate::commands_addons::Package) -> zeima_core::addon_sig::SignatureCheck {
+        let (publishers, _) = self.trust_snapshot();
+        zeima_core::addon_sig::check(
+            &package.manifest_src,
+            &package.wasm,
+            package.signature.as_deref(),
+            &crate::registry::trusted_keys(&publishers),
+        )
+    }
+
+    /// Why an addon may not run here: an organization's rules. `None` if it may.
+    pub fn blocked(&self, id: &str, signature: &zeima_core::addon_sig::SignatureCheck) -> Option<String> {
+        let (_, rules) = self.trust_snapshot();
+        crate::registry::refused_by(&rules, id, signature)
+    }
+
+    /// Why this package may not be installed: a signature that does not match, or the rules.
+    pub fn install_blocked(&self, id: &str, signature: &zeima_core::addon_sig::SignatureCheck) -> Option<String> {
+        if signature.status == zeima_core::addon_sig::SignatureStatus::Invalid {
+            return Some("The signature does not match the files: the addon was changed after it was signed, or it is damaged.".into());
+        }
+        self.blocked(id, signature)
+    }
+
     fn set_error(&self, id: &str, error: Option<String>) {
         let mut errors = self.errors.lock().unwrap_or_else(|e| e.into_inner());
         match error {
@@ -653,6 +702,13 @@ impl Addons {
         self.unload(&record.id);
         if !record.enabled {
             self.set_error(&record.id, None);
+            return;
+        }
+        let signature = addons_dir(app)
+            .map(|d| crate::registry::installed_signature(&d.join(&record.id)))
+            .unwrap_or_else(|_| zeima_core::addon_sig::SignatureCheck::unsigned());
+        if let Some(reason) = self.blocked(&record.id, &signature) {
+            self.set_error(&record.id, Some(reason));
             return;
         }
         let result = addons_dir(app).map_err(|e| e.to_string()).and_then(|dir| {
@@ -1008,7 +1064,7 @@ mod tests {
                 .unwrap(),
         );
         core.set_default_tz("UTC").unwrap();
-        let (manifest, wasm) = crate::commands_addons::read_package(&zip).unwrap();
+        let crate::commands_addons::Package { manifest, wasm, .. } = crate::commands_addons::read_package(&zip).unwrap();
         static LOADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         // Tests run in parallel and may load the same addon: one folder each.
         let n = LOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

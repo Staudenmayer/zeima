@@ -14,6 +14,8 @@ import { billingRoutes } from './modules/billing/routes.ts'
 import { licenseRoutes, licensingRoutes } from './modules/licensing/routes.ts'
 import { internalRoutes } from './modules/internal/routes.ts'
 import { orgRoutes } from './modules/orgs/routes.ts'
+import { addonRoutes } from './modules/addons/routes.ts'
+import { jurisdictionRoutes } from './modules/jurisdictions/routes.ts'
 import { scimRoutes } from './modules/orgs/scim.ts'
 import { directoryRoutes } from './modules/directory/routes.ts'
 import { ssoRoutes } from './modules/orgs/sso.ts'
@@ -86,6 +88,8 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
       await v1.register(orgRoutes)
       await v1.register(ssoRoutes, { config, ...(options.dnsTxt && { txt: options.dnsTxt }), ...(options.dnsResolver && { resolver: options.dnsResolver }) })
       await v1.register(scimRoutes, { config })
+      await v1.register(addonRoutes, { config })
+      await v1.register(jurisdictionRoutes, { config })
       await v1.register(internalRoutes, { config })
       await v1.register(syncRoutes)
       await v1.register(licensingRoutes)

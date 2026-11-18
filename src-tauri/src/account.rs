@@ -51,7 +51,7 @@ pub struct OidcConfig {
 /// API versions this app speaks.
 pub const API_VERSION: u32 = 1;
 
-fn http_get(url: &str) -> Result<String, String> {
+pub(crate) fn http_get(url: &str) -> Result<String, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(HTTP_TIMEOUT))
@@ -219,7 +219,7 @@ fn err(code: &str, message: impl ToString) -> CmdError {
     CmdError::other(code, message)
 }
 
-async fn server_url(state: &AppState) -> CmdResult<Option<String>> {
+pub(crate) async fn server_url(state: &AppState) -> CmdResult<Option<String>> {
     Ok(state.core.get_meta(SERVER_KEY).await?.filter(|s| !s.is_empty()))
 }
 

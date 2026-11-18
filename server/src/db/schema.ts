@@ -208,6 +208,19 @@ export const entitlement = pgTable(
   (t) => [check('entitlement_subject', sql`(${t.userId} IS NULL) <> (${t.orgId} IS NULL)`)],
 )
 
+/** Which addons an organization lets its people use (the apps enforce it). */
+export const orgAddonPolicy = pgTable('org_addon_policy', {
+  orgId: uuid('org_id')
+    .primaryKey()
+    .references(() => organization.id, { onDelete: 'cascade' }),
+  /** `open`: any addon; `allowlist`: only the ones in `allowed`. */
+  mode: text('mode').notNull().default('open'),
+  /** Only addons signed by a publisher the app trusts. */
+  requireSigned: boolean('require_signed').notNull().default(false),
+  allowed: text('allowed').array().notNull().default(sql`'{}'::text[]`),
+  updatedAt: ms('updated_at').notNull(),
+})
+
 /** A key an identity provider uses to provision the people of one organization (SCIM). Only a hash is kept. */
 export const scimToken = pgTable(
   'scim_token',

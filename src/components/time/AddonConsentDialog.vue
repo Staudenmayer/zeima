@@ -6,6 +6,7 @@ import { commands, type AddonPackage } from '@/bindings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import SignatureBadge from '@/components/time/SignatureBadge.vue'
 import { HOOK_KEYS, PERMISSION_KEYS } from '@/lib/addons'
 import { call, errorMessage } from '@/lib/ipc'
 
@@ -53,6 +54,13 @@ async function install() {
       <div class="grid gap-4 text-sm">
         <p v-if="pkg.manifest.description">{{ pkg.manifest.description }}</p>
 
+        <SignatureBadge :signature="pkg.signature" />
+        <p v-if="pkg.signature.status === 'unknown_key'" class="text-xs text-muted-foreground">{{ $t('addons.signature.unknownKeyHint', { id: pkg.signature.keyId ?? '' }) }}</p>
+        <p v-if="pkg.blocked" class="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-destructive">
+          <AlertTriangle class="mt-0.5 size-4 shrink-0" />
+          {{ pkg.blocked }}
+        </p>
+
         <p v-if="!pkg.compatible" class="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-destructive">
           <AlertTriangle class="mt-0.5 size-4 shrink-0" />
           {{ $t('addons.incompatible', { version: pkg.manifest.min_app_version }) }}
@@ -99,7 +107,7 @@ async function install() {
 
       <DialogFooter>
         <Button variant="outline" @click="open = false">{{ $t('common.cancel') }}</Button>
-        <Button :disabled="installing || !pkg.compatible" @click="install">
+        <Button :disabled="installing || !pkg.compatible || !!pkg.blocked" @click="install">
           {{ pkg.installedVersion ? $t('addons.update') : $t('addons.install') }}
         </Button>
       </DialogFooter>

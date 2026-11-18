@@ -361,3 +361,65 @@ When a call fails or hits a limit, Zeima shows the error on the Addons page and 
 Increase `version` with every release. Installing a package with the same `id` replaces the old version; settings and storage are kept. Use `min_app_version` when you rely on features of a newer Zeima: the meeting, absence and work-day calls, the activities call and the `meeting.changed` / `absence.changed` hooks need `1.0.0`, and so does the local date and time in `Tick`. Within a major version of the SDK, new fields are only ever added, never removed or renamed.
 
 **Changes in 1.0.** The SDK gained `host::list_activities`, `list_meetings`, `list_absences` and `list_work_days` with the types `Activity`, `Meeting`, `MeetingOccurrence`, `MeetingResponse`, `Absence`, `WorkDay` and `DateRange`; the events `meeting.changed` and `absence.changed` (with the `Event` helpers `change`, `meeting_id`, `meeting`, `status`, `occurrence_at`, `absence_id`, `absence`, `day`); and `timezone`, `localDate` and `localTime` on `Tick`. Tag groups no longer exist in the app: `Tag.group_name` is still read from old data, but do not rely on it.
+
+## Signing and the registry
+
+An addon runs code on the person's machine, inside a sandbox with the permissions they agreed to.
+Signing tells them *who made it*, and the registry gives an installation one place to offer addons
+from. Both are optional: an unsigned addon installs from a file as before, unless an organization
+says otherwise (see below).
+
+### Signing
+
+A publisher has an Ed25519 key pair. The signature covers the manifest and the module, not the zip,
+so it survives repacking and breaks if either file changes (more permissions, a swapped module).
+
+```sh
+node scripts/addons.mjs keygen acme-2026            # acme-2026.key (secret!) and the public key
+addons/build.sh hours-export                         # builds addons/dist/<id>-<version>.zip
+node scripts/addons.mjs sign addons/dist/<id>-<version>.zip --key acme-2026.key --key-id acme-2026
+node scripts/addons.mjs verify addons/dist/<id>-<version>.zip --public <public key>
+```
+
+With `ZEIMA_SIGN_KEY=acme-2026.key ZEIMA_SIGN_KEY_ID=acme-2026`, `addons/build.sh` signs as part of the
+build. The signature is the file `addon.sig` in the zip: `{"keyId": "...", "signature": "<base64url>"}`;
+the message is `zeima-addon-v1\n<sha256 of addon.toml>\n<sha256 of the module>\n`
+(`crates/zeima-core/src/addon_sig.rs`, test vectors in `packages/shared-fixtures/addons`).
+
+The app trusts a key when it is built into the app (`BUILTIN` in `src-tauri/src/registry.rs`) or when
+the signed-in server's registry lists it as a publisher. The install dialog and the addon list show:
+
+| Shown | Meaning |
+|---|---|
+| Signed by *Name* | a trusted publisher signed exactly these files |
+| Not signed | no signature |
+| Signed by a publisher this app does not know | a signature, but nobody the app trusts vouches for the key |
+| The signature does not match | the files were changed after signing, or are damaged; **cannot be installed** |
+
+### The registry of a server
+
+A server offers addons from a folder, `ADDON_REGISTRY_DIR` (`deploy/addon-registry` with the compose
+file, a volume with the Helm chart). Make it with the same tool:
+
+```sh
+node scripts/addons.mjs publish deploy/addon-registry \
+  --publisher acme-2026="Acme IT"=<public key> \
+  addons/dist/com.acme.hours-export-1.2.0.zip
+```
+
+This copies the packages, writes `index.json` (id, name, version, permissions, hooks, size, SHA-256, the
+key that signed it, and the publishers) and can be run again to add versions. The server serves the
+index (`GET /v1/addons/registry`) and the packages to signed-in users and does nothing else with them:
+**the app checks the hash and the signature itself.** In the app, Addons lists what the server offers
+and installs it after the same consent dialog as for a file.
+
+### What an organization can require
+
+Owners and admins can restrict addons for their people (Organization → Addons, `PUT
+/v1/orgs/:id/addons`): *any addon*, or *only the addons on a list* (by id), and optionally *only
+signed addons* (signed by a publisher the app trusts). The apps enforce it for every organization the
+person belongs to; the strictest one wins. A refused addon cannot be installed, and an installed one
+stops running (the Addons page says why). The rules are kept on the device, so they apply offline, and
+are refreshed every half hour and whenever the Addons page opens. This is a control for managed
+installations, not protection against a user who modifies their own copy of the app.
+

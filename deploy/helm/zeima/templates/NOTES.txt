@@ -1,0 +1,13 @@
+Zeima is being installed.
+
+  The app connects to:  {{ .Values.publicUrl }}   (Settings → Account → Server)
+  Sign-in service:      {{ .Values.idUrl }}
+
+Keycloak's admin password:
+  kubectl get secret {{ include "zeima.secretName" . }} -n {{ .Release.Namespace }} -o jsonpath='{.data.keycloak-admin-password}' | base64 -d
+
+Check that everything is up:
+  kubectl rollout status deploy/{{ .Release.Name }}-api deploy/{{ .Release.Name }}-keycloak -n {{ .Release.Namespace }}
+
+Syncing needs a license: until an entitlement is added for your users or organization the server runs
+everything else but offers the Free plan (docs/helm.md, server/README.md).

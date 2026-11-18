@@ -1,0 +1,106 @@
+{{- $public := required "publicUrl is required (https://zeima.example.com)" .Values.publicUrl }}
+{{- $secret := include "zeima.secretName" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-api
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .Release.Name }}-api
+  ports:
+    - { name: http, port: 3000, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Release.Name }}-api
+        {{- include "zeima.labels" . | nindent 8 }}
+      annotations:
+        # A changed list of profiles restarts the API.
+        checksum/jurisdictions: {{ .Values.jurisdictions.files | toYaml | sha256sum }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: {{ include "zeima.apiImage" . }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          env:
+            - { name: NODE_ENV, value: production }
+            - { name: DEPLOYMENT_MODE, value: self_hosted }
+            - { name: TRUST_PROXY, value: "true" }
+            - { name: PUBLIC_URL, value: {{ $public | quote }} }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: postgres-password } }
+            - name: DATABASE_URL
+              value: {{ printf "postgres://%s:$(POSTGRES_PASSWORD)@%s:%v/%s" .Values.externalDatabase.api.user (include "zeima.dbHost" .) .Values.externalDatabase.port .Values.externalDatabase.api.database | quote }}
+            - { name: KEYCLOAK_URL, value: {{ required "idUrl is required" .Values.idUrl | quote }} }
+            - { name: KEYCLOAK_INTERNAL_URL, value: {{ printf "http://%s-keycloak:8080" .Release.Name | quote }} }
+            - { name: METRICS_ENABLED, value: {{ .Values.api.metricsEnabled | quote }} }
+            - { name: DOCS_ENABLED, value: {{ .Values.api.docsEnabled | quote }} }
+            - name: KEYCLOAK_ADMIN_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: api-admin-secret } }
+            - name: KEYCLOAK_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: {{ $secret }}, key: webhook-secret } }
+            - { name: RECONCILE_INTERVAL_HOURS, value: {{ .Values.api.reconcileIntervalHours | quote }} }
+            - { name: ENTITLEMENT_PUBLIC_KEYS, value: {{ .Values.api.entitlementPublicKeys | quote }} }
+            {{- if .Values.addonRegistry.enabled }}
+            - { name: ADDON_REGISTRY_DIR, value: /data/addon-registry }
+            {{- end }}
+            {{- if or .Values.jurisdictions.files .Values.jurisdictions.existingConfigMap }}
+            - { name: JURISDICTIONS_DIR, value: /data/jurisdictions }
+            {{- end }}
+            {{- range $k, $v := .Values.api.extraEnv }}
+            - { name: {{ $k }}, value: {{ $v | quote }} }
+            {{- end }}
+          ports:
+            - { name: http, containerPort: 3000 }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+            failureThreshold: 5
+          resources: {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            {{- if .Values.addonRegistry.enabled }}
+            - { name: registry, mountPath: /data/addon-registry, readOnly: true }
+            {{- end }}
+            {{- if or .Values.jurisdictions.files .Values.jurisdictions.existingConfigMap }}
+            - { name: jurisdictions, mountPath: /data/jurisdictions, readOnly: true }
+            {{- end }}
+      volumes:
+        - { name: tmp, emptyDir: {} }
+        {{- if .Values.addonRegistry.enabled }}
+        - name: registry
+          persistentVolumeClaim: { claimName: {{ .Values.addonRegistry.persistence.existingClaim | default (printf "%s-addon-registry" .Release.Name) }} }
+        {{- end }}
+        {{- if or .Values.jurisdictions.files .Values.jurisdictions.existingConfigMap }}
+        - name: jurisdictions
+          configMap: { name: {{ .Values.jurisdictions.existingConfigMap | default (printf "%s-jurisdictions" .Release.Name) }} }
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}

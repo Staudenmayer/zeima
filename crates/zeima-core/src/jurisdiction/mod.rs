@@ -9,6 +9,7 @@ mod easter;
 mod holidays;
 
 use std::collections::BTreeMap;
+use std::sync::RwLock;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,10 @@ const BUNDLED: &[(&str, &str)] = &[
     ("DE", include_str!("../../jurisdictions/DE.toml")),
     ("CH", include_str!("../../jurisdictions/CH.toml")),
 ];
+
+/// Profiles an installation adds at run time (a self-hosted server's mounted folder, or the app's
+/// own `jurisdictions` folder). A profile with the id of a bundled one replaces it.
+static EXTRA: RwLock<Vec<ProfileDef>> = RwLock::new(Vec::new());
 
 /// Text in several languages, keyed by language code (`de`, `en`, …).
 pub type LocalizedText = BTreeMap<String, String>;
@@ -262,8 +267,95 @@ pub fn bundled() -> Vec<ProfileDef> {
         .collect()
 }
 
+/// The bundled profiles, with the extra ones added (and replacing a bundled one of the same id).
+pub fn all() -> Vec<ProfileDef> {
+    merge(bundled(), &EXTRA.read().unwrap_or_else(|e| e.into_inner()))
+}
+
+fn merge(mut list: Vec<ProfileDef>, extra: &[ProfileDef]) -> Vec<ProfileDef> {
+    for e in extra {
+        list.retain(|p| !p.id.eq_ignore_ascii_case(&e.id));
+        list.push(e.clone());
+    }
+    list.sort_by(|a, b| a.id.cmp(&b.id));
+    list
+}
+
+/// Checks a profile that did not come with the app. The bundled ones are checked by the tests; this
+/// is what stops a broken file from taking a person's day calculation down.
+pub fn validate(def: &ProfileDef) -> Result<()> {
+    let bad = |msg: String| Error::validation("profile", format!("{}: {msg}", def.id));
+    let id_ok = def.id.len() >= 2
+        && def.id.len() <= 8
+        && def.id.starts_with(|c: char| c.is_ascii_uppercase())
+        && def.id.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+    if !id_ok {
+        return Err(bad("the id must be 2 to 8 capital letters or digits (an ISO 3166-1 code for a country)".into()));
+    }
+    if def.name.is_empty() || !def.name.contains_key("en") {
+        return Err(bad("needs an English name".into()));
+    }
+    if def.sources.is_empty() {
+        return Err(bad("needs sources".into()));
+    }
+    if def.default_locale.trim().is_empty() {
+        return Err(bad("needs a default_locale".into()));
+    }
+    let mut ids: Vec<&String> = def.holidays.iter().map(|h| &h.id).collect();
+    ids.sort();
+    ids.dedup();
+    if ids.len() != def.holidays.len() {
+        return Err(bad("duplicate holiday ids".into()));
+    }
+    let mut regions: Vec<Option<&str>> = vec![None];
+    for (code, region) in &def.regions {
+        if !code.starts_with(&format!("{}-", def.id)) {
+            return Err(bad(format!("region {code} must start with {}-", def.id)));
+        }
+        if let Some(unknown) = region.remove_holidays.iter().find(|r| !def.holidays.iter().any(|h| &h.id == *r)) {
+            return Err(bad(format!("region {code} removes unknown holiday {unknown}")));
+        }
+        regions.push(Some(code));
+    }
+    for region in regions {
+        let profile = resolve(def.clone(), region)?;
+        // Every rule has to produce dates, in any year, without panicking.
+        for year in [2000, 2024, 2025, 2026, 2100] {
+            let days: Vec<_> = profile.holidays(year).into_iter().map(|h| h.id).collect();
+            let mut unique = days.clone();
+            unique.sort();
+            unique.dedup();
+            if unique.len() != days.len() {
+                return Err(bad(format!("a holiday falls twice in {year}")));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Replaces the extra profiles with these files (name, TOML text). Returns what was wrong with the
+/// files that were left out, one line each; the others are used.
+pub fn set_extra(files: &[(String, String)]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let mut good: Vec<ProfileDef> = Vec::new();
+    for (file, source) in files {
+        match parse(source).and_then(|def| validate(&def).map(|()| def)) {
+            Ok(def) if good.iter().any(|g| g.id == def.id) => problems.push(format!("{file}: {} is defined twice", def.id)),
+            Ok(def) => good.push(def),
+            Err(e) => problems.push(format!("{file}: {e}")),
+        }
+    }
+    *EXTRA.write().unwrap_or_else(|e| e.into_inner()) = good;
+    problems
+}
+
+/// Whether `id` is a profile that came from outside the app (or replaces a bundled one).
+pub fn is_extra(id: &str) -> bool {
+    EXTRA.read().unwrap_or_else(|e| e.into_inner()).iter().any(|p| p.id.eq_ignore_ascii_case(id))
+}
+
 pub fn list() -> Vec<ProfileInfo> {
-    bundled()
+    all()
         .into_iter()
         .map(|p| ProfileInfo {
             id: p.id,
@@ -281,7 +373,7 @@ pub fn list() -> Vec<ProfileInfo> {
 
 /// Loads a bundled profile and applies `region`.
 pub fn load(id: &str, region: Option<&str>) -> Result<Profile> {
-    let def = bundled()
+    let def = all()
         .into_iter()
         .find(|p| p.id.eq_ignore_ascii_case(id))
         .ok_or_else(|| Error::validation("profileId", format!("unknown country profile '{id}'")))?;
@@ -320,7 +412,7 @@ pub fn suggest_for_locale(locale: &str) -> Option<String> {
         .split(['-', '_', '.'])
         .nth(1)
         .map(|c| c.to_ascii_uppercase())?;
-    bundled().into_iter().find(|p| p.id == country).map(|p| p.id)
+    all().into_iter().find(|p| p.id == country).map(|p| p.id)
 }
 
 /// JSON Schema of the profile format (`jurisdictions/profile.schema.json`).

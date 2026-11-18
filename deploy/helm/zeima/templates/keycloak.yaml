@@ -1,0 +1,89 @@
+{{- $id := required "idUrl is required (https://id.example.com)" .Values.idUrl }}
+{{- $public := required "publicUrl is required (https://zeima.example.com)" .Values.publicUrl }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-keycloak
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .Release.Name }}-keycloak
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-keycloak
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}-keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Release.Name }}-keycloak
+        {{- include "zeima.labels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: keycloak
+          image: {{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}
+          imagePullPolicy: {{ .Values.keycloak.image.pullPolicy }}
+          args: ["start", "--import-realm"]
+          env:
+            - { name: KC_BOOTSTRAP_ADMIN_USERNAME, value: admin }
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "zeima.secretName" . }}, key: keycloak-admin-password } }
+            - { name: KC_DB, value: postgres }
+            - { name: KC_DB_URL, value: {{ printf "jdbc:postgresql://%s:%v/%s" (include "zeima.dbHost" .) .Values.externalDatabase.port .Values.externalDatabase.keycloak.database | quote }} }
+            - { name: KC_DB_USERNAME, value: {{ .Values.externalDatabase.keycloak.user | quote }} }
+            - name: KC_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "zeima.secretName" . }}, key: keycloak-db-password } }
+            - { name: KC_HOSTNAME, value: {{ $id | quote }} }
+            # TLS ends at the ingress.
+            - { name: KC_HTTP_ENABLED, value: "true" }
+            - { name: KC_PROXY_HEADERS, value: xforwarded }
+            - { name: KC_HEALTH_ENABLED, value: "true" }
+            # Placeholders in realm-zeima.json
+            - name: ZEIMA_API_ADMIN_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "zeima.secretName" . }}, key: api-admin-secret } }
+            - { name: ZEIMA_API_URL, value: {{ $public | quote }} }
+            - { name: ZEIMA_WEB_URL, value: {{ $public | quote }} }
+            - { name: ZEIMA_SWAGGER_ENABLED, value: "false" }
+            - { name: ZEIMA_SMTP_HOST, value: {{ .Values.smtp.host | default "localhost" | quote }} }
+            - { name: ZEIMA_SMTP_PORT, value: {{ .Values.smtp.port | quote }} }
+            - { name: ZEIMA_SMTP_FROM, value: {{ .Values.smtp.from | quote }} }
+            - { name: ZEIMA_SMTP_STARTTLS, value: {{ .Values.smtp.starttls | quote }} }
+            - { name: ZEIMA_SMTP_AUTH, value: {{ .Values.smtp.auth | quote }} }
+            - { name: ZEIMA_SMTP_USER, value: {{ .Values.smtp.user | quote }} }
+            - name: ZEIMA_SMTP_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "zeima.secretName" . }}, key: smtp-password, optional: true } }
+            - { name: ZEIMA_VERIFY_EMAIL, value: {{ .Values.keycloak.verifyEmail | quote }} }
+            # The event listener tells the API about changes.
+            - { name: ZEIMA_WEBHOOK_URL, value: {{ printf "http://%s-api:3000/v1/internal/keycloak-events" .Release.Name | quote }} }
+            - name: ZEIMA_WEBHOOK_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "zeima.secretName" . }}, key: webhook-secret } }
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: management, containerPort: 9000 }
+          readinessProbe:
+            httpGet: { path: /health/ready, port: management }
+            periodSeconds: 10
+            failureThreshold: 12
+          startupProbe:
+            httpGet: { path: /health/started, port: management }
+            periodSeconds: 5
+            failureThreshold: 60
+          resources: {{- toYaml .Values.keycloak.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}

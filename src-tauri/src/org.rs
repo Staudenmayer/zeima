@@ -44,7 +44,7 @@ pub fn allowed(method: &str, path: &str) -> bool {
 }
 
 /// The answer: status and body text.
-fn call(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<(u16, String), String> {
+pub(crate) fn call(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<(u16, String), String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(HTTP_TIMEOUT))

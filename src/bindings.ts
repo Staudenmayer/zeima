@@ -123,7 +123,19 @@ export const commands = {
 	installedVersion: string | null,
 	/**  The app is new enough (`min_app_version`). */
 	compatible: boolean,
+	/**  Who made it. */
+	signature: SignatureCheck,
+	/**  Why this device may not install it (an organization's rules, or a signature that does not match). */
+	blocked: string | null,
 } | null, CmdError>(__TAURI_INVOKE("addon_pick")),
+	addonRegistry: () => typedError<RegistryView, CmdError>(__TAURI_INVOKE("addon_registry")),
+	/**
+	 *  Downloads an addon from the server's registry and installs it, after checking its hash and its
+	 *  signature and the rules of the person's organizations.
+	 */
+	addonRegistryInstall: (id: string, version: string) => typedError<AddonInfo, CmdError>(__TAURI_INVOKE("addon_registry_install", { id, version })),
+	/**  What the person's organizations allow (asks the server; the last known rules when it cannot). */
+	addonRules: () => typedError<OrgRule[], CmdError>(__TAURI_INVOKE("addon_rules")),
 	/**
 	 *  Installs (or updates) a package the user has consented to; it is
 	 *  enabled right away with all requested permissions granted.
@@ -375,6 +387,10 @@ export type AddonInfo = {
 	error: string | null,
 	/**  `[[oauth]]` providers with a connected account. */
 	connected: string[],
+	/**  Who made it, as far as the app can tell. */
+	signature: SignatureCheck,
+	/**  Why an organization the person belongs to does not let it run (and it is not running). */
+	blocked: string | null,
 };
 
 export type AddonManifest = {
@@ -421,6 +437,10 @@ export type AddonPackage = {
 	installedVersion: string | null,
 	/**  The app is new enough (`min_app_version`). */
 	compatible: boolean,
+	/**  Who made it. */
+	signature: SignatureCheck,
+	/**  Why this device may not install it (an organization's rules, or a signature that does not match). */
+	blocked: string | null,
 };
 
 export type AddonRecord = {
@@ -1004,6 +1024,16 @@ export type OrgPolicy = {
 	groupPath: string | null,
 } & PolicySettings;
 
+/**  What one organization allows. */
+export type OrgRule = {
+	orgId: string,
+	orgName: string,
+	/**  `open` or `allowlist`. */
+	mode: string,
+	requireSigned: boolean,
+	allowed: string[],
+};
+
 export type PatternDay = {
 	/**  1 = Monday … 7 = Sunday. */
 	weekday: number,
@@ -1217,6 +1247,29 @@ export type RegionalFormats = {
 	weekStart: WeekStart,
 };
 
+/**  An addon the server offers. */
+export type RegistryAddon = {
+	id: string,
+	name: string,
+	version: string,
+	description: string,
+	author: string,
+	permissions: string[],
+	hooks: string[],
+	size: number,
+	installedVersion: string | null,
+	/**  The publisher's name when the package says it is signed by a publisher this app trusts. */
+	signer: string | null,
+	compatible: boolean,
+	blocked: string | null,
+};
+
+export type RegistryView = {
+	addons: RegistryAddon[],
+	/**  Why the list could not be read (signed out, server unreachable). */
+	error: string | null,
+};
+
 export type Report = {
 	totalMs: number,
 	billableMs: number,
@@ -1309,6 +1362,24 @@ export type SettingType = "text" | "number" | "boolean" |
 "select" | 
 /**  Text shown masked in the form. */
 "password";
+
+export type SignatureCheck = {
+	status: SignatureStatus,
+	keyId: string | null,
+	/**  The publisher's name, for a trusted key. */
+	signer: string | null,
+};
+
+/**  What the person is told about who made an addon. */
+export type SignatureStatus = 
+/**  No signature. */
+"unsigned" | 
+/**  Signed by a key the app trusts, and the files match. */
+"trusted" | 
+/**  Signed, but by a key the app does not know. */
+"unknown_key" | 
+/**  Signed, but the files do not match the signature (changed after signing, or damaged). */
+"invalid";
 
 export type SkippedRow = {
 	/**  Line in the file, counting the header as 1. */
