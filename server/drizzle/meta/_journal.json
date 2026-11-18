@@ -99,6 +99,13 @@
       "when": 1794675047106,
       "tag": "0013_avatar",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795021323275,
+      "tag": "0014_wandering_lord_tyger",
+      "breakpoints": true
     }
   ]
 }

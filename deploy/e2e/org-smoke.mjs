@@ -5,6 +5,8 @@
 //   PUBLIC_URL=http://localhost:3000 ID_URL=http://localhost:8080 KEYCLOAK_ADMIN_PASSWORD=admin \
 //   node deploy/e2e/org-smoke.mjs
 //
+// Add E2E_SSO=1 to also check single sign-on; the API then needs SSO_ALLOW_PRIVATE_URLS=true.
+//
 // The API needs KEYCLOAK_ADMIN_CLIENT_SECRET (see deploy/compose.dev.yml) and
 // the realm from deploy/keycloak applied. Needs Node 24. Exit code 1 on the
 // first failed step.
@@ -85,6 +87,51 @@ must(
 const pulled = async (who) => (await json(await call(who, 'GET', '/v1/sync/pull?cursor=0'))).rows.filter((r) => r.workspaceId === shared.id)
 must((await pulled(member)).some((r) => r.rowId === entry), 'the member reads their entry')
 must((await pulled(owner)).some((r) => r.rowId === entry), 'the owner reads it too')
+
+// ---- single sign-on (needs an API that accepts a provider on this machine: SSO_ALLOW_PRIVATE_URLS=true)
+// Keycloak's own master realm stands in for the organization's identity provider.
+if (process.env.E2E_SSO) {
+  const domain = `e2e-${randomUUID().slice(0, 8)}.example`
+  const before = await expect(await call(owner, 'GET', `/v1/orgs/${org.id}/sso`), 200, 'the owner reads the single sign-on before setting it up')
+  must(before.configured === false && before.redirectUri.includes(`/broker/sso-${org.id}/endpoint`), 'it names the address to point the provider at', before)
+  await expect(await call(member, 'GET', `/v1/orgs/${org.id}/sso`), 403, 'a member may not read it')
+  const set = await expect(
+    await call(owner, 'PUT', `/v1/orgs/${org.id}/sso`, { protocol: 'oidc', name: 'E2E sign-in', sourceUrl: `${ID_URL}/realms/master`, clientId: 'e2e-client', clientSecret: 'e2e-secret', domains: [domain] }),
+    200,
+    'the owner set up an OIDC provider',
+  )
+  must(set.configured && set.domains[0] === domain && !JSON.stringify(set).includes('e2e-secret'), 'it is configured and the secret is not given back', set)
+  // Keycloak: the provider exists, is linked to the organization and is hidden from the sign-in page.
+  const kcIdp = await json(await fetch(`${ID_URL}/admin/realms/zeima/identity-provider/instances/sso-${org.id}`, { headers: { authorization: `Bearer ${admin}` } }))
+  must(kcIdp.hideOnLogin === true && kcIdp.config.authorizationUrl?.includes('/realms/master/'), 'Keycloak has the provider, read from its metadata and hidden from the sign-in page', kcIdp)
+  const kcOrg = await json(await fetch(`${ID_URL}/admin/realms/zeima/organizations/${org.id}`, { headers: { authorization: `Bearer ${admin}` } }))
+  must(kcOrg.domains?.some((d) => d.name === domain && d.identityProviderAlias === `sso-${org.id}` && d.autoRedirect), 'the organization\'s domain is tied to the provider', kcOrg)
+  // A person with an address in the domain is sent to the provider when they sign in.
+  const redirected = await (async () => {
+    const oidc = await json(await fetch(`${discovery.issuer}/.well-known/openid-configuration`))
+    const authUrl = new URL(oidc.authorization_endpoint)
+    for (const [k, v] of Object.entries({ response_type: 'code', client_id: discovery.clientId, redirect_uri: 'http://127.0.0.1:54321', scope: 'openid', state: 'x', code_challenge: 'x'.repeat(43), code_challenge_method: 'S256' })) authUrl.searchParams.set(k, v)
+    const jar = new Map()
+    const remember = (res) => res.headers.getSetCookie().forEach((c) => jar.set(c.split('=')[0], c.split(';')[0]))
+    const page = await fetch(authUrl, { redirect: 'manual' })
+    remember(page)
+    const action = (await page.text()).match(/<form[^>]*id="kc-form-login"[^>]*>/)?.[0]?.match(/\saction="([^"]+)"/)?.[1]?.replaceAll('&amp;', '&')
+    if (!action) return 'no login form'
+    let res = await fetch(action, { method: 'POST', redirect: 'manual', headers: { cookie: [...jar.values()].join('; '), 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ username: `someone@${domain}` }) })
+    for (let hop = 0; hop < 5; hop++) {
+      remember(res)
+      const next = res.headers.get('location')
+      if (!next) return `stopped at ${res.status}`
+      if (next.includes('/realms/master/protocol/openid-connect/auth')) return 'ok'
+      res = await fetch(new URL(next, ID_URL), { redirect: 'manual', headers: { cookie: [...jar.values()].join('; ') } })
+    }
+    return 'too many redirects'
+  })()
+  must(redirected === 'ok', 'signing in with an address in the domain leads to the identity provider', redirected)
+  await expect(await call(owner, 'DELETE', `/v1/orgs/${org.id}/sso`), 204, 'the owner removed the single sign-on')
+  const gone = await fetch(`${ID_URL}/admin/realms/zeima/identity-provider/instances/sso-${org.id}`, { headers: { authorization: `Bearer ${admin}` } })
+  must(gone.status === 404, 'Keycloak no longer has the provider', gone.status)
+}
 
 // ---- leaving
 await expect(await call(owner, 'DELETE', `/v1/orgs/${org.id}/members/${member.sub}`), 204, 'the owner removed the member')

@@ -207,12 +207,25 @@ What 2.0 deliberately does not include, and why:
 
 ## Phase 7 — Enterprise & Hardening (ongoing)
 
-- SSO per org: Keycloak identity providers (Entra ID, Google Workspace, generic SAML/OIDC) linked to the org's email domain; LDAP/AD user federation for self-hosted; SCIM provisioning via a Keycloak SCIM extension; self-service SSO setup page in the admin UI
+- [x] **SSO per org** ✅: identity providers per organization (Microsoft Entra ID, Google Workspace, generic OIDC and SAML, linked to the organization's email domains; the Organization page has a Single sign-on tab; the API proves domains by TXT record where required and refuses private addresses; end-to-end check `E2E_SSO=1 node deploy/e2e/org-smoke.mjs`); **SCIM 2.0 provisioning** (keys per organization, `/v1/scim/v2/Users`); **sign-out when an account is disabled** (sessions ended, requests refused within seconds, back-channel logout on OIDC providers); **seat limit for people who join by SSO** (newcomers beyond the free seats are turned away, invitations keep their seat); **company directory (LDAP / Active Directory)** for self-hosted installs (`/v1/admin/ldap`, Keycloak user federation). `docs/keycloak.md`. Not checked against a live LDAP server yet: run the directory setup against a test directory before relying on it. Not offered: SCIM groups (departments).
 - Self-hosted polish: Helm chart, air-gapped install bundle, admin docs, upgrade guide, mountable extra country profiles
 - Addon registry with signing; org addon allowlist
 - Data import: **Toggl and Clockify ✅** (Settings → Data → Import: a detailed CSV export with the columns Project, Client, Description, Billable, Start date/time, End date/time, Tags, English or German headers; date order chosen by the person with a guess from the file; projects and tags matched by name and created; re-importing adds nothing; `zeima_core::import`). Timeular CSV still open (its export has a different layout)
 - Security review / penetration test; GDPR DPA, works-council documentation pack
 - Mobile companion (Tauri mobile) exploration
+
+---
+
+## Release checks (before 2.0 is tagged)
+
+Done when the plan gets here, ahead of the later addons. The end-to-end checks against the dev stack pass (`deploy/e2e/smoke.mjs`, `deploy/e2e/org-smoke.mjs`); what is left needs people, other systems or accounts.
+
+- [ ] **Two apps on one organization** (ideally one on Windows or macOS): invite and join, switch workspace, track time in both, request and approve an absence, create a meeting and answer it from the other app, look at Online, Locations and Team.
+- [ ] **The same end-to-end checks against the production-style stack** (`deploy/docker-compose.yml` with Caddy), not only the dev stack. CI runs `smoke.mjs` on it; `org-smoke.mjs` is run by hand.
+- [ ] **Tray behaviour on Linux, Windows and macOS** (it differs per platform), including the status badge and the recent items.
+- [ ] **Review the AT/DE/CH country profile values** with someone who knows each country's law.
+- [ ] **Answer the open questions in SPEC §14.**
+- [ ] **Release pipeline**: the updater key password secret matches the key (`node scripts/verify-updater-key.mjs`), then tag `v2.0.0-rc.1` first. Details in `docs/release-2.0.md`.
 
 ---
 
@@ -254,7 +267,4 @@ Last on the plan; each needs work the earlier phases do not.
 
 ## Immediate Next Steps
 
-1. Answer the open questions in SPEC §14 (the missing feature bullet).
-2. Manual end-to-end test of Phase 1 on Linux, Windows and macOS (tray behaviour differs per platform).
-3. Review the AT/DE/CH profile values with someone who knows each country's law.
-4. Phase 5: start `deploy/compose.dev.yml` and check the realm (import, desktop loopback redirect), then 5b's database part (Drizzle schema, RLS) and `can()`, then 5d desktop sign-in.
+1. Phase 7 — Enterprise & Hardening, from the top of its list. The release checks come after it, then Phase 8.

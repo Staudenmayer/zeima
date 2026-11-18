@@ -28,7 +28,9 @@ app.addHook('onClose', async () => {
 // in case an event was missed.
 if (config.reconcileIntervalHours > 0 && app.keycloakAdmin) {
   const kc = app.keycloakAdmin
-  const run = () => reconcileAll(db, kc, (msg, err) => (err ? app.log.warn({ err }, msg) : app.log.info(msg)))
+  const run = () => reconcileAll(db, kc, (msg, err) => (err ? app.log.warn({ err }, msg) : app.log.info(msg)), {
+      seatLimit: async (orgId) => (await app.licensing.ofOrg(db, orgId))?.seats ?? null,
+    })
   const first = setTimeout(run, 60_000)
   const every = setInterval(run, config.reconcileIntervalHours * 3_600_000)
   app.addHook('onClose', async () => {

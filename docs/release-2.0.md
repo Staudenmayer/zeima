@@ -43,7 +43,8 @@ organization:
   (the app does so automatically before upgrades; for the server use
   `pg_dump` of the `zeima` database).
 - **Keycloak**: apply the realm file again (`deploy/keycloak/apply.sh`): the
-  API's service account needs `manage-organizations` and `view-organizations`.
+  API's service account needs `manage-organizations`, `view-organizations`,
+  `manage-identity-providers`, `view-identity-providers`, and `manage-realm` and `view-realm` (company directory; apply the realm file again).
   Without `KEYCLOAK_ADMIN_CLIENT_SECRET` the organization routes answer 503.
   Keycloak needs working SMTP to send invitations. With Organizations in use,
   the sign-in page asks for the address first and the password second.

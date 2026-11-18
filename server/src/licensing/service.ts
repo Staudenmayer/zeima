@@ -132,6 +132,32 @@ export class Licensing {
     return { plan: e.plan, features: e.features, status: 'valid', orgId: e.orgId, seats: e.seats, expiresAt: exp, token }
   }
 
+  /** What an organization has: its best usable entitlement (for work that has no signed-in user, like SCIM and the seat check). */
+  async ofOrg(db: Db, orgId: string, now = Date.now()): Promise<{ features: string[]; seats: number | null } | null> {
+    const rows = await db.select().from(schema.entitlement).where(eq(schema.entitlement.orgId, orgId))
+    const nowSeconds = Math.floor(now / 1000)
+    const candidates = rows
+      .filter((r) => r.validUntil === null || r.validUntil > now || r.token !== null)
+      .sort((a, b) => PLAN_RANK.indexOf(b.plan) - PLAN_RANK.indexOf(a.plan))
+    for (const row of candidates) {
+      if (row.token) {
+        const verified = verifyEntitlement(row.token, this.trusted, nowSeconds)
+        if (verified.status === 'invalid') continue
+        return { features: verified.features, seats: verified.seats ?? null }
+      }
+      const features = Array.isArray(row.features) && row.features.length ? (row.features as string[]) : [...(PLAN_FEATURES[row.plan] ?? [])]
+      return { features, seats: row.seats }
+    }
+    return null
+  }
+
+  /** Throws unless the organization's plan includes `feature` (cloud only). */
+  async requireForOrg(db: Db, orgId: string, feature: string): Promise<void> {
+    if (!this.cloud) return
+    const have = await this.ofOrg(db, orgId)
+    if (!have?.features.includes(feature)) throw new HttpProblem(403, 'feature_not_available', `the plan of this organization does not include ${feature}`)
+  }
+
   /** Throws unless the user's plan includes `feature` (cloud only). */
   async require(db: Db, user: AuthUser, feature: string): Promise<void> {
     if (!this.cloud) return

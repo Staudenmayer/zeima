@@ -1149,7 +1149,14 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         security: SECURITY,
         params: OrgParams,
         response: {
-          200: Type.Object({ members: Type.Integer(), addedMembers: Type.Integer(), removedMembers: Type.Integer(), groups: Type.Integer() }),
+          200: Type.Object({
+            members: Type.Integer(),
+            addedMembers: Type.Integer(),
+            removedMembers: Type.Integer(),
+            groups: Type.Integer(),
+            rejectedMembers: Type.Integer(),
+            signedOut: Type.Integer(),
+          }),
           ...problems(401, 403, 502, 503),
         },
       },
@@ -1157,7 +1164,8 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request) => {
       const { orgId } = request.params
       authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
-      return reconcileOrganization(database(), keycloak(), orgId)
+      const db = database()
+      return reconcileOrganization(db, keycloak(), orgId, { seatLimit: async (id) => (await app.licensing.ofOrg(db, id))?.seats ?? null })
     },
   )
 

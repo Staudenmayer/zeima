@@ -62,8 +62,10 @@ export const internalRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asy
       const { orgId, userId } = request.body
       const orgs = orgId ? [orgId] : userId ? await orgsOfUser(app.db, userId) : []
       // Answer now; the check takes a few calls to Keycloak.
+      const { db, keycloakAdmin: kc } = app
+      const seatLimit = async (orgId: string) => (await app.licensing.ofOrg(db, orgId))?.seats ?? null
       for (const id of orgs) {
-        void reconcileOrganization(app.db, app.keycloakAdmin, id).catch((err: unknown) => app.log.warn({ err, orgId: id }, 'reconcile after event failed'))
+        void reconcileOrganization(db, kc, id, { seatLimit }).catch((err: unknown) => app.log.warn({ err, orgId: id }, 'reconcile after event failed'))
       }
       return reply.code(202).send({ organizations: orgs.length })
     },

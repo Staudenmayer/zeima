@@ -42,7 +42,90 @@ export interface KeycloakAdmin {
   renameGroup(groupId: string, name: string): Promise<void>
   addToGroup(userId: string, groupId: string): Promise<void>
   removeFromGroup(userId: string, groupId: string): Promise<void>
+  /** The identity provider (single sign-on) the organization has, if any. */
+  getSso(orgId: string): Promise<KcSso | null>
+  /** Sets up (or changes) the organization's identity provider and the email domains that sign in through it. */
+  setSso(orgId: string, input: SsoInput): Promise<void>
+  /** Removes the identity provider and the organization's domains. */
+  deleteSso(orgId: string): Promise<void>
+  /** Ends every session of the user (their tokens stop working at the next refresh). */
+  logoutUser(userId: string): Promise<void>
+  /** The account with this email address, if there is one. */
+  findUserByEmail(email: string): Promise<KcUser | null>
+  /** Creates an account for a person an identity provider's directory knows; returns its id. */
+  createUser(input: { email: string; firstName: string; lastName: string; enabled: boolean }): Promise<string>
+  /** Changes a person's name. */
+  setUserName(userId: string, firstName: string, lastName: string): Promise<void>
+  /** The directory (LDAP / Active Directory) people can sign in with, if one is set up. */
+  getLdap(): Promise<KcLdap | null>
+  /** Sets up (or changes) the directory. */
+  setLdap(input: LdapInput): Promise<void>
+  /** Removes the directory; the accounts that were imported from it stay. */
+  deleteLdap(): Promise<void>
+  /** Checks that Keycloak can sign in to the directory with these settings. */
+  testLdap(input: LdapInput): Promise<void>
+  /** Imports the directory's people now. */
+  syncLdap(): Promise<{ added: number; updated: number; removed: number; failed: number }>
 }
+
+export type LdapVendor = 'ad' | 'openldap'
+
+export interface LdapInput {
+  vendor: LdapVendor
+  /** `ldap://host:389` or `ldaps://host:636`. */
+  url: string
+  startTls: boolean
+  bindDn: string
+  /** Left out on a change it stays as it was. */
+  bindPassword?: string
+  /** Where the people are, `ou=people,dc=acme,dc=example`. */
+  usersDn: string
+  /** An LDAP filter that limits who may sign in, `(memberOf=cn=zeima,…)`. */
+  userFilter?: string
+  enabled: boolean
+}
+
+export interface KcLdap {
+  vendor: LdapVendor
+  url: string
+  startTls: boolean
+  bindDn: string
+  usersDn: string
+  userFilter: string
+  enabled: boolean
+}
+
+export type SsoProtocol = 'oidc' | 'saml'
+
+export interface SsoInput {
+  protocol: SsoProtocol
+  /** Shown to the people who sign in. */
+  name: string
+  /** OIDC: the issuer address (`…/.well-known/openid-configuration` is read from it); SAML: the metadata address. */
+  sourceUrl: string
+  /** OIDC only. */
+  clientId?: string
+  /** OIDC only; left out on a change it stays as it was. */
+  clientSecret?: string
+  /** Email domains whose people are sent to this identity provider when they sign in. */
+  domains: string[]
+  enabled: boolean
+}
+
+export interface KcSso {
+  protocol: SsoProtocol
+  name: string
+  enabled: boolean
+  sourceUrl: string
+  clientId: string | null
+  domains: string[]
+}
+
+const LDAP_TYPE = 'org.keycloak.storage.UserStorageProvider'
+const LDAP_NAME = 'zeima-ldap'
+
+/** The Keycloak alias of an organization's identity provider; it is part of the address the provider redirects to. */
+export const ssoAlias = (orgId: string) => `sso-${orgId}`
 
 export interface KcUser {
   id: string
@@ -56,6 +139,14 @@ export interface KcDepartment {
   /** Full path, `/orgs/<orgId>/groups/dev/backend`. */
   path: string
   memberIds: string[]
+}
+
+interface IdpRep {
+  alias: string
+  displayName?: string
+  providerId: string
+  enabled?: boolean
+  config?: Record<string, string>
 }
 
 interface GroupRep {
@@ -285,6 +376,239 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
 
   async removeFromGroup(userId: string, groupId: string): Promise<void> {
     await this.call('DELETE', `/users/${userId}/groups/${groupId}`)
+  }
+
+  private async idp(alias: string): Promise<IdpRep | null> {
+    const res = await this.call('GET', `/identity-provider/instances/${encodeURIComponent(alias)}`).catch((err: unknown) => {
+      if (err instanceof HttpProblem && err.status === 404) return null
+      throw err
+    })
+    return res ? ((await res.json()) as IdpRep) : null
+  }
+
+  /**
+   * The organization's domains, each tied to the provider `alias`: people with such an address are sent to
+   * the provider as soon as they give their address on the sign-in page, and join the organization.
+   */
+  private async setDomains(orgId: string, domains: readonly string[], alias: string): Promise<void> {
+    const org = (await this.call('GET', `/organizations/${orgId}`).then((r) => r.json())) as Record<string, unknown>
+    await this.call('PUT', `/organizations/${orgId}`, {
+      json: { ...org, domains: domains.map((name) => ({ name, verified: false, autoRedirect: true, identityProviderAlias: alias })) },
+    })
+  }
+
+  async getSso(orgId: string): Promise<KcSso | null> {
+    const alias = ssoAlias(orgId)
+    const linked = (await this.call('GET', `/organizations/${orgId}/identity-providers`).then((r) => r.json())) as IdpRep[]
+    const idp = linked.find((p) => p.alias === alias)
+    if (!idp) return null
+    const config = idp.config ?? {}
+    const org = (await this.call('GET', `/organizations/${orgId}`).then((r) => r.json())) as { domains?: { name: string; identityProviderAlias?: string }[] }
+    return {
+      protocol: idp.providerId === 'saml' ? 'saml' : 'oidc',
+      name: idp.displayName ?? '',
+      enabled: idp.enabled !== false,
+      sourceUrl: config['zeima.sourceUrl'] ?? '',
+      clientId: config['clientId'] ?? null,
+      domains: (org.domains ?? []).filter((d) => d.identityProviderAlias === alias).map((d) => d.name),
+    }
+  }
+
+  async setSso(orgId: string, input: SsoInput): Promise<void> {
+    const alias = ssoAlias(orgId)
+    const existing = await this.idp(alias)
+    // Keycloak reads the provider's endpoints and keys from its metadata.
+    const fromUrl = input.protocol === 'oidc' ? `${input.sourceUrl.replace(/\/+$/, '')}/.well-known/openid-configuration` : input.sourceUrl
+    const imported = (await this.call('POST', '/identity-provider/import-config', { json: { providerId: input.protocol, fromUrl } }).then((r) => r.json())) as Record<string, string>
+    const config: Record<string, string> = {
+      ...imported,
+      syncMode: 'IMPORT',
+      'zeima.sourceUrl': input.sourceUrl,
+    }
+    if (input.protocol === 'oidc') {
+      Object.assign(config, {
+        clientId: input.clientId ?? '',
+        // Keycloak shows a secret as ********** and keeps the stored one when it gets that back.
+        clientSecret: input.clientSecret ?? (existing ? '**********' : ''),
+        clientAuthMethod: 'client_secret_post',
+        defaultScope: 'openid email profile',
+        validateSignature: 'true',
+        useJwksUrl: 'true',
+        // The provider can tell Keycloak that a person signed out or was disabled there.
+        backchannelSupported: 'true',
+      })
+    } else {
+      Object.assign(config, {
+        nameIDPolicyFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+        postBindingResponse: 'true',
+        postBindingAuthnRequest: 'true',
+        wantAssertionsSigned: 'true',
+        validateSignature: 'true',
+      })
+    }
+    // The address is not trusted to be the person's: Keycloak still confirms an address that matches
+    // an existing account. The provider is not listed on the sign-in page; people reach it by their address.
+    const rep = { alias, displayName: input.name, providerId: input.protocol, enabled: input.enabled, trustEmail: false, hideOnLogin: true, config }
+    if (existing) {
+      await this.call('PUT', `/identity-provider/instances/${encodeURIComponent(alias)}`, { json: { ...existing, ...rep } })
+    } else {
+      await this.call('POST', '/identity-provider/instances', { json: rep })
+    }
+    await this.call('POST', `/organizations/${orgId}/identity-providers`, { json: alias }).catch((err: unknown) => {
+      if (err instanceof HttpProblem && err.status === 409) return // already linked
+      throw err
+    })
+    // The domains point at the provider, so they come last.
+    await this.setDomains(orgId, input.domains, alias)
+  }
+
+  async deleteSso(orgId: string): Promise<void> {
+    const alias = ssoAlias(orgId)
+    // The domains point at the provider, so they go first.
+    await this.setDomains(orgId, [], alias)
+    await this.call('DELETE', `/identity-provider/instances/${encodeURIComponent(alias)}`).catch((err: unknown) => {
+      if (err instanceof HttpProblem && err.status === 404) return
+      throw err
+    })
+  }
+
+  async logoutUser(userId: string): Promise<void> {
+    await this.call('POST', `/users/${userId}/logout`)
+  }
+
+  async findUserByEmail(email: string): Promise<KcUser | null> {
+    const users = (await this.call('GET', `/users?email=${encodeURIComponent(email)}&exact=true&max=2`).then((r) => r.json())) as {
+      id: string
+      email?: string
+      firstName?: string
+      lastName?: string
+      enabled?: boolean
+    }[]
+    const u = users.find((x) => x.email?.toLowerCase() === email.toLowerCase())
+    return u
+      ? { id: u.id, email: u.email ?? null, name: [u.firstName, u.lastName].filter(Boolean).join(' ') || null, enabled: u.enabled !== false }
+      : null
+  }
+
+  async createUser(input: { email: string; firstName: string; lastName: string; enabled: boolean }): Promise<string> {
+    // The directory vouches for the address: no verification mail.
+    const res = await this.call('POST', '/users', {
+      json: { username: input.email, email: input.email, firstName: input.firstName, lastName: input.lastName, enabled: input.enabled, emailVerified: true },
+    })
+    return this.createdId(res)
+  }
+
+  async setUserName(userId: string, firstName: string, lastName: string): Promise<void> {
+    const user = (await this.call('GET', `/users/${userId}`).then((r) => r.json())) as Record<string, unknown>
+    await this.call('PUT', `/users/${userId}`, { json: { ...user, firstName, lastName } })
+  }
+
+  private async ldapComponent(): Promise<{ id: string; config: Record<string, string[]>; parentId: string } | null> {
+    const list = (await this.call('GET', `/components?type=${encodeURIComponent(LDAP_TYPE)}&name=${LDAP_NAME}`).then((r) => r.json())) as {
+      id: string
+      providerId: string
+      name: string
+      parentId: string
+      config: Record<string, string[]>
+    }[]
+    return list.find((c) => c.providerId === 'ldap' && c.name === LDAP_NAME) ?? null
+  }
+
+  private ldapConfig(input: LdapInput, kept: string | undefined): Record<string, string[]> {
+    const ad = input.vendor === 'ad'
+    const c: Record<string, string> = {
+      enabled: String(input.enabled),
+      vendor: ad ? 'ad' : 'other',
+      connectionUrl: input.url,
+      startTls: String(input.startTls),
+      authType: 'simple',
+      bindDn: input.bindDn,
+      bindCredential: input.bindPassword ?? kept ?? '',
+      usersDn: input.usersDn,
+      usernameLDAPAttribute: ad ? 'sAMAccountName' : 'uid',
+      rdnLDAPAttribute: ad ? 'cn' : 'uid',
+      uuidLDAPAttribute: ad ? 'objectGUID' : 'entryUUID',
+      userObjectClasses: ad ? 'person, organizationalPerson, user' : 'inetOrgPerson, organizationalPerson',
+      customUserSearchFilter: input.userFilter ?? '',
+      searchScope: '2',
+      pagination: 'true',
+      connectionPooling: 'true',
+      // Read only: Zeima never writes to the directory. The people are imported on their first sign-in and every day.
+      editMode: 'READ_ONLY',
+      importEnabled: 'true',
+      syncRegistrations: 'false',
+      // The directory vouches for the address, so invitations to it work.
+      trustEmail: 'true',
+      fullSyncPeriod: '86400',
+      changedSyncPeriod: '-1',
+      cachePolicy: 'DEFAULT',
+      batchSizeForSync: '1000',
+      validatePasswordPolicy: 'false',
+      usePasswordModifyExtendedOp: 'false',
+    }
+    return Object.fromEntries(Object.entries(c).map(([k, v]) => [k, [v]]))
+  }
+
+  async getLdap(): Promise<KcLdap | null> {
+    const c = await this.ldapComponent()
+    if (!c) return null
+    const one = (k: string) => c.config[k]?.[0] ?? ''
+    return {
+      vendor: one('vendor') === 'ad' ? 'ad' : 'openldap',
+      url: one('connectionUrl'),
+      startTls: one('startTls') === 'true',
+      bindDn: one('bindDn'),
+      usersDn: one('usersDn'),
+      userFilter: one('customUserSearchFilter'),
+      enabled: one('enabled') !== 'false',
+    }
+  }
+
+  async setLdap(input: LdapInput): Promise<void> {
+    const existing = await this.ldapComponent()
+    const kept = existing ? '**********' : undefined
+    const config = this.ldapConfig(input, kept)
+    if (existing) {
+      await this.call('PUT', `/components/${existing.id}`, { json: { id: existing.id, name: LDAP_NAME, providerId: 'ldap', providerType: LDAP_TYPE, parentId: existing.parentId, config } })
+    } else {
+      const realm = (await this.call('GET', '').then((r) => r.json())) as { id: string }
+      await this.call('POST', '/components', { json: { name: LDAP_NAME, providerId: 'ldap', providerType: LDAP_TYPE, parentId: realm.id, config } })
+    }
+  }
+
+  async deleteLdap(): Promise<void> {
+    const existing = await this.ldapComponent()
+    if (existing) await this.call('DELETE', `/components/${existing.id}`)
+  }
+
+  async testLdap(input: LdapInput): Promise<void> {
+    const existing = await this.ldapComponent()
+    // Keycloak takes the stored password when it gets ********** and the id of the component.
+    await this.call('POST', '/testLDAPConnection', {
+      json: {
+        action: 'testAuthentication',
+        connectionUrl: input.url,
+        bindDn: input.bindDn,
+        bindCredential: input.bindPassword ?? (existing ? '**********' : ''),
+        useTruststoreSpi: 'ldapsOnly',
+        connectionTimeout: '10000',
+        authType: 'simple',
+        startTls: String(input.startTls),
+        ...(existing && { componentId: existing.id }),
+      },
+    })
+  }
+
+  async syncLdap() {
+    const existing = await this.ldapComponent()
+    if (!existing) throw new HttpProblem(404, 'not_found', 'no directory is set up')
+    const r = (await this.call('POST', `/user-storage/${existing.id}/sync?action=triggerFullSync`).then((x) => x.json())) as {
+      added?: number
+      updated?: number
+      removed?: number
+      failed?: number
+    }
+    return { added: r.added ?? 0, updated: r.updated ?? 0, removed: r.removed ?? 0, failed: r.failed ?? 0 }
   }
 }
 

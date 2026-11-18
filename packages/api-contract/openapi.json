@@ -4268,7 +4268,9 @@
                     "members",
                     "addedMembers",
                     "removedMembers",
-                    "groups"
+                    "groups",
+                    "rejectedMembers",
+                    "signedOut"
                   ],
                   "properties": {
                     "members": {
@@ -4281,6 +4283,12 @@
                       "type": "integer"
                     },
                     "groups": {
+                      "type": "integer"
+                    },
+                    "rejectedMembers": {
+                      "type": "integer"
+                    },
+                    "signedOut": {
                       "type": "integer"
                     }
                   }
@@ -4735,6 +4743,1075 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/sso": {
+      "get": {
+        "summary": "The single sign-on of the organization (those who manage its settings)",
+        "tags": [
+          "organizations"
+        ],
+        "description": "Also tells where the identity provider has to be pointed (`redirectUri`) before it is configured.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization's single sign-on; the client secret is never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "configured",
+                    "redirectUri",
+                    "samlMetadataUrl",
+                    "domainChallenge",
+                    "domains",
+                    "enabled"
+                  ],
+                  "properties": {
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "redirectUri": {
+                      "type": "string",
+                      "description": "Give this to the identity provider as the address it redirects back to (OIDC) or posts the assertion to (SAML)"
+                    },
+                    "samlMetadataUrl": {
+                      "type": "string",
+                      "description": "The service provider metadata of a SAML identity provider"
+                    },
+                    "domainChallenge": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "value"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ],
+                      "description": "When domains must be proven: the TXT record to publish for each domain (`<name>.<domain>` with this value); `null` when not required"
+                    },
+                    "protocol": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "oidc"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "saml"
+                          ]
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "sourceUrl": {
+                      "type": "string"
+                    },
+                    "clientId": {
+                      "type": "string"
+                    },
+                    "domains": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "description": "The organization's single sign-on; the client secret is never returned"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Sets up or changes the single sign-on (those who manage the organization's settings)",
+        "tags": [
+          "organizations"
+        ],
+        "description": "People whose email address is in `domains` are sent to the identity provider when they sign in, and join the organization. Where domains must be proven (`domainChallenge` is not null), each needs the TXT record. The provider's metadata is read from `sourceUrl` by Keycloak.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "protocol",
+                  "name",
+                  "sourceUrl",
+                  "domains"
+                ],
+                "properties": {
+                  "protocol": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "oidc"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "saml"
+                        ]
+                      }
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "description": "Shown to the people who sign in"
+                  },
+                  "sourceUrl": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "OIDC: the issuer address; SAML: the metadata address"
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "clientSecret": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Left out on a change, the stored secret stays"
+                  },
+                  "domains": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    },
+                    "minItems": 1,
+                    "maxItems": 10,
+                    "description": "Email domains whose people sign in here"
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organization's single sign-on; the client secret is never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "configured",
+                    "redirectUri",
+                    "samlMetadataUrl",
+                    "domainChallenge",
+                    "domains",
+                    "enabled"
+                  ],
+                  "properties": {
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "redirectUri": {
+                      "type": "string",
+                      "description": "Give this to the identity provider as the address it redirects back to (OIDC) or posts the assertion to (SAML)"
+                    },
+                    "samlMetadataUrl": {
+                      "type": "string",
+                      "description": "The service provider metadata of a SAML identity provider"
+                    },
+                    "domainChallenge": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "value"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ],
+                      "description": "When domains must be proven: the TXT record to publish for each domain (`<name>.<domain>` with this value); `null` when not required"
+                    },
+                    "protocol": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "oidc"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "saml"
+                          ]
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "sourceUrl": {
+                      "type": "string"
+                    },
+                    "clientId": {
+                      "type": "string"
+                    },
+                    "domains": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "description": "The organization's single sign-on; the client secret is never returned"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Removes the single sign-on; people sign in with their own accounts again (those who manage the organization's settings)",
+        "tags": [
+          "organizations"
+        ],
+        "description": "The people who joined through it stay members and keep their accounts.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/scim": {
+      "get": {
+        "summary": "The address and the keys for SCIM provisioning",
+        "tags": [
+          "sso"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "baseUrl",
+                    "tokens"
+                  ],
+                  "properties": {
+                    "baseUrl": {
+                      "type": "string",
+                      "description": "Give this to the identity provider as the SCIM address (tenant URL)"
+                    },
+                    "tokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "hint",
+                          "createdAt",
+                          "lastUsedAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "hint": {
+                            "type": "string",
+                            "description": "The first characters of the key"
+                          },
+                          "createdAt": {
+                            "type": "integer"
+                          },
+                          "lastUsedAt": {
+                            "anyOf": [
+                              {
+                                "type": "integer"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/scim/tokens": {
+      "post": {
+        "summary": "Makes a key for the identity provider",
+        "tags": [
+          "sso"
+        ],
+        "description": "The key is in the answer once and cannot be read again.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "token"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/orgs/{orgId}/scim/tokens/{id}": {
+      "delete": {
+        "summary": "Removes a key; the identity provider stops being able to provision",
+        "tags": [
+          "sso"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "orgId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scim/v2/ServiceProviderConfig": {
+      "get": {
+        "summary": "What this SCIM service can do",
+        "tags": [
+          "scim"
+        ],
+        "description": "SCIM 2.0. Sign in with a key made under the organization's single sign-on settings (`Authorization: Bearer zscim_…`).",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scim/v2/ResourceTypes": {
+      "get": {
+        "summary": "The kinds of resources",
+        "tags": [
+          "scim"
+        ],
+        "description": "SCIM 2.0. Sign in with a key made under the organization's single sign-on settings (`Authorization: Bearer zscim_…`).",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scim/v2/Schemas": {
+      "get": {
+        "summary": "The schemas",
+        "tags": [
+          "scim"
+        ],
+        "description": "SCIM 2.0. Sign in with a key made under the organization's single sign-on settings (`Authorization: Bearer zscim_…`).",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scim/v2/Users": {
+      "get": {
+        "summary": "Lists the organization's people, or finds one by `userName eq \"…\"`",
+        "tags": [
+          "scim"
+        ],
+        "description": "SCIM 2.0. Sign in with a key made under the organization's single sign-on settings (`Authorization: Bearer zscim_…`).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "filter",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "in": "query",
+            "name": "startIndex",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 200
+            },
+            "in": "query",
+            "name": "count",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Adds a person to the organization",
+        "tags": [
+          "scim"
+        ],
+        "description": "SCIM 2.0. Sign in with a key made under the organization's single sign-on settings (`Authorization: Bearer zscim_…`).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scim/v2/Users/{id}": {
+      "get": {
+        "summary": "One person",
+        "tags": [
+          "scim"
+        ],
+        "description": "SCIM 2.0. Sign in with a key made under the organization's single sign-on settings (`Authorization: Bearer zscim_…`).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replaces a person's name and whether the account is active",
+        "tags": [
+          "scim"
+        ],
+        "description": "SCIM 2.0. Sign in with a key made under the organization's single sign-on settings (`Authorization: Bearer zscim_…`).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Changes whether the account is active, or the name",
+        "tags": [
+          "scim"
+        ],
+        "description": "SCIM 2.0. Sign in with a key made under the organization's single sign-on settings (`Authorization: Bearer zscim_…`).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Takes a person out of the organization",
+        "tags": [
+          "scim"
+        ],
+        "description": "SCIM 2.0. Sign in with a key made under the organization's single sign-on settings (`Authorization: Bearer zscim_…`).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
           }
         }
       }
@@ -5813,6 +6890,598 @@
             }
           },
           "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/ldap": {
+      "get": {
+        "summary": "The directory people can sign in with",
+        "tags": [
+          "directory"
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The directory people can sign in with; the password of the bind account is never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "configured",
+                    "enabled"
+                  ],
+                  "properties": {
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "vendor": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "ad"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "openldap"
+                          ]
+                        }
+                      ],
+                      "description": "`ad` for Active Directory, `openldap` for OpenLDAP, FreeIPA, 389 and the like"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "startTls": {
+                      "type": "boolean"
+                    },
+                    "bindDn": {
+                      "type": "string"
+                    },
+                    "usersDn": {
+                      "type": "string"
+                    },
+                    "userFilter": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "description": "The directory people can sign in with; the password of the bind account is never returned"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Connects (or changes) the directory",
+        "tags": [
+          "directory"
+        ],
+        "description": "Keycloak checks the connection first; nothing is saved when it fails. People are imported when they first sign in and then every day.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "vendor",
+                  "url",
+                  "bindDn",
+                  "usersDn"
+                ],
+                "properties": {
+                  "vendor": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "ad"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "openldap"
+                        ]
+                      }
+                    ],
+                    "description": "`ad` for Active Directory, `openldap` for OpenLDAP, FreeIPA, 389 and the like"
+                  },
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300,
+                    "description": "`ldap://host:389` or `ldaps://host:636`"
+                  },
+                  "startTls": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "bindDn": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "The account that reads the directory"
+                  },
+                  "bindPassword": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Left out on a change, the stored password stays"
+                  },
+                  "usersDn": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Where the people are, `ou=people,dc=acme,dc=example`"
+                  },
+                  "userFilter": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "An LDAP filter that limits who may sign in, in parentheses"
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The directory people can sign in with; the password of the bind account is never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "configured",
+                    "enabled"
+                  ],
+                  "properties": {
+                    "configured": {
+                      "type": "boolean"
+                    },
+                    "vendor": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "ad"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "openldap"
+                          ]
+                        }
+                      ],
+                      "description": "`ad` for Active Directory, `openldap` for OpenLDAP, FreeIPA, 389 and the like"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "startTls": {
+                      "type": "boolean"
+                    },
+                    "bindDn": {
+                      "type": "string"
+                    },
+                    "usersDn": {
+                      "type": "string"
+                    },
+                    "userFilter": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "description": "The directory people can sign in with; the password of the bind account is never returned"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Removes the directory; imported accounts stay but can no longer sign in with the directory's password",
+        "tags": [
+          "directory"
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/ldap/test": {
+      "post": {
+        "summary": "Checks that Keycloak can sign in to the directory with these settings",
+        "tags": [
+          "directory"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "vendor",
+                  "url",
+                  "bindDn",
+                  "usersDn"
+                ],
+                "properties": {
+                  "vendor": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "ad"
+                        ]
+                      },
+                      {
+                        "type": "string",
+                        "enum": [
+                          "openldap"
+                        ]
+                      }
+                    ],
+                    "description": "`ad` for Active Directory, `openldap` for OpenLDAP, FreeIPA, 389 and the like"
+                  },
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300,
+                    "description": "`ldap://host:389` or `ldaps://host:636`"
+                  },
+                  "startTls": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "bindDn": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "The account that reads the directory"
+                  },
+                  "bindPassword": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Left out on a change, the stored password stays"
+                  },
+                  "usersDn": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Where the people are, `ou=people,dc=acme,dc=example`"
+                  },
+                  "userFilter": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "An LDAP filter that limits who may sign in, in parentheses"
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Default Response"
+          },
+          "400": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/ldap/sync": {
+      "post": {
+        "summary": "Imports the directory's people now",
+        "tags": [
+          "directory"
+        ],
+        "security": [
+          {
+            "keycloak": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "added",
+                    "updated",
+                    "removed",
+                    "failed"
+                  ],
+                  "properties": {
+                    "added": {
+                      "type": "integer"
+                    },
+                    "updated": {
+                      "type": "integer"
+                    },
+                    "removed": {
+                      "type": "integer"
+                    },
+                    "failed": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
             "description": "Problem details (RFC 9457)",
             "content": {
               "application/problem+json": {

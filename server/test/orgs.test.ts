@@ -152,7 +152,7 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect((await call('POST', `/v1/orgs/${ORG}/reconcile`, MEMBER, 'member')).statusCode).toBe(403)
       const res = await call('POST', `/v1/orgs/${ORG}/reconcile`, ADMIN, 'admin')
       expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({ members: 4, addedMembers: 1, removedMembers: 1, groups: 1 })
+      expect(res.json()).toEqual({ members: 4, addedMembers: 1, removedMembers: 1, groups: 1, rejectedMembers: 0, signedOut: 1 })
       const members = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, ORG))
       expect(members.map((m) => [m.userId, m.role]).sort()).toEqual([[ADMIN, 'manager'], [MEMBER, 'member'], [NEWCOMER, 'member'], [OWNER, 'owner']].sort())
       const [nina] = await db.db.select().from(schema.kcUser).where(eq(schema.kcUser.id, NEWCOMER))

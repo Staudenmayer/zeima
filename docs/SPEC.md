@@ -504,7 +504,7 @@ server/
 |---|---|---|
 | `zeima-desktop` | public, Auth Code + PKCE | Desktop login in the system browser. Redirect via loopback `http://127.0.0.1:<port>/callback` (RFC 8252), with `time://auth/callback` (tauri deep-link) as fallback. Scopes `openid profile email offline_access` so users stay signed in for weeks; sessions can be revoked in Keycloak. |
 | `zeima-api` | confidential, bearer-only (audience) | Audience mapper adds `aud: zeima-api` to desktop tokens |
-| `zeima-api-admin` | confidential, service account | API → Keycloak Admin REST API (manage users, groups, orgs, invitations). Only scoped `realm-management` roles: `manage-users`, `view-users`, `query-groups`, `manage-organizations`. |
+| `zeima-api-admin` | confidential, service account | API → Keycloak Admin REST API (manage users, groups, orgs, invitations). Only scoped `realm-management` roles: `manage-users`, `view-users`, `query-groups`, `manage-organizations`, `manage-identity-providers`, `manage-realm` (company directory). |
 | `zeima-swagger` | public, PKCE | Swagger UI "Authorize" (dev/staging; optional in prod) |
 | `zeima-web` | public, PKCE | Future web app / admin console |
 

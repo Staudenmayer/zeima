@@ -1,7 +1,7 @@
 // A Keycloak admin client that only records what it was asked to do.
 
 import { randomUUID } from 'node:crypto'
-import type { KcDepartment, KcUser, KeycloakAdmin } from '../src/keycloak/admin.ts'
+import type { KcDepartment, KcLdap, KcSso, KcUser, KeycloakAdmin, LdapInput, SsoInput } from '../src/keycloak/admin.ts'
 import type { RoleKey } from '../src/plugins/permissions.ts'
 
 export class FakeKeycloak implements KeycloakAdmin {
@@ -75,5 +75,82 @@ export class FakeKeycloak implements KeycloakAdmin {
   }
   async removeFromGroup(userId: string, groupId: string) {
     this.record('removeFromGroup', userId, groupId)
+  }
+
+  /** The identity provider of each organization, as the last `setSso` left it. */
+  sso = new Map<string, KcSso & { clientSecret?: string }>()
+  async getSso(orgId: string) {
+    const kept = this.sso.get(orgId)
+    if (!kept) return null
+    const { clientSecret: _secret, ...sso } = kept
+    return sso
+  }
+  async setSso(orgId: string, input: SsoInput) {
+    this.record('setSso', orgId, input.protocol, input.domains.join(','))
+    const before = this.sso.get(orgId)
+    this.sso.set(orgId, {
+      protocol: input.protocol,
+      name: input.name,
+      enabled: input.enabled,
+      sourceUrl: input.sourceUrl,
+      clientId: input.clientId ?? null,
+      domains: input.domains,
+      clientSecret: input.clientSecret ?? before?.clientSecret,
+    })
+  }
+  async deleteSso(orgId: string) {
+    this.record('deleteSso', orgId)
+    this.sso.delete(orgId)
+  }
+
+  /** The accounts that exist in Keycloak, by id (for SCIM). */
+  users = new Map<string, KcUser>()
+  async logoutUser(userId: string) {
+    this.record('logoutUser', userId)
+  }
+  async findUserByEmail(email: string) {
+    return [...this.users.values()].find((u) => u.email?.toLowerCase() === email.toLowerCase()) ?? null
+  }
+  async createUser(input: { email: string; firstName: string; lastName: string; enabled: boolean }) {
+    this.record('createUser', input.email)
+    const id = randomUUID()
+    this.users.set(id, { id, email: input.email, name: `${input.firstName} ${input.lastName}`.trim() || null, enabled: input.enabled })
+    return id
+  }
+  async setUserName(userId: string, firstName: string, lastName: string) {
+    this.record('setUserName', userId, firstName, lastName)
+    const u = this.users.get(userId)
+    if (u) u.name = `${firstName} ${lastName}`.trim() || null
+  }
+
+  ldap: (KcLdap & { bindPassword?: string }) | null = null
+  async getLdap() {
+    if (!this.ldap) return null
+    const { bindPassword: _p, ...ldap } = this.ldap
+    return ldap
+  }
+  async setLdap(input: LdapInput) {
+    this.record('setLdap', input.vendor, input.url)
+    this.ldap = {
+      vendor: input.vendor,
+      url: input.url,
+      startTls: input.startTls,
+      bindDn: input.bindDn,
+      usersDn: input.usersDn,
+      userFilter: input.userFilter ?? '',
+      enabled: input.enabled,
+      bindPassword: input.bindPassword ?? this.ldap?.bindPassword,
+    }
+  }
+  async deleteLdap() {
+    this.record('deleteLdap')
+    this.ldap = null
+  }
+  async testLdap(input: LdapInput) {
+    this.record('testLdap', input.url)
+  }
+  async syncLdap() {
+    this.record('syncLdap')
+    return { added: 2, updated: 1, removed: 0, failed: 0 }
   }
 }

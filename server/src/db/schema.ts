@@ -208,6 +208,26 @@ export const entitlement = pgTable(
   (t) => [check('entitlement_subject', sql`(${t.userId} IS NULL) <> (${t.orgId} IS NULL)`)],
 )
 
+/** A key an identity provider uses to provision the people of one organization (SCIM). Only a hash is kept. */
+export const scimToken = pgTable(
+  'scim_token',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** SHA-256 of the token, hex. */
+    hash: text('hash').notNull().unique(),
+    /** The first characters, to tell the keys apart in a list. */
+    hint: text('hint').notNull(),
+    createdBy: uuid('created_by'),
+    createdAt: ms('created_at').notNull(),
+    lastUsedAt: ms('last_used_at'),
+  },
+  (t) => [index('scim_token_org').on(t.orgId)],
+)
+
 export const auditLog = pgTable(
   'audit_log',
   {

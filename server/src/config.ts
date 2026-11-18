@@ -44,6 +44,14 @@ export const EnvSchema = Type.Object({
 
   /** Secret that signs the calls of Keycloak's event listener (`POST /v1/internal/keycloak-events`). Without it the endpoint is off. */
   KEYCLOAK_WEBHOOK_SECRET: Type.Optional(Type.String({ minLength: 16 })),
+  /** Lets an organization point its single sign-on at an address on a private network or without https (development only). */
+  SSO_ALLOW_PRIVATE_URLS: Type.Boolean({ default: false }),
+  /**
+   * Makes an organization prove it owns the email domains it signs people in for (a TXT record
+   * `_zeima-challenge.<domain>`). On by default in the cloud, where organizations do not know each
+   * other; off by default on a self-hosted server, whose administrators are trusted.
+   */
+  SSO_VERIFY_DOMAINS: Type.Optional(Type.Boolean()),
   /** Hours between checks of the member and department mirror against Keycloak; 0 turns the check off. */
   RECONCILE_INTERVAL_HOURS: Type.Integer({ minimum: 0, maximum: 720, default: 24 }),
 
@@ -93,6 +101,7 @@ export interface Config {
   }
   audience: string
   keycloakWebhookSecret: string | null
+  sso: { allowPrivateUrls: boolean; verifyDomains: boolean }
   reconcileIntervalHours: number
   allowedClients: string[]
   docsClientId: string
@@ -203,6 +212,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     },
     audience: env.API_AUDIENCE,
     keycloakWebhookSecret: env.KEYCLOAK_WEBHOOK_SECRET ?? null,
+    sso: { allowPrivateUrls: env.SSO_ALLOW_PRIVATE_URLS, verifyDomains: env.SSO_VERIFY_DOMAINS ?? env.DEPLOYMENT_MODE === 'cloud' },
     reconcileIntervalHours: env.RECONCILE_INTERVAL_HOURS,
     allowedClients: list(env.ALLOWED_CLIENTS),
     docsClientId: env.DOCS_CLIENT_ID,

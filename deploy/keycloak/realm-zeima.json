@@ -224,7 +224,7 @@
       "enabled": true,
       "serviceAccountClientId": "zeima-api-admin",
       "clientRoles": {
-        "realm-management": ["manage-users", "view-users", "query-users", "query-groups", "manage-organizations", "view-organizations"]
+        "realm-management": ["manage-users", "view-users", "query-users", "query-groups", "manage-organizations", "view-organizations", "manage-identity-providers", "view-identity-providers", "manage-realm", "view-realm"]
       }
     }
   ]

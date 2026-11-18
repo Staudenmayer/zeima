@@ -42,9 +42,102 @@ console (Realm settings → Themes).
 
 People sign in with an email address and a password (self-registration, with
 email verification, is on in the realm). Zeima does not ship Google or
-Microsoft sign-in. An installation that wants its own directory connects it in
-Keycloak: user federation (LDAP/AD) or identity providers (Entra ID, Google
-Workspace, SAML/OIDC); see SPEC §7.2.
+Microsoft sign-in for everyone. Companies connect their own provider, per
+organization, as described next; an installation that wants its whole directory
+(LDAP/AD) connects it as described under *Company directory*.
+
+## Single sign-on per organization
+
+An owner or admin (the permission `org.settings`) connects the organization's
+own identity provider on the Organization page, tab **Single sign-on**: Microsoft
+Entra ID, Google Workspace, any OpenID Connect provider, or a SAML provider. People
+whose email address is in the organization's domains are sent to that provider as
+soon as they give their address on the sign-in page, and join the organization
+when they sign in. Everybody else signs in as before. On the cloud it is an
+enterprise-plan feature (`sso`).
+
+How it is built (`server/src/modules/orgs/sso.ts`, `server/src/keycloak/admin.ts`):
+
+- The API creates a Keycloak **identity provider** `sso-<orgId>` (OIDC or SAML;
+  Keycloak reads the endpoints and keys from the provider's metadata), hidden from
+  the sign-in page, links it to the Keycloak organization, and ties each email
+  domain of the organization to it (domain with `identityProviderAlias` and
+  `autoRedirect`). Keycloak's identity-first login does the redirect.
+- The provider's own address (`redirectUri`, or `samlMetadataUrl` for SAML) is what
+  the administrator enters at the provider. `GET /v1/orgs/:id/sso` gives it before
+  anything is set up; the client secret is never given back.
+- Routes: `GET`, `PUT` and `DELETE /v1/orgs/:id/sso`. Changes are in the activity
+  log (`sso.set`, `sso.delete`). Removing it removes the provider and the domains;
+  people who joined stay members and keep their accounts.
+- The people who join this way are plain members, without an invitation. The seat
+  limit applies to them: when Keycloak tells the API about a new member (or the
+  nightly check finds one), a person beyond the free seats is taken out of the
+  organization again and the activity log says `member.rejected` (reason
+  `seat_limit`). A person with a pending invitation keeps the seat the invitation
+  holds, and nobody who is already in is removed when seats shrink.
+- The email address is not trusted as proof of an account: `trustEmail` is off, so
+  Keycloak still confirms an address that matches an existing account.
+
+Two safeguards, because the provider's address is read by Keycloak from inside your
+network and because an organization could otherwise claim someone else's domain:
+
+- **Addresses**: only public https addresses are accepted (no user name in the
+  address, no `localhost`, private networks or names that resolve to them). For
+  development, `SSO_ALLOW_PRIVATE_URLS=true` allows others.
+- **Domain proof**: where `SSO_VERIFY_DOMAINS` is on (default in the cloud, off
+  when self-hosted), the organization must publish a TXT record
+  `_zeima-challenge.<domain>` with the value the API shows for the organization
+  (derived from a secret only the API has), for every domain it signs people in
+  for. The page shows the value.
+
+The service account needs the realm roles `manage-identity-providers` and
+`view-identity-providers` (the realm file has them; apply it again, see
+*Changing the realm*). `deploy/e2e/org-smoke.mjs` with `E2E_SSO=1` sets it up
+against a running stack, using Keycloak's master realm as the provider, and checks
+that a matching address is redirected to it.
+
+## Provisioning with SCIM
+
+Instead of waiting for people to sign in, the identity provider can create, rename,
+disable and remove them itself (SCIM 2.0, users only). On the same tab an owner or
+admin makes a **key** (up to five; shown once, only a hash is kept) and gives the
+provider the SCIM address (`<PUBLIC_URL>/v1/scim/v2`) and the key as secret token.
+`server/src/modules/orgs/scim.ts`:
+
+- `GET /v1/orgs/:id/scim`, `POST /v1/orgs/:id/scim/tokens`, `DELETE /v1/orgs/:id/scim/tokens/:keyId`
+  make the keys (permission `org.settings`, enterprise plan on the cloud, in the activity log).
+- `/v1/scim/v2/Users` (list with `userName eq "…"`, get, create, replace, patch, delete),
+  `ServiceProviderConfig`, `ResourceTypes`, `Schemas`, with a key in `Authorization: Bearer`.
+- Only people whose address is in a domain the organization set up for single sign-on
+  are created or changed; owners are never changed; a person who is already an account
+  of the installation is added to the organization, not duplicated.
+- `active: false` disables the account in Keycloak and ends their sessions; the API also
+  refuses their tokens within seconds. Delete takes the person out of the organization
+  (the account stays). The seat limit applies to creating people (409).
+
+## Signing people out
+
+A disabled account (by an administrator, by SCIM, or in Keycloak) stops working
+without waiting for its token to run out: the listener tells the API, the API checks
+the organization again, ends the person's Keycloak sessions, and refuses a request
+whose account is disabled (the state is remembered for 15 seconds). OIDC providers
+are set up with back-channel logout, so the provider can end Keycloak sessions
+itself. A provider that only disables a person, without SCIM, is noticed when their
+session next asks the provider.
+
+## Company directory (LDAP / Active Directory)
+
+For self-hosted installations whose people already have directory accounts: the
+people who run the installation (realm role `platform-admin`) connect the directory
+in the same place (Organization page, Single sign-on tab) or with `GET`/`PUT`/`DELETE
+/v1/admin/ldap`, `POST /v1/admin/ldap/test` and `/v1/admin/ldap/sync`
+(`server/src/modules/directory/routes.ts`). The routes exist only on self-hosted
+servers. Keycloak checks the connection first, then keeps one user federation
+provider `zeima-ldap`: read only, people imported on first sign-in and every day,
+the directory's email address trusted (so invitations work). People sign in on the
+Keycloak page with their directory name and password; an owner then invites their
+email address. The service account needs `manage-realm` for this (user federation
+is a realm setting); a cloud installation does not use the routes.
 
 ## Organizations: roles, departments and the API's copy
 
@@ -58,7 +151,8 @@ departments are groups, which the access token lists in its `groups` claim:
 
 The API creates and changes all of this through the service account
 `zeima-api-admin` (roles `manage-users`, `view-users`, `query-groups`,
-`manage-organizations`, `view-organizations`; set by the realm file), so admins
+`manage-organizations`, `view-organizations`, `manage-identity-providers`, `manage-realm` (company directory),
+`view-identity-providers`; set by the realm file), so admins
 never need the Keycloak console. It keeps a copy of members, roles, departments
 and who is in them in its own database, and checks that copy against Keycloak:
 

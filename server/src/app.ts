@@ -14,6 +14,9 @@ import { billingRoutes } from './modules/billing/routes.ts'
 import { licenseRoutes, licensingRoutes } from './modules/licensing/routes.ts'
 import { internalRoutes } from './modules/internal/routes.ts'
 import { orgRoutes } from './modules/orgs/routes.ts'
+import { scimRoutes } from './modules/orgs/scim.ts'
+import { directoryRoutes } from './modules/directory/routes.ts'
+import { ssoRoutes } from './modules/orgs/sso.ts'
 import { HttpKeycloakAdmin, type KeycloakAdmin } from './keycloak/admin.ts'
 import { syncRoutes } from './modules/sync/routes.ts'
 import { meRoutes } from './modules/me/routes.ts'
@@ -38,6 +41,10 @@ export interface AppOptions {
   documentAll?: boolean
   /** Readiness checks; default: Keycloak. */
   readiness?: Record<string, ReadinessCheck>
+  /** TXT lookups for the proof of an email domain (tests pass their own); default: the DNS. */
+  dnsTxt?: (name: string) => Promise<string[][]>
+  /** Host name lookups for the safety check of a provider's address (tests pass their own). */
+  dnsResolver?: (host: string) => Promise<{ address: string }[]>
 }
 
 export async function buildApp(config: Config, options: AppOptions = {}) {
@@ -77,11 +84,15 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
     async (v1) => {
       await v1.register(meRoutes)
       await v1.register(orgRoutes)
+      await v1.register(ssoRoutes, { config, ...(options.dnsTxt && { txt: options.dnsTxt }), ...(options.dnsResolver && { resolver: options.dnsResolver }) })
+      await v1.register(scimRoutes, { config })
       await v1.register(internalRoutes, { config })
       await v1.register(syncRoutes)
       await v1.register(licensingRoutes)
       // Offline licenses are for self-hosted installs; the cloud has billing.
       if (config.deploymentMode === 'self_hosted' || options.documentAll) await v1.register(licenseRoutes)
+      // A company directory (LDAP / Active Directory) is for installations that run their own Keycloak.
+      if (config.deploymentMode === 'self_hosted' || options.documentAll) await v1.register(directoryRoutes)
       // Purchases exist only in the cloud; self-hosted installs use license files.
       if (config.deploymentMode === 'cloud' || options.documentAll) await v1.register(billingRoutes, { config })
     },
