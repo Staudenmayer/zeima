@@ -1,9 +1,8 @@
 # Security
 
-The first white-box assessment of the code (commit `70c8d36`, 18 November 2026; the report is
-[`Zeima-Security-Assessment.pdf`](Zeima-Security-Assessment.pdf)) found no critical issue, 2 high, 10 medium,
+The first white-box assessment of the code (commit `70c8d36`, 18 November 2026; the report is kept outside the repository) found no critical issue, 2 high, 10 medium,
 8 low and 2 informational ones. This page says what was done about each, where the fix lives and how it is tested.
-A re-assessment of the fixes ([`Zeima-Security-Re-Assessment.pdf`](Zeima-Security-Re-Assessment.pdf)) found no high or medium finding left and
+A re-assessment of the fixes (also kept outside the repository) found no high or medium finding left and
 listed nine low and informational remainders (R-1 to R-9, below); they are handled too.
 **Not yet done:** a penetration test of a running installation, which both reports leave open, and the items marked *open*.
 
