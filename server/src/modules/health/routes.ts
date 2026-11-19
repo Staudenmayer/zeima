@@ -13,9 +13,9 @@ const Readiness = Type.Object({
   checks: Type.Record(Type.String(), Status),
 })
 
-export const healthRoutes: FastifyPluginAsyncTypebox<{ checks: Record<string, ReadinessCheck> }> = async (
+export const healthRoutes: FastifyPluginAsyncTypebox<{ checks: Record<string, ReadinessCheck>; cacheMs?: number }> = async (
   app,
-  { checks },
+  { checks, cacheMs = 5_000 },
 ) => {
   app.get(
     '/healthz',
@@ -30,6 +30,9 @@ export const healthRoutes: FastifyPluginAsyncTypebox<{ checks: Record<string, Re
     async () => ({ status: 'ok' as const }),
   )
 
+  // One round of checks serves every caller for a few seconds: the endpoint is public and each round calls Keycloak and the database.
+  let cached: { at: number; ok: boolean; checks: Record<string, 'ok' | 'error'> } | null = null
+
   app.get(
     '/readyz',
     {
@@ -41,6 +44,9 @@ export const healthRoutes: FastifyPluginAsyncTypebox<{ checks: Record<string, Re
       },
     },
     async (request, reply) => {
+      if (cached && Date.now() - cached.at < cacheMs) {
+        return reply.code(cached.ok ? 200 : 503).send({ status: cached.ok ? 'ok' : 'unavailable', checks: cached.checks })
+      }
       const results = await Promise.all(
         Object.entries(checks).map(async ([name, check]) => {
           try {
@@ -53,6 +59,7 @@ export const healthRoutes: FastifyPluginAsyncTypebox<{ checks: Record<string, Re
         }),
       )
       const ok = results.every(([, s]) => s === 'ok')
+      cached = { at: Date.now(), ok, checks: Object.fromEntries(results) }
       return reply.code(ok ? 200 : 503).send({ status: ok ? 'ok' : 'unavailable', checks: Object.fromEntries(results) })
     },
   )

@@ -36,7 +36,7 @@ async function mayGiveRole(db: Db, actor: Actor, orgId: string, role: string) {
   const target = await roleOf(db, orgId, role)
   if (!target) throw new HttpProblem(404, 'not_found', 'no such role')
   const mine = actor.user.orgs[orgId]!
-  if (role === 'owner' && mine.role !== 'owner') throw new HttpProblem(403, 'forbidden', 'only an owner can make owners')
+  if ((role === 'owner' || role === 'admin') && mine.role !== 'owner') throw new HttpProblem(403, 'forbidden', `only an owner can make ${role === 'owner' ? 'owners' : 'administrators'}`)
   if (!covers(mine.permissions, target.permissions)) {
     throw new HttpProblem(403, 'forbidden', 'this role has permissions you do not have yourself')
   }
@@ -671,6 +671,10 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         const [group] = await db.select().from(schema.kcGroup).where(and(eq(schema.kcGroup.id, groupId), eq(schema.kcGroup.orgId, orgId)))
         if (!group) throw new HttpProblem(404, 'not_found', 'department not found')
         if (!(await memberOf(db, orgId, userId))) throw new HttpProblem(404, 'not_found', 'not a member of this organization')
+        // Departments decide what a role's department-scoped rights reach: nobody but an owner puts themselves into one.
+        if (userId === actor.user.id && actor.user.orgs[orgId]!.role !== 'owner') {
+          throw new HttpProblem(403, 'forbidden', 'only an owner changes their own departments; ask another administrator')
+        }
         const kc = keycloak()
         if (method === 'PUT') {
           await kc.addToGroup(userId, groupId)

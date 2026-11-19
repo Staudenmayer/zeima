@@ -95,3 +95,22 @@ A further white-box review with proofs of concept found no critical or high issu
 | PT-14 | LDAP without encryption | Fixed | `ldap://` needs StartTLS; `ldaps://` otherwise. |
 | PT-15 | Seat limit not atomic | Fixed (invitations) | Counting and inserting run under the organization lock; SCIM creation is *open*. |
 | PT-16, PT-17 | Maintenance advisories; accepted risks | Unchanged | See the report. |
+
+## Second penetration test of 19 November 2026 (PT2-01 to PT2-15)
+
+A third review (static, white-box; the report is kept outside the repository) found no critical or high issue, 2 medium, 7 low and 6 informational ones.
+
+| ID | Finding | Status | Where, and what to know |
+|---|---|---|---|
+| PT2-01 | Every member got the organization's billing portal link | Fixed | `GET /v1/billing` returns `portalUrl` for an organization's subscription only to holders of `billing.manage`. |
+| PT2-02 | SCIM keys ignored the role hierarchy | Fixed | Provisioning changes only members and managers; SCIM audit entries carry the key id. |
+| PT2-03 | `/readyz` exempt from the rate limit; jurisdictions read per request | Fixed | Readiness is limited like other routes and cached 5 s; the profile folder is cached 60 s. |
+| PT2-04 | Push byte budget skipped without `Content-Length` | Fixed | The parsed body's size is charged. The per-workspace total (PT-04) stays open. |
+| PT2-05 | Profile pictures not re-encoded; all returned in list responses | Open | Needs an image library to re-encode on upload. |
+| PT2-06 | `group.manage` lets someone join departments themselves | Fixed | Only an owner changes their own department membership. |
+| PT2-07 | Admins could create admins | Fixed | Only an owner gives the admin role. |
+| PT2-08 | Checkout token outlives ownership | Fixed (partly) | A new subscription attaches to an organization only if the buyer still owns it; renewals continue. |
+| PT2-09 | Web view could read the access token and open any URL | Fixed | `account_access_token` removed; the opener is limited to https and mailto. |
+| PT2-10, 11, 13, 14 | Presence project id, identity provider pre-registration (test on a live Keycloak), maintenance advisories, LDAP address | Open / accepted | Informational. |
+| PT2-12 | Development license key | Fixed | The server refuses to start with it in cloud mode and warns otherwise. |
+| PT2-15 | `zeima://` redirect | Fixed | Removed from the realm (existing installations: `deploy/keycloak/apply.sh`). |

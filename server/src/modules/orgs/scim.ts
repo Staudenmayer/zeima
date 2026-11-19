@@ -44,6 +44,8 @@ declare module 'fastify' {
   interface FastifyRequest {
     /** The organization a SCIM key belongs to. */
     scimOrg?: string
+    /** The id of the SCIM key that made the call (for the audit log). */
+    scimKey?: string
   }
 }
 
@@ -281,6 +283,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         const [row] = await db.select().from(schema.scimToken).where(eq(schema.scimToken.hash, hashToken(token)))
         if (!row) throw new ScimError(401, 'the key is not valid')
         request.scimOrg = row.orgId
+        request.scimKey = row.id
         if (!row.lastUsedAt || Date.now() - row.lastUsedAt > 60_000) {
           await db.update(schema.scimToken).set({ lastUsedAt: Date.now() }).where(eq(schema.scimToken.id, row.id))
         }
@@ -302,7 +305,9 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
 
       /** A member SCIM may change: not an owner, and in a domain of the organization. */
       const changeable = async (orgId: string, m: MemberRow) => {
-        if (m.role === 'owner') throw new ScimError(403, 'owners are not changed by provisioning')
+        // Provisioning is not bound by the role hierarchy (a key has no person behind it), so it gets a fixed ceiling:
+        // it never touches anyone who administers the organization (admins, owners, custom roles).
+        if (m.role !== 'member' && m.role !== 'manager') throw new ScimError(403, 'only members and managers are changed by provisioning')
         if (!m.email || !inClaimedDomain(m.email, await claimedDomains(orgId))) {
           throw new ScimError(403, 'this person is not in a domain of the organization', 'mutability')
         }
@@ -314,7 +319,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         return rows.some((r) => r.orgId !== orgId)
       }
 
-      const apply = async (orgId: string, m: MemberRow, changes: Changes): Promise<'removed' | 'changed'> => {
+      const apply = async (orgId: string, m: MemberRow, changes: Changes, key: string | undefined): Promise<'removed' | 'changed'> => {
         const db = database()
         const kc = keycloak()
         if (changes.givenName !== undefined || changes.familyName !== undefined) {
@@ -329,14 +334,14 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
           // would lock them out of those too. Taking them out of this organization ends this organization's access.
           await kc.removeMember(orgId, m.id)
           await db.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
-          await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim', reason: 'deactivated, account belongs to other organizations' } })
+          await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim', key, reason: 'deactivated, account belongs to other organizations' } })
           return 'removed' as const
         }
         if (changes.active !== undefined && changes.active !== m.active) {
           await kc.setEnabled(m.id, changes.active)
           if (!changes.active) await kc.logoutUser(m.id).catch(() => {})
           await db.update(schema.kcUser).set({ active: changes.active }).where(eq(schema.kcUser.id, m.id))
-          await audit(db, { orgId, actorId: null, action: changes.active ? 'member.reactivate' : 'member.deactivate', target: m.id, detail: { via: 'scim' } })
+          await audit(db, { orgId, actorId: null, action: changes.active ? 'member.reactivate' : 'member.deactivate', target: m.id, detail: { via: 'scim', key } })
         }
         return 'changed'
       }
@@ -415,7 +420,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
               await db.delete(schema.orgInvitation).where(eq(schema.orgInvitation.id, row.id))
               throw err
             })
-            await audit(db, { orgId, actorId: null, action: 'member.invite', target: email, detail: { role: 'member', via: 'scim' } })
+            await audit(db, { orgId, actorId: null, action: 'member.invite', target: email, detail: { role: 'member', via: 'scim', key: request.scimKey } })
           }
           // The same answer as for a person who is already in: what the key holder learns is that this address is taken, not
           // whether it belongs to somebody else's account.
@@ -433,7 +438,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
             .onConflictDoUpdate({ target: schema.kcUser.id, set: { email, active: enabled, ...(displayName ? { displayName } : {}) } })
           await tx.insert(schema.kcOrgMember).values({ orgId, userId, role: 'member' }).onConflictDoNothing()
         })
-        await audit(db, { orgId, actorId: null, action: 'member.join', target: userId, detail: { role: 'member', via: 'scim' } })
+        await audit(db, { orgId, actorId: null, action: 'member.join', target: userId, detail: { role: 'member', via: 'scim', key: request.scimKey } })
         return reply.header('location', `${baseUrl}/Users/${userId}`).code(201).type('application/scim+json').send(toScim(await member(orgId, userId), baseUrl))
       })
 
@@ -443,7 +448,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
           const orgId = orgOf(request)
           const m = await member(orgId, request.params.id)
           await changeable(orgId, m)
-          const outcome = await apply(orgId, m, changesOf(request.body, patch))
+          const outcome = await apply(orgId, m, changesOf(request.body, patch), request.scimKey)
           // A person who was only taken out of this organization is reported as switched off, which is what the provider asked for.
           return send(reply, 200, outcome === 'removed' ? toScim({ ...m, active: false }, baseUrl) : toScim(await member(orgId, m.id), baseUrl))
         }
@@ -457,7 +462,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         const db = database()
         await keycloak().removeMember(orgId, m.id)
         await db.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
-        await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim' } })
+        await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim', key: request.scimKey } })
         return reply.code(204).send(null)
       })
     },

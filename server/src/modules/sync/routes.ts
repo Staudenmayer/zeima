@@ -237,7 +237,8 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const { workspaceId, changes } = request.body
       pushRequests.spend(user.id, 1, 'pushes')
       pushChanges.spend(user.id, changes.length, 'changes')
-      pushBytes.spend(user.id, Number(request.headers['content-length']) || 1, 'bytes')
+      // The size of what was parsed, not the header (a chunked request has none).
+      pushBytes.spend(user.id, Math.max(1, JSON.stringify(request.body).length), 'bytes')
       await app.licensing.require(db(), user, 'sync')
       return withUser(db(), callerOf(user), async (tx) => {
         const [ws] = await tx.select().from(schema.workspace).where(eq(schema.workspace.id, workspaceId))

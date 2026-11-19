@@ -187,8 +187,6 @@ export const commands = {
 	 *  expires; revoking it from the account page signs out everywhere.
 	 */
 	accountSignOut: () => typedError<AccountStatus, CmdError>(__TAURI_INVOKE("account_sign_out")),
-	/**  A valid access token for API calls, or `None` when signed out. */
-	accountAccessToken: () => typedError<string | null, CmdError>(__TAURI_INVOKE("account_access_token")),
 	syncStatus: () => typedError<SyncStatus, CmdError>(__TAURI_INVOKE("sync_status")),
 	/**  The newer version that is available, if any. */
 	updateCheck: () => typedError<{

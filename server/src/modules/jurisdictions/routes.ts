@@ -15,6 +15,7 @@ const MAX_FILES = 50
 
 export const jurisdictionRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (app, { config }) => {
   const dir = config.jurisdictionsDir
+  let cache: { at: number; value: { profiles: { file: string; source: string }[] } } | null = null
 
   app.get(
     '/jurisdictions',
@@ -29,6 +30,9 @@ export const jurisdictionRoutes: FastifyPluginAsyncTypebox<{ config: Config }> =
     },
     async (_request, reply) => {
       if (!dir) return { profiles: [] }
+      reply.header('cache-control', 'public, max-age=300')
+      // The folder is read at most once a minute, however often this public route is called.
+      if (cache && Date.now() - cache.at < 60_000) return cache.value
       const names = (await readdir(dir).catch(() => [] as string[])).filter((n) => FILE.test(n)).sort().slice(0, MAX_FILES)
       const profiles: { file: string; source: string }[] = []
       for (const file of names) {
@@ -37,8 +41,9 @@ export const jurisdictionRoutes: FastifyPluginAsyncTypebox<{ config: Config }> =
         const source = await readFile(path, 'utf8').catch(() => null)
         if (source !== null) profiles.push({ file, source })
       }
-      reply.header('cache-control', 'public, max-age=300')
-      return { profiles }
+      const value = { profiles }
+      cache = { at: Date.now(), value }
+      return value
     },
   )
 }

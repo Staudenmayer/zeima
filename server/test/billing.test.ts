@@ -1,6 +1,8 @@
 import { createHmac } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { buildApp } from '../src/app.ts'
+import { schema } from '../src/db/index.ts'
 import { ConfigError, loadConfig } from '../src/config.ts'
 import { checkoutToken, checkoutUrl, parseEvent, signatureValid, uuidFor } from '../src/modules/billing/lemonsqueezy.ts'
 import { keys, token } from './helpers.ts'
@@ -146,6 +148,28 @@ describe.skipIf(!(await reachable()))('billing routes', () => {
     })
   }
   const authed = async (sub = ADA, groups: string[] = []) => ({ authorization: `Bearer ${await token({ sub, groups })}` })
+
+  it('attaches a new subscription only for the organization\'s owner, and shows the portal link to owners only', async () => {
+    const BOB = '2c8f1f5e-0000-4000-8000-000000000002'
+    await db.db.insert(schema.organization).values({ id: ORG, name: 'Acme', createdAt: 1 })
+    await db.db.insert(schema.kcUser).values([{ id: ADA, email: 'ada@example.com' }, { id: BOB, email: 'bob@example.com' }]).onConflictDoNothing()
+    await db.db.insert(schema.kcOrgMember).values([{ orgId: ORG, userId: BOB, role: 'member' }])
+    const app = await cloud()
+    const forOrg = { user_id: ADA, org_id: ORG, token: checkoutToken(SECRET, ADA, ORG) }
+    const team = (name: string) => event(name, { variant_id: 222 }, forOrg, '9100')
+    // Ada is no (longer) a member: the genuine, signed event does not attach to the organization.
+    expect((await webhook(app, team('subscription_created'))).json().status).toBe('ignored')
+    await db.db.insert(schema.kcOrgMember).values({ orgId: ORG, userId: ADA, role: 'owner' })
+    expect((await webhook(app, team('subscription_created'))).json()).toEqual({ status: 'applied' })
+    const portal = async (sub: string, role: string) =>
+      (await app.inject({ url: '/v1/billing', headers: await authed(sub, [`/orgs/${ORG}/roles/${role}`]) })).json().portalUrl
+    expect(await portal(ADA, 'owner')).toBe('https://store.example/portal/abc')
+    expect(await portal(BOB, 'member')).toBeNull()
+    // Ada steps down: renewals of the subscription still go through.
+    await db.db.update(schema.kcOrgMember).set({ role: 'member' }).where(eq(schema.kcOrgMember.userId, ADA))
+    expect((await webhook(app, event('subscription_updated', { variant_id: 222, updated_at: iso(now + 5000) }, forOrg, '9100'))).json().status).toBe('applied')
+    await app.close()
+  })
 
   it('exists only in the cloud', async () => {
     const app = await buildApp(loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'silent', METRICS_ENABLED: 'false' }), { logger: false, keys, readiness: {}, db: db.db })

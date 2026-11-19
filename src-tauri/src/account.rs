@@ -430,16 +430,6 @@ pub(crate) async fn current_token(app: &AppHandle) -> Result<Option<(String, Str
     Ok(token.map(|t| (server, t)))
 }
 
-/// A valid access token for API calls, or `None` when signed out.
-#[tauri::command]
-#[specta::specta]
-pub async fn account_access_token(app: AppHandle) -> CmdResult<Option<String>> {
-    Ok(current_token(&app)
-        .await
-        .map_err(|e| err("server", e))?
-        .map(|(_, token)| token))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

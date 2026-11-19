@@ -68,6 +68,15 @@ app.addHook('onClose', async () => {
   await new Promise<void>((resolve) => (internalServer ? internalServer.close(() => resolve()) : resolve()))
 })
 
+// The development signing key is public: a server that trusts it must not be one that serves other people.
+if (config.env !== 'production') {
+  if (config.deploymentMode === 'cloud') {
+    app.log.fatal('NODE_ENV is not production on a cloud deployment: the development license key would be trusted. Refusing to start.')
+    process.exit(1)
+  }
+  app.log.warn('NODE_ENV is not production: the public development license key is trusted. Never expose this server to other people.')
+}
+
 try {
   await app.listen({ host: config.host, port: config.port })
   if (config.internalPort !== null) internalServer = await listenInternal(app, config.internalPort, config.host)

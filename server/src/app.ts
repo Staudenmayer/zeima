@@ -92,6 +92,7 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
   if (db) app.decorate('db', db)
   await app.register(rolesPlugin)
   await app.register(healthRoutes, {
+    cacheMs: config.env === 'test' ? 0 : undefined,
     checks: {
       ...(options.readiness ?? { keycloak: keycloakCheck(config.keycloak.jwksUrl) }),
       ...(db && { database: async () => void (await db.execute(sql`select 1`)) }),

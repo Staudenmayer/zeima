@@ -204,6 +204,16 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       expect(outside.statusCode).toBe(403)
     })
 
+    it('never changes an administrator, even inside the domains (a key is not bound by the role hierarchy)', async () => {
+      await db.db.update(schema.kcUser).set({ email: 'adam@acme.example' }).where(eq(schema.kcUser.id, ADMIN))
+      const off = await scim('PATCH', `/Users/${ADMIN}`, { Operations: [{ op: 'replace', path: 'active', value: false }] })
+      const gone = await scim('DELETE', `/Users/${ADMIN}`)
+      await db.db.update(schema.kcUser).set({ email: '2@example.com' }).where(eq(schema.kcUser.id, ADMIN))
+      expect(off.statusCode).toBe(403)
+      expect(gone.statusCode).toBe(403)
+      expect((await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.userId, ADMIN))).length).toBe(1)
+    })
+
     it('does not pull an existing account into the organization: the person is invited', async () => {
       const outsider = id(60)
       kc.users.set(outsider, { id: outsider, email: 'old@acme.example', name: 'Old Account', enabled: true })

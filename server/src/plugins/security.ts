@@ -22,8 +22,9 @@ export const securityPlugin = fp(
       timeWindow: '1 minute',
       // Injected test sockets have no address.
       keyGenerator: (request) => request.ip ?? 'unknown',
-      // Probes must keep working under load.
-      allowList: (request) => request.url === '/healthz' || request.url === '/readyz',
+      // The liveness probe does no work and must keep working under load. Readiness calls Keycloak and the database,
+      // so it is limited like everything else (and answers from a short cache, see health/routes.ts).
+      allowList: (request) => request.url === '/healthz',
       errorResponseBuilder: (_request, context) =>
         new HttpProblem(429, 'rate_limited', `too many requests; try again in ${context.after}`),
     })

@@ -261,13 +261,22 @@ describe.skipIf(!(await reachable()))('organizations', () => {
   })
 
   describe('invitations', () => {
+    it('keeps administrators from putting themselves into a department', async () => {
+      await reset()
+      const dev = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'dev' })).json()
+      expect((await call('PUT', `/v1/orgs/${ORG}/groups/${dev.id}/members/${ADMIN}`, ADMIN, 'admin')).statusCode).toBe(403)
+      expect((await call('PUT', `/v1/orgs/${ORG}/groups/${dev.id}/members/${MEMBER}`, ADMIN, 'admin')).statusCode).toBe(204)
+      expect((await call('PUT', `/v1/orgs/${ORG}/groups/${dev.id}/members/${OWNER}`, OWNER, 'owner')).statusCode).toBe(204)
+    })
+
     it('invites with a role, but only one whose permissions the inviter holds', async () => {
       await reset()
       const ok = await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'New@Example.com' })
       expect(ok.statusCode).toBe(201)
       expect(ok.json()).toMatchObject({ email: 'new@example.com', role: 'member' })
       expect(kc.calls).toEqual([`invite ${ORG} new@example.com`])
-      // An admin may hand out the admin role, not the manager role (it reads more entries) and not the owner's.
+      // An admin hands out neither the admin role (only an owner makes administrators), nor the manager role (it reads more entries), nor the owner's.
+      expect((await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'twin@example.com', role: 'admin' })).statusCode).toBe(403)
       expect((await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'boss@example.com', role: 'manager' })).statusCode).toBe(403)
       expect((await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'boss@example.com', role: 'owner' })).statusCode).toBe(403)
       expect((await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'boss@example.com', role: 'nonsense' })).statusCode).toBe(404)

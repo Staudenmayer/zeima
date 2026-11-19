@@ -152,7 +152,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             account::account_sign_in,
             account::account_cancel,
             account::account_sign_out,
-            account::account_access_token,
             sync::sync_status,
             updates::update_check,
             updates::update_install,

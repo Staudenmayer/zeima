@@ -38,6 +38,8 @@ export interface Update {
   /** Entitlement row id. */
   id: string
   userId: string | null
+  /** Who made the checkout link (its signed `user_id`). */
+  buyerId: string
   orgId: string | null
   email: string | null
   plan: string
@@ -123,6 +125,7 @@ export function parseEvent(body: unknown, plans: readonly BillingPlan[], now: nu
     update: {
       id: uuidFor(subscriptionId),
       userId: orgId ? null : userId,
+      buyerId: userId!,
       orgId,
       email: asString(attributes.user_email),
       plan: plan.plan,

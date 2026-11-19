@@ -8,7 +8,7 @@
 //   POST /v1/billing/webhook    Lemon Squeezy → entitlements (signed, no bearer token)
 
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
-import { desc, eq, or } from 'drizzle-orm'
+import { and, desc, eq, or } from 'drizzle-orm'
 import { Type } from 'typebox'
 import type { Config } from '../../config.ts'
 import { callerOf, schema, withUser } from '../../db/index.ts'
@@ -97,7 +97,9 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asyn
       const row = rows.find((r) => r.billing)
       if (!row) return null
       const b = row.billing as { status?: string; portalUrl?: string | null }
-      return { plan: row.plan, status: b.status ?? 'unknown', validUntil: row.validUntil, portalUrl: b.portalUrl ?? null }
+      // The portal link manages the subscription (cancel, payment method): for an organization's it is the owner's.
+      const mayManage = !row.orgId || Boolean(user.orgs[row.orgId]?.permissions['billing.manage'])
+      return { plan: row.plan, status: b.status ?? 'unknown', validUntil: row.validUntil, portalUrl: mayManage ? (b.portalUrl ?? null) : null }
     },
   )
 
@@ -151,6 +153,14 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asyn
           }
           const [existing] = await tx.select({ updatedAt: schema.entitlement.updatedAt }).from(schema.entitlement).where(eq(schema.entitlement.id, update.id))
           if (existing && existing.updatedAt > update.updatedAt) return { status: 'ignored' as const, reason: 'older than what is stored' }
+          // A new subscription attaches to an organization only for someone who still owns it (renewals of an existing one go on).
+          if (!existing && update.orgId) {
+            const [owner] = await tx
+              .select({ userId: schema.kcOrgMember.userId })
+              .from(schema.kcOrgMember)
+              .where(and(eq(schema.kcOrgMember.orgId, update.orgId), eq(schema.kcOrgMember.userId, update.buyerId), eq(schema.kcOrgMember.role, 'owner')))
+            if (!owner) return { status: 'ignored' as const, reason: 'the buyer does not own the organization' }
+          }
           const values = {
             userId: update.userId,
             orgId: update.orgId,

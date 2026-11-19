@@ -25,7 +25,7 @@ describe('what each window may call (docs/security.md, ZE-14)', () => {
   it('keeps the small windows to what they need: no addon install, no organization API, no data export, no purchases', () => {
     const bare = committed('bare.json')
     expect(bare.windows.sort()).toEqual(['prompt', 'quickswitch'])
-    for (const c of ['addon_install', 'addon_registry_install', 'addon_pick', 'addon_uninstall', 'org_request', 'account_sign_in', 'account_access_token', 'data_export_json', 'import_run', 'billing_checkout', 'sync_now', 'backup_open_dir', 'report_export_addon']) {
+    for (const c of ['addon_install', 'addon_registry_install', 'addon_pick', 'addon_uninstall', 'org_request', 'account_sign_in', 'data_export_json', 'import_run', 'billing_checkout', 'sync_now', 'backup_open_dir', 'report_export_addon']) {
       expect(bare.permissions, c).not.toContain(allow(c))
     }
     // ... and still has what it does: the timer, the lists the quick switch shows, hiding itself.
