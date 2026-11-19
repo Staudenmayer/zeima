@@ -44,7 +44,7 @@ keyring = "4.2"
 url = "2"
 psl = "2"
 sha2 = "0.10"
-base64 = "0.22"
+base64 = "0.23"
 getrandom = "0.3"
 ureq = "3"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-native-roots"] }
