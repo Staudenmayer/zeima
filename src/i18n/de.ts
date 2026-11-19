@@ -367,6 +367,9 @@ const de: typeof en = {
     schedules: 'Arbeitszeitmodell',
     schedulesHint: 'Sollstunden pro Wochentag. Ein neues Modell gilt ab seinem Startdatum; frühere Tage behalten das alte.',
     managedBy: 'Wird von deiner Organisation festgelegt. Ein Administrator legt dein Arbeitszeitmodell, deinen Urlaubsanspruch und Überstunden-Korrekturen fest.',
+    managedUnderOrg: 'Arbeitszeitmodelle, Urlaubsansprüche und Überstunden-Korrekturen der Personen der Organisation werden festgelegt unter',
+    openOrgWorkspace: 'Die Arbeitszeit liegt im Arbeitsbereich der Organisation. Wechsle dorthin, um sie zu sehen und festzulegen.',
+    openOrgWorkspaceButton: 'Zum Arbeitsbereich der Organisation wechseln',
     managedPerson: 'Person',
     validFrom: 'Gültig ab',
     model: 'Modell',
@@ -919,7 +922,7 @@ const de: typeof en = {
     invitePendingHint: 'Eingeladen, noch nicht beigetreten. Sie bekommen das beim Beitritt.',
     offline: 'Offline',
     presenceStates: { online: 'Online', in_meeting: 'Im Termin', traveling: 'Unterwegs', away: 'Abwesend' },
-    tabs: { members: 'Mitglieder', online: 'Online', roles: 'Rollen', jobs: 'Tätigkeiten', policies: 'Regeln', invitations: 'Einladungen', departments: 'Abteilungen', activity: 'Aktivität', sso: 'Single Sign-on', addons: 'Addons' },
+    tabs: { members: 'Mitglieder', online: 'Online', workHours: 'Arbeitszeit', roles: 'Rollen', jobs: 'Tätigkeiten', policies: 'Regeln', invitations: 'Einladungen', departments: 'Abteilungen', activity: 'Aktivität', sso: 'Single Sign-on', addons: 'Addons' },
     sso: {
       intro: 'Wer eine E-Mail-Adresse in den Domains Ihres Unternehmens hat, meldet sich mit Ihrem eigenen Identitätsanbieter an (Microsoft Entra ID, Google Workspace oder ein anderer OpenID-Connect- oder SAML-Anbieter). Die Personen treten der Organisation bei ihrer ersten Anmeldung bei; wer ihn nicht nutzt, meldet sich wie bisher an.',
       provider: 'Identitätsanbieter',

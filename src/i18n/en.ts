@@ -365,6 +365,9 @@ export default {
     schedules: 'Work schedule',
     schedulesHint: 'Target hours per weekday. A new schedule applies from its start date; earlier days keep the old one.',
     managedBy: 'Set by your organization. An administrator sets your schedule, vacation entitlement and overtime corrections.',
+    managedUnderOrg: 'Schedules, vacation entitlement and overtime corrections of the organization\'s people are set under',
+    openOrgWorkspace: 'Work hours are kept in the organization\'s workspace. Switch to it to see and set them.',
+    openOrgWorkspaceButton: 'Switch to the organization workspace',
     managedPerson: 'Person',
     validFrom: 'Valid from',
     model: 'Model',
@@ -917,7 +920,7 @@ export default {
     invitePendingHint: 'Invited, not joined yet. They get these when they join.',
     offline: 'Offline',
     presenceStates: { online: 'Online', in_meeting: 'In a meeting', traveling: 'Traveling', away: 'Away' },
-    tabs: { members: 'Members', online: 'Online', roles: 'Roles', jobs: 'Job descriptions', policies: 'Rules', invitations: 'Invitations', departments: 'Departments', activity: 'Activity', sso: 'Single sign-on', addons: 'Addons' },
+    tabs: { members: 'Members', online: 'Online', workHours: 'Work hours', roles: 'Roles', jobs: 'Job descriptions', policies: 'Rules', invitations: 'Invitations', departments: 'Departments', activity: 'Activity', sso: 'Single sign-on', addons: 'Addons' },
     sso: {
       intro: "People whose email address is in your company's domains sign in with your own identity provider (Microsoft Entra ID, Google Workspace or any OpenID Connect or SAML provider). They join the organization when they sign in for the first time, and the people who do not use it sign in as before.",
       provider: 'Identity provider',

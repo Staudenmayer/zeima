@@ -21,6 +21,7 @@ import RoleDialog from '@/components/time/RoleDialog.vue'
 import AddonRulesPanel from '@/components/time/AddonRulesPanel.vue'
 import DirectoryPanel from '@/components/time/DirectoryPanel.vue'
 import ScimPanel from '@/components/time/ScimPanel.vue'
+import OrgWorkHours from '@/components/time/OrgWorkHours.vue'
 import SsoPanel from '@/components/time/SsoPanel.vue'
 import EmptyState from '@/components/time/EmptyState.vue'
 import PageHeader from '@/components/time/PageHeader.vue'
@@ -427,6 +428,7 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(shownAudit, {
         <TabsTrigger value="members">{{ $t('org.tabs.members') }}</TabsTrigger>
         <TabsTrigger value="departments">{{ $t('org.tabs.departments') }}</TabsTrigger>
         <TabsTrigger v-if="canEditJobs || canDeleteJobs" value="jobs">{{ $t('org.tabs.jobs') }}</TabsTrigger>
+        <TabsTrigger v-if="org.can('member.manage')" value="workhours">{{ $t('org.tabs.workHours') }}</TabsTrigger>
         <TabsTrigger v-if="canSeeRoles" value="roles">{{ $t('org.tabs.roles') }}</TabsTrigger>
         <TabsTrigger v-if="org.can('policy.write')" value="policies">{{ $t('org.tabs.policies') }}</TabsTrigger>
         <TabsTrigger v-if="org.can('org.settings')" value="sso">{{ $t('org.tabs.sso') }}</TabsTrigger>
@@ -589,6 +591,10 @@ const { sort: auditSort, sorted: sortedAudit } = useSort(shownAudit, {
           </table>
         </div>
         </template>
+      </TabsContent>
+
+      <TabsContent v-if="org.can('member.manage')" value="workhours">
+        <OrgWorkHours />
       </TabsContent>
 
       <TabsContent v-if="canSeeRoles" value="roles">
