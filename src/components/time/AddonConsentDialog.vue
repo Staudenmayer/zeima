@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import SignatureBadge from '@/components/time/SignatureBadge.vue'
 import { HOOK_KEYS, PERMISSION_KEYS } from '@/lib/addons'
-import { call, errorMessage } from '@/lib/ipc'
+import { AppError, call, errorMessage } from '@/lib/ipc'
 
 // Shows what a package asks for before it is installed.
 const props = defineProps<{ pkg: AddonPackage | null }>()
@@ -33,7 +33,8 @@ async function install() {
     open.value = false
     emit('installed')
   } catch (err) {
-    toast.error(errorMessage(err))
+    // The app asked the person itself and they said no: nothing to report.
+    if (!(err instanceof AppError && err.code === 'cancelled')) toast.error(errorMessage(err))
   } finally {
     installing.value = false
   }

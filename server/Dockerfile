@@ -2,7 +2,7 @@
 # sources directly (type stripping). Build from the repository root:
 #   docker build -f server/Dockerfile -t zeima-api .
 
-FROM docker.io/oven/bun:1.4 AS deps
+FROM docker.io/oven/bun:1.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb4720b407548f1d AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY server/package.json server/
@@ -11,7 +11,7 @@ COPY packages/shared-fixtures/package.json packages/shared-fixtures/
 # Only the server's production dependencies, not the desktop frontend's.
 RUN bun install --frozen-lockfile --production --filter '@zeima/server'
 
-FROM docker.io/library/node:24-slim
+FROM docker.io/library/node:24-slim@sha256:0e2646ab57e77b7a384a0cb59b6815b182c77e1f9c3ba36bd8435bd9c4e6680e
 ENV NODE_ENV=production \
     PORT=3000
 WORKDIR /app

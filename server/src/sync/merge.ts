@@ -35,9 +35,21 @@ export interface Actor {
   manager: boolean
 }
 
-export type Reason = 'locked' | 'forbidden_field' | 'forbidden' | 'forbidden_table' | 'policy_project' | 'policy_tags' | 'room_taken'
+export type Reason = 'locked' | 'forbidden_field' | 'forbidden' | 'forbidden_table' | 'policy_project' | 'policy_tags' | 'room_taken' | 'clock_ahead'
 
 export type Outcome = { status: 'applied' } | { status: 'ignored' } | { status: 'rejected'; reason: Reason }
+
+/**
+ * How far ahead of the server's clock a change may be stamped. The merge keeps the newer stamp per field, so a
+ * stamp far in the future would make a field impossible to change for everybody else (a lock a manager sets,
+ * a decision). Past a small allowance for clocks that are a little off, the change is refused.
+ */
+export const MAX_CLOCK_AHEAD_MS = 2 * 60_000
+
+/** The wall-clock part of an HLC string (`{wall_ms:015}-{counter}-{node}`). */
+export function hlcWallMs(hlc: string): number {
+  return Number(hlc.slice(0, 15))
+}
 
 const TIME_ENTRY = 'time_entry'
 const LOCKED = 'locked'

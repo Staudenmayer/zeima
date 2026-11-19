@@ -12,6 +12,7 @@ pub mod entitlement;
 pub mod error;
 pub mod events;
 pub mod export;
+pub mod fsperm;
 pub mod hlc;
 pub mod ids;
 pub mod import;

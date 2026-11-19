@@ -18,7 +18,8 @@ export async function createTestDatabase(): Promise<{ db: Db; drop: () => Promis
   await admin.unsafe(`create database ${name}`)
   const url = new URL(ADMIN_URL)
   url.pathname = `/${name}`
-  const conn = connect(url.toString(), { onnotice: () => {} })
+  // Small pools: many test files run at once against one PostgreSQL (max_connections).
+  const conn = connect(url.toString(), { onnotice: () => {}, max: 4 })
   await migrateDb(conn.db)
   return {
     db: conn.db,

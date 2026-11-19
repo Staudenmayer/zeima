@@ -19,6 +19,7 @@ export const jurisdictionRoutes: FastifyPluginAsyncTypebox<{ config: Config }> =
   app.get(
     '/jurisdictions',
     {
+      config: { public: 'country profiles are not secret' },
       schema: {
         tags: ['discovery'],
         summary: 'Extra country profiles this installation adds',

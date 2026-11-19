@@ -35,8 +35,11 @@ pub struct SignatureFile {
 pub enum SignatureStatus {
     /// No signature.
     Unsigned,
-    /// Signed by a key the app trusts, and the files match.
+    /// Signed by a publisher key built into the app (the vendor's), and the files match.
     Trusted,
+    /// Signed by a publisher the connected server vouches for: as far as the installation's administrator is
+    /// trusted, not more. Shown differently from the vendor's.
+    ServerTrusted,
     /// Signed, but by a key the app does not know.
     UnknownKey,
     /// Signed, but the files do not match the signature (changed after signing, or damaged).
@@ -62,9 +65,9 @@ impl SignatureCheck {
         Self::of(SignatureStatus::Unsigned, None, None)
     }
 
-    /// Whether the signature is good (a trusted publisher made exactly these files).
+    /// Whether the signature is good: a publisher the app or its server trusts made exactly these files.
     pub fn is_trusted(&self) -> bool {
-        self.status == SignatureStatus::Trusted
+        matches!(self.status, SignatureStatus::Trusted | SignatureStatus::ServerTrusted)
     }
 }
 
@@ -74,6 +77,8 @@ pub struct TrustedKey {
     pub key_id: String,
     pub name: String,
     pub key: VerifyingKey,
+    /// Built into the app (the vendor's) rather than handed out by the connected server.
+    pub vendor: bool,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -112,7 +117,11 @@ pub fn check(manifest_src: &[u8], wasm: &[u8], signature_json: Option<&str>, tru
         .ok()
         .and_then(|b| Signature::from_slice(&b).ok())
         .is_some_and(|sig| key.key.verify(&message(manifest_src, wasm), &sig).is_ok());
-    let status = if good { SignatureStatus::Trusted } else { SignatureStatus::Invalid };
+    let status = match (good, key.vendor) {
+        (true, true) => SignatureStatus::Trusted,
+        (true, false) => SignatureStatus::ServerTrusted,
+        (false, _) => SignatureStatus::Invalid,
+    };
     SignatureCheck::of(status, Some(key.key_id.clone()), good.then(|| key.name.clone()))
 }
 
@@ -149,6 +158,7 @@ mod tests {
             key_id: v.key.key_id.clone(),
             name: v.key.name.clone(),
             key: parse_public_key(&v.key.public_key).expect("key parses"),
+            vendor: true,
         }];
         for c in v.cases {
             let wasm = base64::engine::general_purpose::STANDARD.decode(&c.wasm_base64).unwrap();
@@ -157,6 +167,11 @@ mod tests {
             let want: SignatureStatus = serde_json::from_value(serde_json::Value::String(c.expect.clone())).unwrap();
             assert_eq!(got.status, want, "{}", c.name);
             assert_eq!(got.signer.is_some(), want == SignatureStatus::Trusted, "{}", c.name);
+            // The same files signed by a key the server handed out are "server trusted", never vendor trusted.
+            let by_server = [TrustedKey { vendor: false, ..trusted[0].clone() }];
+            let got = check(c.manifest.as_bytes(), &wasm, sig.as_deref(), &by_server);
+            let want_server = if want == SignatureStatus::Trusted { SignatureStatus::ServerTrusted } else { want };
+            assert_eq!(got.status, want_server, "{} (server key)", c.name);
         }
     }
 

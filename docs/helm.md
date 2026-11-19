@@ -45,15 +45,35 @@ Server).
 | `<release>-keycloak` | Deployment (one replica, `start --import-realm`), Service, probes on port 9000. |
 | `<release>-postgres` | StatefulSet with a volume, and a second database for Keycloak. Switch off with `postgres.enabled=false` and fill `externalDatabase`. |
 | `<release>` | Ingress for both host names. |
-| `<release>-secrets` | The five secrets, generated on the first install and **kept when you upgrade**. Use `secrets.existingSecret` for your own (below). |
+| `<release>-secrets` | The six secrets, generated on the first install and **kept when you upgrade**. Use `secrets.existingSecret` for your own (below). |
+| NetworkPolicies | Default deny, then: the ingress controller reaches the API (3000) and Keycloak (8080), only Keycloak reaches the API's internal port (3001), only the API and Keycloak reach PostgreSQL. Needs a network plugin that enforces them. `networkPolicy.enabled=false` switches them off; `networkPolicy.ingressFrom` narrows where the ingress controller runs. |
 
 ### Secrets
 
 Leave `secrets.*` empty and the chart generates them. To manage them yourself, make a Secret with the keys
-`postgres-password`, `keycloak-db-password`, `keycloak-admin-password`, `api-admin-secret`, `webhook-secret` (and
+`postgres-password`, `app-db-password`, `keycloak-db-password`, `keycloak-admin-password`, `api-admin-secret`, `webhook-secret` (and
 `smtp-password` if you use authenticated mail) and set `secrets.existingSecret`. The realm is read only on
 Keycloak's first start: choose `api-admin-secret` before the first install, or apply the realm again with
 `deploy/keycloak/apply.sh` (see [upgrading.md](upgrading.md)).
+
+### Decide: registration
+
+`keycloak.registrationAllowed` has no default; the chart does not install until you set it to `true` or `false` (may people create their own accounts?).
+See docs/admin-guide.md.
+
+### Outgoing traffic
+
+Besides default-deny for incoming traffic, the API and Keycloak may only send to DNS, each other, the database and **public** addresses (https;
+and the mail port for Keycloak). Private ranges, link-local and the cloud metadata address are blocked, so a provider address cannot be used to
+reach your internal services. List anything inside your network they must reach (a mail relay, a directory, an external database, an identity
+provider on a private network) in `networkPolicy.egressAllowCidrs`; `networkPolicy.restrictEgress=false` turns it off.
+
+### The sign-in host
+
+The ingress publishes only `/realms/zeima` and `/resources` on the sign-in host (`idUrl`): not Keycloak's administration console or the master
+realm. Reach the console with `kubectl port-forward -n <ns> svc/<release>-keycloak 8080:8080`, or set `exposeKeycloakAdmin=true` (behind a VPN or an
+IP allowlist). `keycloak.verifyEmail` is on by default, so the install needs `smtp.host`; the API's `trustProxy` is `1`, which is right for
+one ingress controller.
 
 ### Your own database
 

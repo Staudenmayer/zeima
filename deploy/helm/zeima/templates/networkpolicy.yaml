@@ -1,0 +1,172 @@
+{{- if .Values.networkPolicy.enabled }}
+# Nothing reaches a pod of this release unless a rule below says so. (Needs a network plugin that enforces
+# NetworkPolicy. Outgoing traffic is not restricted: Keycloak calls identity providers, mail and directory servers,
+# and the API calls Keycloak and the identity providers of organizations.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: zeima
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-api
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}-api
+  policyTypes: [Ingress]
+  ingress:
+    # The ingress controller (and anything that goes through it).
+    - from: {{- toYaml .Values.networkPolicy.ingressFrom | nindent 8 }}
+      ports:
+        - { port: 3000, protocol: TCP }
+    # Keycloak's events and the metrics: only Keycloak (and nothing through the ingress).
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Release.Name }}-keycloak
+      ports:
+        - { port: 3001, protocol: TCP }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-keycloak
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}-keycloak
+  policyTypes: [Ingress]
+  ingress:
+    # The ingress controller, and the API (which reads the realm's keys and manages organizations).
+    - from: {{- toYaml .Values.networkPolicy.ingressFrom | nindent 8 }}
+      ports:
+        - { port: 8080, protocol: TCP }
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Release.Name }}-api
+      ports:
+        - { port: 8080, protocol: TCP }
+{{- if .Values.postgres.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-postgres
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}-postgres
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Release.Name }}-api
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Release.Name }}-keycloak
+      ports:
+        - { port: 5432, protocol: TCP }
+{{- end }}
+{{- if .Values.networkPolicy.restrictEgress }}
+{{- $dns := `- to:
+    - namespaceSelector: {}
+  ports:
+    - { port: 53, protocol: UDP }
+    - { port: 53, protocol: TCP }` }}
+{{- $internet := `ipBlock:
+    cidr: 0.0.0.0/0
+    except: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10", "127.0.0.0/8"]` }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-api-egress
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}-api
+  policyTypes: [Egress]
+  egress:
+    {{- $dns | nindent 4 }}
+    # Keycloak (the realm's keys, organization management) and the database.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Release.Name }}-keycloak
+      ports:
+        - { port: 8080, protocol: TCP }
+    {{- if .Values.postgres.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Release.Name }}-postgres
+      ports:
+        - { port: 5432, protocol: TCP }
+    {{- end }}
+    # Public https only: the metadata of an organization's identity provider.
+    - to:
+        - {{- $internet | nindent 10 }}
+      ports:
+        - { port: 443, protocol: TCP }
+    {{- with .Values.networkPolicy.egressAllowCidrs }}
+    - to:
+        {{- range . }}
+        - ipBlock: { cidr: {{ . | quote }} }
+        {{- end }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-keycloak-egress
+  labels: {{- include "zeima.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}-keycloak
+  policyTypes: [Egress]
+  egress:
+    {{- $dns | nindent 4 }}
+    # The API (events) and the database.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Release.Name }}-api
+      ports:
+        - { port: 3001, protocol: TCP }
+    {{- if .Values.postgres.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ .Release.Name }}-postgres
+      ports:
+        - { port: 5432, protocol: TCP }
+    {{- end }}
+    # Public addresses: identity providers (https) and the mail server.
+    - to:
+        - {{- $internet | nindent 10 }}
+      ports:
+        - { port: 443, protocol: TCP }
+        - { port: {{ .Values.smtp.port }}, protocol: TCP }
+    {{- with .Values.networkPolicy.egressAllowCidrs }}
+    - to:
+        {{- range . }}
+        - ipBlock: { cidr: {{ . | quote }} }
+        {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}

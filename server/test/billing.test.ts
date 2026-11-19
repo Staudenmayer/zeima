@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { ConfigError, loadConfig } from '../src/config.ts'
-import { checkoutUrl, parseEvent, signatureValid, uuidFor } from '../src/modules/billing/lemonsqueezy.ts'
+import { checkoutToken, checkoutUrl, parseEvent, signatureValid, uuidFor } from '../src/modules/billing/lemonsqueezy.ts'
 import { keys, token } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
 
@@ -17,7 +17,7 @@ const DAY = 86_400_000
 const now = Date.parse('2026-11-13T12:00:00Z')
 const iso = (ms: number) => new Date(ms).toISOString()
 
-function event(name: string, attributes: Record<string, unknown> = {}, custom: Record<string, unknown> = { user_id: ADA }, id = '9001') {
+function event(name: string, attributes: Record<string, unknown> = {}, custom: Record<string, unknown> = { user_id: ADA, token: checkoutToken(SECRET, ADA, null) }, id = '9001') {
   return {
     meta: { event_name: name, custom_data: custom },
     data: {
@@ -50,33 +50,33 @@ describe('Lemon Squeezy events', () => {
   })
 
   it('maps an active subscription to its plan, paid until renewal plus a few days', () => {
-    const r = parseEvent(event('subscription_created'), PLANS, now)
+    const r = parseEvent(event('subscription_created'), PLANS, now, SECRET)
     expect(r.ok && r.update).toMatchObject({ userId: ADA, orgId: null, plan: 'pro', validUntil: now + 33 * DAY })
     expect(r.ok && r.update.billing.portalUrl).toBe('https://store.example/portal/abc')
   })
 
   it('keeps a cancelled subscription until its period ends', () => {
-    const r = parseEvent(event('subscription_cancelled', { status: 'cancelled', ends_at: iso(now + 10 * DAY) }), PLANS, now)
+    const r = parseEvent(event('subscription_cancelled', { status: 'cancelled', ends_at: iso(now + 10 * DAY) }), PLANS, now, SECRET)
     expect(r.ok && r.update.validUntil).toBe(now + 10 * DAY)
   })
 
   it('ends an expired, paused or unpaid subscription at once', () => {
     for (const [name, status] of [['subscription_expired', 'expired'], ['subscription_updated', 'paused'], ['subscription_updated', 'unpaid']] as const) {
-      const r = parseEvent(event(name, { status, ends_at: null }), PLANS, now)
+      const r = parseEvent(event(name, { status, ends_at: null }), PLANS, now, SECRET)
       expect(r.ok && r.update.validUntil).toBeLessThanOrEqual(now)
     }
   })
 
   it('assigns organization purchases to the organization', () => {
-    const r = parseEvent(event('subscription_created', { variant_id: 222 }, { user_id: ADA, org_id: ORG }), PLANS, now)
+    const r = parseEvent(event('subscription_created', { variant_id: 222 }, { user_id: ADA, org_id: ORG, token: checkoutToken(SECRET, ADA, ORG) }), PLANS, now, SECRET)
     expect(r.ok && r.update).toMatchObject({ userId: null, orgId: ORG, plan: 'team' })
   })
 
   it('refuses what it cannot place', () => {
-    expect(parseEvent(event('order_created'), PLANS, now)).toMatchObject({ ok: false })
-    expect(parseEvent(event('subscription_created', { variant_id: 999 }), PLANS, now)).toMatchObject({ ok: false, reason: 'unknown variant 999' })
-    expect(parseEvent(event('subscription_created', {}, {}), PLANS, now)).toMatchObject({ ok: false })
-    expect(parseEvent(null, PLANS, now)).toMatchObject({ ok: false })
+    expect(parseEvent(event('order_created'), PLANS, now, SECRET)).toMatchObject({ ok: false })
+    expect(parseEvent(event('subscription_created', { variant_id: 999 }), PLANS, now, SECRET)).toMatchObject({ ok: false, reason: 'unknown variant 999' })
+    expect(parseEvent(event('subscription_created', {}, {}), PLANS, now, SECRET)).toMatchObject({ ok: false })
+    expect(parseEvent(null, PLANS, now, SECRET)).toMatchObject({ ok: false })
   })
 
   it('gives a subscription one stable id', () => {
@@ -85,8 +85,23 @@ describe('Lemon Squeezy events', () => {
     expect(uuidFor('9001')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
   })
 
+  it('refuses a purchase whose metadata the buyer edited', () => {
+    const signed = { user_id: ADA, org_id: ORG, token: checkoutToken(SECRET, ADA, ORG) }
+    expect(parseEvent(event('subscription_created', {}, signed), PLANS, now, SECRET)).toMatchObject({ ok: true })
+    // Another organization's id in the link the buyer opened.
+    const other = '00000000-0000-4000-8000-000000000999'
+    expect(parseEvent(event('subscription_created', {}, { ...signed, org_id: other }), PLANS, now, SECRET)).toMatchObject({ ok: false, reason: expect.stringContaining('not signed') })
+    // Another user's id.
+    expect(parseEvent(event('subscription_created', {}, { ...signed, user_id: '2c8f1f5e-0000-4000-8000-000000000002' }), PLANS, now, SECRET)).toMatchObject({ ok: false })
+    // The organization dropped, or no token, or a token from another server.
+    expect(parseEvent(event('subscription_created', {}, { user_id: ADA, token: signed.token }), PLANS, now, SECRET)).toMatchObject({ ok: false })
+    expect(parseEvent(event('subscription_created', {}, { user_id: ADA, org_id: ORG }), PLANS, now, SECRET)).toMatchObject({ ok: false })
+    expect(parseEvent(event('subscription_created', {}, { ...signed, token: checkoutToken('another-secret', ADA, ORG) }), PLANS, now, SECRET)).toMatchObject({ ok: false })
+    expect(parseEvent(event('subscription_created', {}, { org_id: ORG, token: signed.token }), PLANS, now, SECRET)).toMatchObject({ ok: false })
+  })
+
   it('puts the buyer into the checkout link', () => {
-    const url = new URL(checkoutUrl('https://store.example', PLANS[0]!, { userId: ADA, email: 'ada@example.com' }))
+    const url = new URL(checkoutUrl('https://store.example', PLANS[0]!, { userId: ADA, email: 'ada@example.com' }, SECRET))
     expect(url.pathname).toBe(`/checkout/buy/${PLANS[0]!.checkoutId}`)
     expect(url.searchParams.get('checkout[custom][user_id]')).toBe(ADA)
     expect(url.searchParams.get('checkout[email]')).toBe('ada@example.com')

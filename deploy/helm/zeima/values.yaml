@@ -16,6 +16,9 @@ api:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { memory: 512Mi }
   docsEnabled: false
+  # How many proxies are in front of the API (the ingress controller: 1). A number, or a list of proxy
+  # addresses/CIDRs. Not `true`: that believes any X-Forwarded-For, so a caller could pick their own address.
+  trustProxy: "1"
   # Prometheus metrics at /metrics. The ingress routes everything to the API, so leave this off unless
   # your ingress blocks /metrics or you scrape from inside the cluster only.
   metricsEnabled: false
@@ -34,8 +37,14 @@ keycloak:
   resources:
     requests: { cpu: 250m, memory: 768Mi }
     limits: { memory: 1536Mi }
-  # Keycloak stops the sign-in for everyone if this is wrong: keep verifyEmail on once mail works.
-  verifyEmail: false
+  # People must confirm their email address before they can sign in. Keep it on: without it anyone can register any
+  # address (a colleague's, before the colleague does). It needs working mail: set smtp.host. To run without mail,
+  # switch it off knowingly.
+  verifyEmail: true
+  # REQUIRED: set it to true or false. May people create their own accounts on the sign-in page? `true` for a service open
+  # to the public; `false` for a private installation whose people come in through single sign-on, a directory, SCIM or an
+  # administrator. The chart does not install until you decide.
+  registrationAllowed: null
 
 smtp:
   host: ""
@@ -50,7 +59,7 @@ smtp:
 # back it up) or use yours: create two databases and users, one for the API and one for Keycloak.
 postgres:
   enabled: true
-  image: { repository: docker.io/library/postgres, tag: "17" }
+  image: { repository: docker.io/library/postgres, tag: "17@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac" }
   persistence:
     size: 10Gi
     storageClassName: ""
@@ -69,6 +78,7 @@ secrets:
   existingSecret: ""
   postgresPassword: ""        # the API's database user (and the bundled PostgreSQL's)
   keycloakDbPassword: ""
+  appDbPassword: ""          # the restricted database login requests are served through (letters, digits, _ . ~ -)
   keycloakAdminPassword: ""   # Keycloak's `admin` user
   apiAdminSecret: ""          # the API's service account in Keycloak
   webhookSecret: ""           # signs Keycloak's calls to the API
@@ -95,6 +105,24 @@ addonRegistry:
 jurisdictions:
   existingConfigMap: ""
   files: {}
+
+# Which pods may talk to which (needs a network plugin that enforces NetworkPolicy). Default: only the ingress
+# controller reaches the API and Keycloak, the database only the API and Keycloak, and Keycloak's events port only
+# Keycloak. `ingressFrom` says where the ingress controller runs: any namespace by default; narrow it to its own.
+networkPolicy:
+  enabled: true
+  # Outgoing traffic of the API and Keycloak: only DNS, each other, the database, and PUBLIC addresses (identity providers, mail).
+  # Private ranges, the link-local range and the cloud metadata address are blocked, so a provider address (or a name that
+  # changes its DNS answer) cannot be used to reach your internal services. Anything inside your network that they must reach
+  # (a mail relay, a directory server, an external database, a provider on a private network) goes in `egressAllowCidrs`.
+  restrictEgress: true
+  egressAllowCidrs: []   # e.g. ["10.20.30.0/24"]
+  ingressFrom:
+    - namespaceSelector: {}
+
+# Show Keycloak's administration console and the master realm on the public sign-in host. Off: the ingress passes only
+# what browsers and apps need (/realms/zeima, /resources). Leave it off and reach the console with `kubectl port-forward`.
+exposeKeycloakAdmin: false
 
 nodeSelector: {}
 tolerations: []

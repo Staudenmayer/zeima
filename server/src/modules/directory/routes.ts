@@ -62,6 +62,22 @@ export function checkFilter(filter: string | undefined): void {
   if (!filter.startsWith('(') || !filter.endsWith(')') || depth !== 0) throw new HttpProblem(400, 'bad_request', 'the filter must be in parentheses, like (memberOf=cn=zeima,ou=groups,dc=acme,dc=example)')
 }
 
+/** Keycloak refused a user-federation call: the service account has no `manage-realm`, which the rest of Zeima does not need. */
+async function withRole<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work()
+  } catch (err) {
+    if (err instanceof HttpProblem && err.code === 'keycloak_forbidden') {
+      throw new HttpProblem(
+        409,
+        'directory_needs_role',
+        'the API\'s service account may not change the realm\'s user federation. For the company directory, give it the realm-management role manage-realm in Keycloak (Clients → zeima-api-admin → Service account roles), and take the role away again when you are done (docs/keycloak.md).',
+      )
+    }
+    throw err
+  }
+}
+
 export const directoryRoutes: FastifyPluginAsyncTypebox = async (app) => {
   const kc = () => {
     if (!app.keycloakAdmin) throw new HttpProblem(503, 'unavailable', 'organization management is not set up')
@@ -87,10 +103,10 @@ export const directoryRoutes: FastifyPluginAsyncTypebox = async (app) => {
 
   app.get(
     '/admin/ldap',
-    { schema: { tags: ['directory'], summary: 'The directory people can sign in with', security: SECURITY, response: { 200: LdapView, ...problems(401, 403, 502, 503) } } },
+    { schema: { tags: ['directory'], summary: 'The directory people can sign in with', security: SECURITY, response: { 200: LdapView, ...problems(401, 403, 409, 502, 503) } } },
     async (request) => {
       requireAdmin(request.user!.roles)
-      const ldap = await kc().getLdap()
+      const ldap = await withRole(() => kc().getLdap())
       return ldap ? { configured: true, ...ldap } : { configured: false, enabled: false }
     },
   )
@@ -104,18 +120,20 @@ export const directoryRoutes: FastifyPluginAsyncTypebox = async (app) => {
         description: 'Keycloak checks the connection first; nothing is saved when it fails. People are imported when they first sign in and then every day.',
         security: SECURITY,
         body: LdapBody,
-        response: { 200: LdapView, ...problems(400, 401, 403, 502, 503) },
+        response: { 200: LdapView, ...problems(400, 401, 403, 409, 502, 503) },
       },
     },
     async (request) => {
       requireAdmin(request.user!.roles)
       const ldap = input(request.body)
       const keycloak = kc()
-      if (!(await keycloak.getLdap()) && !ldap.bindPassword) throw new HttpProblem(400, 'bad_request', 'the password of the bind account is required')
-      await keycloak.testLdap(ldap)
-      await keycloak.setLdap(ldap)
-      request.log.info({ actor: request.user!.id, url: ldap.url }, 'directory set up')
-      return { configured: true, ...(await keycloak.getLdap())! }
+      return withRole(async () => {
+        if (!(await keycloak.getLdap()) && !ldap.bindPassword) throw new HttpProblem(400, 'bad_request', 'the password of the bind account is required')
+        await keycloak.testLdap(ldap)
+        await keycloak.setLdap(ldap)
+        request.log.info({ actor: request.user!.id, url: ldap.url }, 'directory set up')
+        return { configured: true as const, ...(await keycloak.getLdap())! }
+      })
     },
   )
 
@@ -127,12 +145,12 @@ export const directoryRoutes: FastifyPluginAsyncTypebox = async (app) => {
         summary: 'Checks that Keycloak can sign in to the directory with these settings',
         security: SECURITY,
         body: LdapBody,
-        response: { 204: Type.Null(), ...problems(400, 401, 403, 502, 503) },
+        response: { 204: Type.Null(), ...problems(400, 401, 403, 409, 502, 503) },
       },
     },
     async (request, reply) => {
       requireAdmin(request.user!.roles)
-      await kc().testLdap(input(request.body))
+      await withRole(() => kc().testLdap(input(request.body)))
       return reply.code(204).send(null)
     },
   )
@@ -144,21 +162,21 @@ export const directoryRoutes: FastifyPluginAsyncTypebox = async (app) => {
         tags: ['directory'],
         summary: 'Imports the directory\'s people now',
         security: SECURITY,
-        response: { 200: Type.Object({ added: Type.Integer(), updated: Type.Integer(), removed: Type.Integer(), failed: Type.Integer() }), ...problems(401, 403, 404, 502, 503) },
+        response: { 200: Type.Object({ added: Type.Integer(), updated: Type.Integer(), removed: Type.Integer(), failed: Type.Integer() }), ...problems(401, 403, 404, 409, 502, 503) },
       },
     },
     async (request) => {
       requireAdmin(request.user!.roles)
-      return kc().syncLdap()
+      return withRole(() => kc().syncLdap())
     },
   )
 
   app.delete(
     '/admin/ldap',
-    { schema: { tags: ['directory'], summary: 'Removes the directory; imported accounts stay but can no longer sign in with the directory\'s password', security: SECURITY, response: { 204: Type.Null(), ...problems(401, 403, 502, 503) } } },
+    { schema: { tags: ['directory'], summary: 'Removes the directory; imported accounts stay but can no longer sign in with the directory\'s password', security: SECURITY, response: { 204: Type.Null(), ...problems(401, 403, 409, 502, 503) } } },
     async (request, reply) => {
       requireAdmin(request.user!.roles)
-      await kc().deleteLdap()
+      await withRole(() => kc().deleteLdap())
       return reply.code(204).send(null)
     },
   )

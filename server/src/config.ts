@@ -8,7 +8,8 @@ const LogLevel = Type.Union(['fatal', 'error', 'warn', 'info', 'debug', 'trace',
 
 export const EnvSchema = Type.Object({
   NODE_ENV: Type.Union([Type.Literal('development'), Type.Literal('production'), Type.Literal('test')], {
-    default: 'development',
+    // Production unless said otherwise: a deployment that forgets the setting must not trust development keys.
+    default: 'production',
   }),
   HOST: Type.String({ default: '0.0.0.0' }),
   PORT: Type.Integer({ minimum: 1, maximum: 65535, default: 3000 }),
@@ -16,7 +17,19 @@ export const EnvSchema = Type.Object({
   PUBLIC_URL: Type.String({ format: 'uri', default: 'http://localhost:3000' }),
   LOG_LEVEL: { ...LogLevel, default: 'info' },
   /** Behind a reverse proxy (Caddy, ingress): trust its X-Forwarded-* headers. */
-  TRUST_PROXY: Type.Boolean({ default: false }),
+  /**
+   * Password for the restricted database login `zeima_app` (16+ letters, digits and `_ . ~ -`). Set, the API sets that login
+   * up and runs requests through it (not through the owner's connection): see docs/admin-guide.md. Without it
+   * requests step down from the owner's session with `SET ROLE`, which is weaker.
+   */
+  APP_DATABASE_PASSWORD: Type.Optional(Type.String({ pattern: '^[A-Za-z0-9_.~-]{16,128}$' })),
+  /**
+   * A second port for what only the installation calls: Keycloak's events (`/v1/internal/*`) and `/metrics`. Set, those
+   * paths are served there only and are 404 on PORT, so a proxy that forwards everything cannot publish them.
+   * Keep it off the proxy and off the internet.
+   */
+  INTERNAL_PORT: Type.Optional(Type.Integer({ minimum: 1, maximum: 65535 })),
+  TRUST_PROXY: Type.String({ default: 'false' }),
   /** `cloud` enables billing and sign-up modules; self-hosted installs keep the default. */
   DEPLOYMENT_MODE: Type.Union([Type.Literal('cloud'), Type.Literal('self_hosted')], { default: 'self_hosted' }),
 
@@ -48,10 +61,13 @@ export const EnvSchema = Type.Object({
   SSO_ALLOW_PRIVATE_URLS: Type.Boolean({ default: false }),
   /**
    * Makes an organization prove it owns the email domains it signs people in for (a TXT record
-   * `_zeima-challenge.<domain>`). On by default in the cloud, where organizations do not know each
-   * other; off by default on a self-hosted server, whose administrators are trusted.
+   * `_zeima-challenge.<domain>`). On by default everywhere: without it any organization admin could claim
+   * another organization's domain and redirect, add or (through SCIM) disable that organization's people.
+   * An installation of one company, which trusts all its administrators, can switch it off.
    */
-  SSO_VERIFY_DOMAINS: Type.Optional(Type.Boolean()),
+  SSO_VERIFY_DOMAINS: Type.Boolean({ default: true }),
+  /** Secret the domain-proof value is derived from. Default: KEYCLOAK_ADMIN_CLIENT_SECRET (a value only the API has). */
+  SSO_CHALLENGE_SECRET: Type.Optional(Type.String({ minLength: 16 })),
   /** Hours between checks of the member and department mirror against Keycloak; 0 turns the check off. */
   RECONCILE_INTERVAL_HOURS: Type.Integer({ minimum: 0, maximum: 720, default: 24 }),
 
@@ -63,8 +79,8 @@ export const EnvSchema = Type.Object({
   /** A folder of extra country profiles (`<ID>.toml`, docs/country-profiles.md) the apps download. */
   JURISDICTIONS_DIR: Type.Optional(Type.String({ minLength: 1 })),
 
-  DOCS_ENABLED: Type.Boolean({ default: true }),
-  METRICS_ENABLED: Type.Boolean({ default: true }),
+  DOCS_ENABLED: Type.Boolean({ default: false }),
+  METRICS_ENABLED: Type.Boolean({ default: false }),
   /** Browser origins allowed by CORS, comma-separated (the desktop app needs none). */
   CORS_ORIGINS: Type.String({ default: '' }),
   RATE_LIMIT_PER_MINUTE: Type.Integer({ minimum: 1, default: 300 }),
@@ -93,7 +109,9 @@ export interface Config {
   port: number
   publicUrl: string
   logLevel: string
-  trustProxy: boolean
+  trustProxy: boolean | number | string[]
+  internalPort: number | null
+  appDatabasePassword: string | null
   deploymentMode: Env['DEPLOYMENT_MODE']
   databaseUrl: string
   keycloak: {
@@ -109,7 +127,7 @@ export interface Config {
   }
   audience: string
   keycloakWebhookSecret: string | null
-  sso: { allowPrivateUrls: boolean; verifyDomains: boolean }
+  sso: { allowPrivateUrls: boolean; verifyDomains: boolean; challengeSecret: string | null }
   reconcileIntervalHours: number
   addonRegistryDir: string | null
   jurisdictionsDir: string | null
@@ -172,6 +190,21 @@ function billingPlans(json: string, problems: string[]): Config['billing']['plan
 }
 
 /** Reads and checks the configuration; throws `ConfigError` listing every problem. */
+/**
+ * `TRUST_PROXY`: `false` (no proxy), a number (how many proxies are in front: `1` for Caddy or one ingress),
+ * a list of addresses or CIDR ranges of the proxies, or `true` (trust everything: a caller can then name their own
+ * address in `X-Forwarded-For` and escape the rate limit; only for development).
+ */
+export function parseTrustProxy(raw: string): boolean | number | string[] {
+  const value = raw.trim().toLowerCase()
+  if (value === '' || value === 'false' || value === '0') return false
+  if (value === 'true') return true
+  if (/^\d+$/.test(value)) return Number(value)
+  const list = raw.split(',').map((p) => p.trim()).filter(Boolean)
+  if (list.every((p) => /^[0-9a-fA-F:.]+(\/\d{1,3})?$/.test(p) || ['loopback', 'linklocal', 'uniquelocal'].includes(p))) return list
+  throw new ConfigError(['TRUST_PROXY: use false, a number of proxies, or a list of addresses or CIDR ranges'])
+}
+
 export function loadConfig(source: Record<string, string | undefined> = process.env): Config {
   // Only our keys; empty values count as unset.
   const raw: Record<string, unknown> = {}
@@ -201,7 +234,9 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     port: env.PORT,
     publicUrl: env.PUBLIC_URL.replace(/\/+$/, ''),
     logLevel: env.LOG_LEVEL,
-    trustProxy: env.TRUST_PROXY,
+    trustProxy: parseTrustProxy(env.TRUST_PROXY),
+    internalPort: env.INTERNAL_PORT ?? null,
+    appDatabasePassword: env.APP_DATABASE_PASSWORD ?? null,
     deploymentMode: env.DEPLOYMENT_MODE,
     databaseUrl: env.DATABASE_URL,
     keycloak: {
@@ -222,7 +257,7 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     },
     audience: env.API_AUDIENCE,
     keycloakWebhookSecret: env.KEYCLOAK_WEBHOOK_SECRET ?? null,
-    sso: { allowPrivateUrls: env.SSO_ALLOW_PRIVATE_URLS, verifyDomains: env.SSO_VERIFY_DOMAINS ?? env.DEPLOYMENT_MODE === 'cloud' },
+    sso: { allowPrivateUrls: env.SSO_ALLOW_PRIVATE_URLS, verifyDomains: env.SSO_VERIFY_DOMAINS, challengeSecret: env.SSO_CHALLENGE_SECRET ?? null },
     reconcileIntervalHours: env.RECONCILE_INTERVAL_HOURS,
     addonRegistryDir: env.ADDON_REGISTRY_DIR ?? null,
     jurisdictionsDir: env.JURISDICTIONS_DIR ?? null,

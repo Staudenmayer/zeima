@@ -7,7 +7,7 @@
   "emailTheme": "zeima",
   "sslRequired": "${ZEIMA_SSL_REQUIRED:external}",
 
-  "registrationAllowed": true,
+  "registrationAllowed": "${ZEIMA_REGISTRATION_ALLOWED:true}",
   "registrationEmailAsUsername": true,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -224,7 +224,7 @@
       "enabled": true,
       "serviceAccountClientId": "zeima-api-admin",
       "clientRoles": {
-        "realm-management": ["manage-users", "view-users", "query-users", "query-groups", "manage-organizations", "view-organizations", "manage-identity-providers", "view-identity-providers", "manage-realm", "view-realm"]
+        "realm-management": ["manage-users", "view-users", "query-users", "query-groups", "manage-organizations", "view-organizations", "manage-identity-providers", "view-identity-providers"]
       }
     }
   ]

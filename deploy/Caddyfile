@@ -9,5 +9,14 @@
 }
 
 id.{$DOMAIN} {
-	reverse_proxy keycloak:8080
+	# Only what people's browsers and apps need of the sign-in service: the realm's pages and endpoints and their
+	# static files. Keycloak's admin console and the master realm (the bootstrap administrator's login) are NOT
+	# published; reach them from inside the network (docs/admin-guide.md, "Keycloak's admin console").
+	@signin path /realms/zeima /realms/zeima/* /resources/* /robots.txt
+	handle @signin {
+		reverse_proxy keycloak:8080
+	}
+	handle {
+		respond 404
+	}
 }

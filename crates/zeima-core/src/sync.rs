@@ -86,6 +86,8 @@ pub enum Reason {
     PolicyTags,
     /// Another meeting has the room at that time.
     RoomTaken,
+    /// The change is stamped with a time well ahead of the server's: this device's clock is wrong.
+    ClockAhead,
 }
 
 impl Reason {
@@ -100,6 +102,7 @@ impl Reason {
             Reason::PolicyProject => "The organization's rules ask for a project on every entry.",
             Reason::PolicyTags => "The organization's rules ask for tags on every entry.",
             Reason::RoomTaken => "The room is booked at that time. Pick another room or time.",
+            Reason::ClockAhead => "This device's clock is ahead of the server's. Correct the date and time, then change it again.",
         }
     }
 }

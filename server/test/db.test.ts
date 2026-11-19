@@ -6,7 +6,7 @@ import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { testApp } from './helpers.ts'
-import { connect, type Db, migrateDb, schema, withUser } from '../src/db/index.ts'
+import { connect, type Db, enableTenantLogin, migrateDb, schema, tenantUrlFor, withUser } from '../src/db/index.ts'
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? 'postgres://zeima:zeima@localhost:5432/postgres'
 const NAME = `zeima_test_${process.pid}_${Date.now()}`
@@ -66,7 +66,6 @@ describe.skipIf(!reachable)('row-level security', () => {
   afterAll(async () => {
     await close?.()
     await admin.unsafe(`drop database if exists ${NAME} with (force)`).catch(() => {})
-    await admin.end()
   })
 
   /** Drizzle wraps driver errors; the Postgres message is in `cause`. */
@@ -152,5 +151,60 @@ async function denied(p: Promise<unknown>, re: RegExp) {
     expect(down.statusCode).toBe(503)
     expect(down.json().checks.database).toBe('error')
     await app.close()
+  })
+})
+
+describe.skipIf(!reachable)('requests through a restricted login', () => {
+  const NAME2 = `zeima_test_tenant_${process.pid}_${Date.now()}`
+  const PASSWORD = 'a-test-password-for-zeima_app'
+  let owner: ReturnType<typeof connect>
+
+  beforeAll(async () => {
+    await admin.unsafe(`create database ${NAME2}`)
+    const url = new URL(ADMIN_URL)
+    url.pathname = `/${NAME2}`
+    const ownerOnly = connect(url.toString(), { onnotice: () => {} })
+    await migrateDb(ownerOnly.db)
+    await enableTenantLogin(ownerOnly.db, PASSWORD)
+    await ownerOnly.client.end()
+    owner = connect(url.toString(), { onnotice: () => {} }, tenantUrlFor(url.toString(), PASSWORD))
+    await owner.db.insert(schema.kcUser).values([{ id: ADA, email: 'ada@example.com' }, { id: BOB, email: 'bob@example.com' }])
+    await owner.db.insert(schema.workspace).values([
+      { id: WS_ADA, kind: 'personal', ownerId: ADA, name: 'Ada', ...row },
+      { id: WS_B, kind: 'personal', ownerId: BOB, name: 'Bob', ...row },
+    ])
+  })
+  afterAll(async () => {
+    await owner?.tenantClient?.end()
+    await owner?.client.end()
+    await admin.unsafe(`drop database if exists ${NAME2} with (force)`).catch(() => {})
+    await admin.end()
+  })
+
+  it('runs as the restricted role, which is no superuser and has no way back to the owner', async () => {
+    await withUser(owner.db, { userId: ADA, orgIds: [] }, async (tx) => {
+      const [me] = (await tx.execute(sql`select current_user as u, (select rolsuper from pg_roles where rolname = current_user) as su, (select rolbypassrls from pg_roles where rolname = current_user) as bypass`)) as unknown as { u: string; su: boolean; bypass: boolean }[]
+      expect(me).toEqual({ u: 'zeima_app', su: false, bypass: false })
+    })
+    // The session cannot become the owner (what a stolen statement in `withUser` could otherwise do).
+    await expect(
+      withUser(owner.db, { userId: ADA, orgIds: [] }, async (tx) => {
+        await tx.execute(sql`reset role`)
+        await tx.execute(sql`set role zeima`)
+        return tx.select().from(schema.workspace)
+      }),
+    ).rejects.toThrow()
+  })
+
+  it('still shows each person only their own rows', async () => {
+    const mine = await withUser(owner.db, { userId: ADA, orgIds: [] }, (tx) => tx.select().from(schema.workspace))
+    expect(mine.map((w) => w.id)).toEqual([WS_ADA])
+    const bobs = await withUser(owner.db, { userId: BOB, orgIds: [] }, (tx) => tx.select().from(schema.workspace))
+    expect(bobs.map((w) => w.id)).toEqual([WS_B])
+  })
+
+  it('refuses a password that could break out of the statement', async () => {
+    await expect(enableTenantLogin(owner.db, "x'; drop table kc_user; --")).rejects.toThrow(/16 to 128/)
+    await expect(enableTenantLogin(owner.db, 'short')).rejects.toThrow()
   })
 })

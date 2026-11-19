@@ -150,6 +150,19 @@ export function requireSeat(limit: number | null, usage: { members: number; pend
   }
 }
 
+/**
+ * Runs `work` while holding the organization's owner lock. "An organization keeps at least one owner" is a check
+ * of the count followed by a change; two owners demoting each other at the same instant would both see two owners
+ * and leave none. Changes to who owns an organization take this lock (released at the end of the transaction), so
+ * the second one sees the first one's result.
+ */
+export async function withOwnerLock<T>(db: Db, orgId: string, work: (tx: Db) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`owners:${orgId}`}))`)
+    return work(tx as unknown as Db)
+  })
+}
+
 export async function ownerCount(db: Db, orgId: string): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })

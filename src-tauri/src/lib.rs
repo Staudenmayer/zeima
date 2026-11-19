@@ -27,6 +27,7 @@ mod settings;
 mod shortcuts;
 mod state;
 mod sync;
+mod trust;
 mod tray;
 mod updates;
 mod windows;
@@ -257,7 +258,7 @@ pub fn run() {
             builder.mount_events(app);
 
             let data_dir = instance::data_dir(app.handle())?;
-            std::fs::create_dir_all(&data_dir)?;
+            zeima_core::fsperm::private_dir(&data_dir)?;
             let core = tauri::async_runtime::block_on(Core::open(
                 &data_dir.join("zeima.db"),
                 Arc::new(SystemClock),

@@ -28,7 +28,7 @@ tar xzf zeima-airgap-2.0.0.tar.gz && cd zeima-airgap-2.0.0
 $EDITOR deploy/.env     # DOMAIN, PUBLIC_URL, ID_URL, the four passwords (docs: deploy/.env.example)
 ```
 
-Caddy cannot get a certificate from Let's Encrypt, so give it yours: one certificate for `DOMAIN` and `id.DOMAIN` (or a
+Caddy cannot get a certificate from Let's Encrypt, so give it yours (the sign-in host publishes only the realm, as in the normal setup): one certificate for `DOMAIN` and `id.DOMAIN` (or a
 wildcard), with the chain, as `deploy/certs/zeima.crt` and `deploy/certs/zeima.key`. Use your company CA, and make sure
 the people's machines trust it (the app uses the system's trust store). Then:
 

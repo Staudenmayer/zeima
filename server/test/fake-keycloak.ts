@@ -1,6 +1,7 @@
 // A Keycloak admin client that only records what it was asked to do.
 
 import { randomUUID } from 'node:crypto'
+import { HttpProblem } from '../src/plugins/errors.ts'
 import type { KcDepartment, KcLdap, KcSso, KcUser, KeycloakAdmin, LdapInput, SsoInput } from '../src/keycloak/admin.ts'
 import type { RoleKey } from '../src/plugins/permissions.ts'
 
@@ -85,7 +86,13 @@ export class FakeKeycloak implements KeycloakAdmin {
     const { clientSecret: _secret, ...sso } = kept
     return sso
   }
-  async setSso(orgId: string, input: SsoInput) {
+  /** What `parseSsoMetadata` hands back; a test sets it to try a provider that names other addresses. */
+  metadata: Record<string, string> = { issuer: 'https://login.acme.example', tokenUrl: 'https://login.acme.example/token', authorizationUrl: 'https://login.acme.example/auth', jwksUrl: 'https://login.acme.example/keys' }
+  async parseSsoMetadata(protocol: string, _document: string) {
+    this.record('parseSsoMetadata', protocol)
+    return this.metadata
+  }
+  async setSso(orgId: string, input: SsoInput, _imported: Record<string, string>) {
     this.record('setSso', orgId, input.protocol, input.domains.join(','))
     const before = this.sso.get(orgId)
     this.sso.set(orgId, {
@@ -111,8 +118,8 @@ export class FakeKeycloak implements KeycloakAdmin {
   async findUserByEmail(email: string) {
     return [...this.users.values()].find((u) => u.email?.toLowerCase() === email.toLowerCase()) ?? null
   }
-  async createUser(input: { email: string; firstName: string; lastName: string; enabled: boolean }) {
-    this.record('createUser', input.email)
+  async createUser(input: { email: string; firstName: string; lastName: string; enabled: boolean; emailVerified: boolean }) {
+    this.record('createUser', input.email, input.emailVerified ? 'verified' : 'unverified')
     const id = randomUUID()
     this.users.set(id, { id, email: input.email, name: `${input.firstName} ${input.lastName}`.trim() || null, enabled: input.enabled })
     return id
@@ -124,7 +131,10 @@ export class FakeKeycloak implements KeycloakAdmin {
   }
 
   ldap: (KcLdap & { bindPassword?: string }) | null = null
+  /** Makes the directory calls answer like Keycloak does when the service account lacks `manage-realm`. */
+  forbidLdap = false
   async getLdap() {
+    if (this.forbidLdap) throw new HttpProblem(502, 'keycloak_forbidden', 'Keycloak refused the API\'s service account')
     if (!this.ldap) return null
     const { bindPassword: _p, ...ldap } = this.ldap
     return ldap

@@ -21,6 +21,7 @@ export const discoveryRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = as
   app.get(
     '/.well-known/zeima-server',
     {
+      config: { public: 'the app finds the server here before it can sign in' },
       schema: {
         tags: ['discovery'],
         summary: 'Find the API and the sign-in issuer from the server URL',

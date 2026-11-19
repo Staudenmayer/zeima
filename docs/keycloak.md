@@ -58,8 +58,12 @@ enterprise-plan feature (`sso`).
 
 How it is built (`server/src/modules/orgs/sso.ts`, `server/src/keycloak/admin.ts`):
 
-- The API creates a Keycloak **identity provider** `sso-<orgId>` (OIDC or SAML;
-  Keycloak reads the endpoints and keys from the provider's metadata), hidden from
+- The API creates a Keycloak **identity provider** `sso-<orgId>` (OIDC or SAML).
+  The **API** reads the provider's metadata document (OIDC discovery or SAML
+  metadata) itself, connected to the address it checked (no second DNS answer, no
+  redirects, size and time limits), and hands the document to Keycloak, which only
+  parses it and fetches nothing. Every address the document names (`tokenUrl`,
+  `jwksUrl`, …) must be public as well. The provider is hidden from
   the sign-in page, links it to the Keycloak organization, and ties each email
   domain of the organization to it (domain with `identityProviderAlias` and
   `autoRedirect`). Keycloak's identity-first login does the redirect.
@@ -84,11 +88,15 @@ network and because an organization could otherwise claim someone else's domain:
 - **Addresses**: only public https addresses are accepted (no user name in the
   address, no `localhost`, private networks or names that resolve to them). For
   development, `SSO_ALLOW_PRIVATE_URLS=true` allows others.
-- **Domain proof**: where `SSO_VERIFY_DOMAINS` is on (default in the cloud, off
-  when self-hosted), the organization must publish a TXT record
+- **Domain proof**: `SSO_VERIFY_DOMAINS` is **on by default** everywhere (an
+  installation of one company, whose administrators you all trust, may switch it
+  off): without it any organization could claim another's domain and redirect,
+  invite or, through SCIM, switch off that organization's people. The organization
+  must publish a TXT record
   `_zeima-challenge.<domain>` with the value the API shows for the organization
-  (derived from a secret only the API has), for every domain it signs people in
-  for. The page shows the value.
+  (derived from `SSO_CHALLENGE_SECRET`, or from the Keycloak admin client secret
+  when that is not set; never from a built-in value), for every domain it signs
+  people in for. The page shows the value.
 
 The service account needs the realm roles `manage-identity-providers` and
 `view-identity-providers` (the realm file has them; apply it again, see
@@ -109,11 +117,17 @@ provider the SCIM address (`<PUBLIC_URL>/v1/scim/v2`) and the key as secret toke
 - `/v1/scim/v2/Users` (list with `userName eq "…"`, get, create, replace, patch, delete),
   `ServiceProviderConfig`, `ResourceTypes`, `Schemas`, with a key in `Authorization: Bearer`.
 - Only people whose address is in a domain the organization set up for single sign-on
-  are created or changed; owners are never changed; a person who is already an account
-  of the installation is added to the organization, not duplicated.
+  are created or changed; owners are never changed. With domain proof on (the default)
+  such a domain is one the organization has proven to own.
+- A person whose address **already has an account** is not pulled into the organization:
+  they are invited (an invitation mail, a seat held) and join when they accept; the call
+  answers 409 and says so. Accounts SCIM creates are marked as verified only when the
+  domain was proven.
 - `active: false` disables the account in Keycloak and ends their sessions; the API also
-  refuses their tokens within seconds. Delete takes the person out of the organization
-  (the account stays). The seat limit applies to creating people (409).
+  refuses their tokens within seconds. If the account belongs to another organization as
+  well, it is **not** switched off (that would lock the person out of the other one):
+  they are only taken out of this organization. Delete takes the person out of the
+  organization (the account stays). The seat limit applies to creating people (409).
 
 ## Signing people out
 
@@ -137,7 +151,12 @@ provider `zeima-ldap`: read only, people imported on first sign-in and every day
 the directory's email address trusted (so invitations work). People sign in on the
 Keycloak page with their directory name and password; an owner then invites their
 email address. The service account needs `manage-realm` for this (user federation
-is a realm setting); a cloud installation does not use the routes.
+is a realm setting), which is **not** part of the realm file: it is a broad right (it
+can change the realm's settings), so give it only while you set the directory up
+(Keycloak console → Clients → `zeima-api-admin` → Service account roles → Assign role →
+filter by clients → `manage-realm`) and take it away again afterwards; the directory
+keeps working. Without the role the routes answer `409 directory_needs_role` and say
+what to do. A cloud installation does not use the routes.
 
 ## Organizations: roles, departments and the API's copy
 
@@ -151,7 +170,7 @@ departments are groups, which the access token lists in its `groups` claim:
 
 The API creates and changes all of this through the service account
 `zeima-api-admin` (roles `manage-users`, `view-users`, `query-groups`,
-`manage-organizations`, `view-organizations`, `manage-identity-providers`, `manage-realm` (company directory),
+`manage-organizations`, `view-organizations`, `manage-identity-providers`,
 `view-identity-providers`; set by the realm file), so admins
 never need the Keycloak console. It keeps a copy of members, roles, departments
 and who is in them in its own database, and checks that copy against Keycloak:

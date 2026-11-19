@@ -1,5 +1,11 @@
 {{- $id := required "idUrl is required (https://id.example.com)" .Values.idUrl }}
 {{- $public := required "publicUrl is required (https://zeima.example.com)" .Values.publicUrl }}
+{{- if kindIs "invalid" .Values.keycloak.registrationAllowed }}
+{{- fail "keycloak.registrationAllowed must be set to true or false: may people create their own accounts on the sign-in page? (docs/helm.md)" }}
+{{- end }}
+{{- if and .Values.keycloak.verifyEmail (not .Values.smtp.host) }}
+{{- fail "keycloak.verifyEmail is on but smtp.host is empty: people could not confirm their address. Set smtp.host, or set keycloak.verifyEmail=false knowingly." }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -71,8 +77,9 @@ spec:
             - name: ZEIMA_SMTP_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ include "zeima.secretName" . }}, key: smtp-password, optional: true } }
             - { name: ZEIMA_VERIFY_EMAIL, value: {{ .Values.keycloak.verifyEmail | quote }} }
+            - { name: ZEIMA_REGISTRATION_ALLOWED, value: {{ .Values.keycloak.registrationAllowed | quote }} }
             # The event listener tells the API about changes.
-            - { name: ZEIMA_WEBHOOK_URL, value: {{ printf "http://%s-api:3000/v1/internal/keycloak-events" .Release.Name | quote }} }
+            - { name: ZEIMA_WEBHOOK_URL, value: {{ printf "http://%s-api:3001/v1/internal/keycloak-events" .Release.Name | quote }} }
             - name: ZEIMA_WEBHOOK_SECRET
               valueFrom: { secretKeyRef: { name: {{ include "zeima.secretName" . }}, key: webhook-secret } }
           ports:
@@ -87,6 +94,12 @@ spec:
             periodSeconds: 5
             failureThreshold: 60
           resources: {{- toYaml .Values.keycloak.resources | nindent 12 }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            seccompProfile: { type: RuntimeDefault }
       {{- with .Values.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

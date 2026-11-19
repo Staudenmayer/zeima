@@ -12,7 +12,6 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_opener::OpenerExt;
 use zeima_core::addon::OAuthProvider;
 
 use crate::addons::{Addons, HostServices};
@@ -122,6 +121,8 @@ pub fn discover(server_url: &str) -> Result<(Discovery, OidcConfig), String> {
     if !discovery.api_versions.contains(&API_VERSION) {
         return Err("this server needs a newer version of the app".into());
     }
+    // Sign-in and API addresses come from the server: they must be https and on its own site.
+    crate::trust::check_discovery(server_url, &discovery)?;
     if let Some(minimum) = &discovery.min_client_version {
         if !meets_minimum(env!("CARGO_PKG_VERSION"), minimum) {
             return Err(format!(
@@ -134,6 +135,7 @@ pub fn discover(server_url: &str) -> Result<(Discovery, OidcConfig), String> {
         .map_err(|e| format!("could not reach the sign-in service: {e}"))?;
     let oidc: OidcConfig =
         serde_json::from_str(&body).map_err(|e| format!("sign-in service configuration: {e}"))?;
+    crate::trust::check_oidc(server_url, &discovery.issuer, &oidc)?;
     Ok((discovery, oidc))
 }
 
@@ -356,10 +358,7 @@ pub async fn account_sign_in(
         &services.tokens,
         state.core.now_ms(),
         move |url| {
-            opener
-                .opener()
-                .open_url(url, None::<&str>)
-                .map_err(|e| format!("could not open the browser: {e}"))
+            crate::trust::open_link(&opener, url)
         },
         cancel,
         &pages,

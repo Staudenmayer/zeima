@@ -56,12 +56,31 @@ pub(crate) fn read_files(dir: &Path) -> Vec<(String, String)> {
 /// server's when both have the same id (the person's administrator knows best).
 pub fn load(app: &AppHandle) {
     let Some(dir) = local_dir(app) else { return };
-    let mut files = read_files(&dir.join(CACHE_DIR));
+    // What the server offers may add countries, but not rewrite the law the app ships (hours, breaks, holidays): that
+    // would let a server silently weaken the compliance checks. Replacing a bundled profile takes a file in the
+    // folder on this machine, which the person's administrator controls.
+    let (mut files, refused) = without_replacements(read_files(&dir.join(CACHE_DIR)));
+    for name in refused {
+        eprintln!("country profile of the server ignored: {name} would replace a profile that ships with the app");
+    }
     files.extend(read_files(&dir));
     let problems = jurisdiction::set_extra(&dedup_last_wins(files));
     for p in problems {
         eprintln!("country profile skipped: {p}");
     }
+}
+
+/// Splits off the files whose profile has the id of a bundled one (and the names of those).
+fn without_replacements(files: Vec<(String, String)>) -> (Vec<(String, String)>, Vec<String>) {
+    let mut kept = Vec::new();
+    let mut refused = Vec::new();
+    for (name, src) in files {
+        match jurisdiction::parse(&src) {
+            Ok(def) if jurisdiction::is_bundled(&def.id) => refused.push(name),
+            _ => kept.push((name, src)), // an invalid file is reported when it is loaded
+        }
+    }
+    (kept, refused)
 }
 
 /// When two files claim the same id the later one stays; `set_extra` would report both as a clash.
@@ -146,6 +165,22 @@ mod tests {
         assert!(!is_profile_file("notes.txt"));
         assert!(!is_profile_file(".toml"));
         assert!(!is_profile_file(".hidden.toml"));
+    }
+
+    #[test]
+    fn a_server_cannot_replace_a_profile_that_ships_with_the_app() {
+        let src = |id: &str| {
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../crates/zeima-core/jurisdictions/AT.toml"))
+                .unwrap()
+                .replacen("id = \"AT\"", &format!("id = \"{id}\""), 1)
+        };
+        let (kept, refused) = without_replacements(vec![
+            ("AT.toml".into(), src("AT")),
+            ("LU.toml".into(), src("LU")),
+            ("junk.toml".into(), "not a profile".into()),
+        ]);
+        assert_eq!(refused, vec!["AT.toml".to_string()]);
+        assert_eq!(kept.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), vec!["LU.toml", "junk.toml"]);
     }
 
     #[test]

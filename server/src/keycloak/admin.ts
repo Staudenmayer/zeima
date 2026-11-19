@@ -44,8 +44,10 @@ export interface KeycloakAdmin {
   removeFromGroup(userId: string, groupId: string): Promise<void>
   /** The identity provider (single sign-on) the organization has, if any. */
   getSso(orgId: string): Promise<KcSso | null>
-  /** Sets up (or changes) the organization's identity provider and the email domains that sign in through it. */
-  setSso(orgId: string, input: SsoInput): Promise<void>
+  /** Has Keycloak parse a provider's metadata document (OIDC discovery JSON or SAML XML) into provider settings. Keycloak fetches nothing. */
+  parseSsoMetadata(protocol: SsoProtocol, document: string): Promise<Record<string, string>>
+  /** Sets up (or changes) the organization's identity provider and the email domains that sign in through it; `imported` is what `parseSsoMetadata` returned. */
+  setSso(orgId: string, input: SsoInput, imported: Record<string, string>): Promise<void>
   /** Removes the identity provider and the organization's domains. */
   deleteSso(orgId: string): Promise<void>
   /** Ends every session of the user (their tokens stop working at the next refresh). */
@@ -53,7 +55,7 @@ export interface KeycloakAdmin {
   /** The account with this email address, if there is one. */
   findUserByEmail(email: string): Promise<KcUser | null>
   /** Creates an account for a person an identity provider's directory knows; returns its id. */
-  createUser(input: { email: string; firstName: string; lastName: string; enabled: boolean }): Promise<string>
+  createUser(input: { email: string; firstName: string; lastName: string; enabled: boolean; emailVerified: boolean }): Promise<string>
   /** Changes a person's name. */
   setUserName(userId: string, firstName: string, lastName: string): Promise<void>
   /** The directory (LDAP / Active Directory) people can sign in with, if one is set up. */
@@ -190,10 +192,12 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
   }
 
   /** One call; Keycloak errors become problems (409 stays 409). */
-  private async call(method: string, path: string, init: { json?: unknown; form?: Record<string, string> } = {}): Promise<Response> {
+  private async call(method: string, path: string, init: { json?: unknown; form?: Record<string, string>; multipart?: FormData } = {}): Promise<Response> {
     const headers: Record<string, string> = { authorization: `Bearer ${await this.accessToken()}` }
-    let body: string | URLSearchParams | undefined
-    if (init.json !== undefined) {
+    let body: string | URLSearchParams | FormData | undefined
+    if (init.multipart) {
+      body = init.multipart
+    } else if (init.json !== undefined) {
       headers['content-type'] = 'application/json'
       body = JSON.stringify(init.json)
     } else if (init.form) {
@@ -207,6 +211,7 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
     )
     if (res.ok) return res
     const detail = await res.text().catch(() => '')
+    if (res.status === 403) throw new HttpProblem(502, 'keycloak_forbidden', `Keycloak refused the API's service account for ${method} ${path}: it lacks a role (docs/keycloak.md, "Service account roles")`)
     if (res.status === 404) throw new HttpProblem(404, 'not_found', 'not found in Keycloak')
     if (res.status === 409) throw new HttpProblem(409, 'conflict', keycloakMessage(detail) || 'already exists')
     if (res.status === 400) throw new HttpProblem(400, 'bad_request', keycloakMessage(detail) || 'Keycloak rejected the request')
@@ -414,12 +419,17 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
     }
   }
 
-  async setSso(orgId: string, input: SsoInput): Promise<void> {
+  async parseSsoMetadata(protocol: SsoProtocol, document: string): Promise<Record<string, string>> {
+    // The document goes up as a file: Keycloak parses it and does not go to any address itself.
+    const form = new FormData()
+    form.set('providerId', protocol)
+    form.set('file', new Blob([document], { type: protocol === 'oidc' ? 'application/json' : 'application/xml' }), protocol === 'oidc' ? 'metadata.json' : 'metadata.xml')
+    return (await this.call('POST', '/identity-provider/import-config', { multipart: form }).then((r) => r.json())) as Record<string, string>
+  }
+
+  async setSso(orgId: string, input: SsoInput, imported: Record<string, string>): Promise<void> {
     const alias = ssoAlias(orgId)
     const existing = await this.idp(alias)
-    // Keycloak reads the provider's endpoints and keys from its metadata.
-    const fromUrl = input.protocol === 'oidc' ? `${input.sourceUrl.replace(/\/+$/, '')}/.well-known/openid-configuration` : input.sourceUrl
-    const imported = (await this.call('POST', '/identity-provider/import-config', { json: { providerId: input.protocol, fromUrl } }).then((r) => r.json())) as Record<string, string>
     const config: Record<string, string> = {
       ...imported,
       syncMode: 'IMPORT',
@@ -490,10 +500,10 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
       : null
   }
 
-  async createUser(input: { email: string; firstName: string; lastName: string; enabled: boolean }): Promise<string> {
+  async createUser(input: { email: string; firstName: string; lastName: string; enabled: boolean; emailVerified: boolean }): Promise<string> {
     // The directory vouches for the address: no verification mail.
     const res = await this.call('POST', '/users', {
-      json: { username: input.email, email: input.email, firstName: input.firstName, lastName: input.lastName, enabled: input.enabled, emailVerified: true },
+      json: { username: input.email, email: input.email, firstName: input.firstName, lastName: input.lastName, enabled: input.enabled, emailVerified: input.emailVerified },
     })
     return this.createdId(res)
   }

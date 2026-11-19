@@ -10,13 +10,13 @@ describe('problem responses', () => {
     app = await testApp()
     app.post(
       '/test/echo',
-      { schema: { hide: true, body: Type.Object({ n: Type.Integer({ minimum: 1 }) }) } },
+      { config: { public: 'test' }, schema: { hide: true, body: Type.Object({ n: Type.Integer({ minimum: 1 }) }) } },
       async (request) => request.body,
     )
-    app.get('/test/conflict', { schema: { hide: true } }, async () => {
+    app.get('/test/conflict', { config: { public: 'test' }, schema: { hide: true } }, async () => {
       throw new HttpProblem(409, 'already_exists', 'the project exists')
     })
-    app.get('/test/crash', { schema: { hide: true } }, async () => {
+    app.get('/test/crash', { config: { public: 'test' }, schema: { hide: true } }, async () => {
       throw new Error('secret database detail')
     })
     await app.ready()

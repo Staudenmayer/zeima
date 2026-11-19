@@ -44,7 +44,7 @@ organization:
   `pg_dump` of the `zeima` database).
 - **Keycloak**: apply the realm file again (`deploy/keycloak/apply.sh`): the
   API's service account needs `manage-organizations`, `view-organizations`,
-  `manage-identity-providers`, `view-identity-providers`, and `manage-realm` and `view-realm` (company directory; apply the realm file again).
+  `manage-identity-providers` and `view-identity-providers` (apply the realm file again). The company directory also needs `manage-realm`, which is no longer part of the realm file: give it by hand while you set the directory up (docs/keycloak.md).
   Without `KEYCLOAK_ADMIN_CLIENT_SECRET` the organization routes answer 503.
   Keycloak needs working SMTP to send invitations. With Organizations in use,
   the sign-in page asks for the address first and the password second.
@@ -63,6 +63,10 @@ organization:
   tables and routes without changing the old ones. A 2.0 app against an older
   server syncs its personal workspace as before; the organization pages show
   the server's "not found" error there.
+- **Security hardening** (docs/security.md): read the "2.0 (security release)" row of docs/upgrading.md before you update.
+  New required setting `APP_DB_PASSWORD`; rebuild Keycloak; the sign-in host no longer shows Keycloak's admin console; email
+  verification and single sign-on domain proof are on by default; the apps refuse a server whose sign-in service is on another site;
+  addons ask for consent in a native window.
 - **One API process** for now: presence is kept in memory.
 
 ## Checks before tagging

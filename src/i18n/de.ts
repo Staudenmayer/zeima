@@ -1135,6 +1135,7 @@ const de: typeof en = {
   addons: {
     signature: {
       trusted: 'Signiert von {signer}',
+      serverTrusted: 'Signiert von {signer} (Ihr Server bürgt dafür)',
       unsigned: 'Nicht signiert',
       unknownKey: 'Von einem Herausgeber signiert, den diese App nicht kennt',
       unknownKeyHint: 'Das Paket sagt, es sei mit dem Schlüssel „{id}“ signiert. Niemand, dem diese App vertraut, bürgt dafür.',

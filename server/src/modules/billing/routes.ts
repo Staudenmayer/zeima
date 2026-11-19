@@ -58,14 +58,14 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asyn
       },
     },
     async (request) => {
-      if (!billing.storeUrl) throw new HttpProblem(503, 'billing_unavailable', 'purchases are not set up on this server')
+      if (!billing.storeUrl || !billing.webhookSecret) throw new HttpProblem(503, 'billing_unavailable', 'purchases are not set up on this server')
       const plan = billing.plans.find((p) => p.key === request.body.key)
       if (!plan) throw new HttpProblem(404, 'not_found', 'no such plan')
       const { orgId } = request.body
       const user = request.user!
       // Only an organization's owner buys for it.
       if (orgId && !user.orgs[orgId]?.permissions['billing.manage']) throw new HttpProblem(403, 'forbidden', 'only an organization owner can buy for it')
-      return { url: checkoutUrl(billing.storeUrl, plan, { userId: user.id, orgId, email: user.email }) }
+      return { url: checkoutUrl(billing.storeUrl, plan, { userId: user.id, orgId, email: user.email }, billing.webhookSecret) }
     },
   )
 
@@ -108,6 +108,7 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asyn
     hooks.post(
       '/billing/webhook',
       {
+        config: { public: 'signed by the billing provider (HMAC)' },
         schema: {
           tags: ['billing'],
           summary: 'Lemon Squeezy webhook',
@@ -132,7 +133,7 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asyn
         } catch {
           return { status: 'ignored' as const, reason: 'not JSON' }
         }
-        const parsed = parseEvent(body, billing.plans, Date.now())
+        const parsed = parseEvent(body, billing.plans, Date.now(), billing.webhookSecret)
         if (!parsed.ok) {
           request.log.warn({ reason: parsed.reason }, 'billing event ignored')
           return { status: 'ignored' as const, reason: parsed.reason }

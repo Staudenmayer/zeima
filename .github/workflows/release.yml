@@ -26,10 +26,27 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+      # Without the vendor's addon publisher key compiled in, every signed addon is at best "server trusted" (docs/addons.md).
+      # A final release must have it; a pre-release only warns.
+      - name: The vendor's addon publisher key is set
+        env:
+          VENDOR_KEYS: ${{ vars.ZEIMA_ADDON_VENDOR_KEYS }}
+          ALLOW_MISSING: ${{ vars.ZEIMA_ALLOW_RELEASE_WITHOUT_ADDON_KEY }}
+        run: |
+          if [ -z "$VENDOR_KEYS" ]; then
+            if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+              echo "::warning::ZEIMA_ADDON_VENDOR_KEYS is not set: signed addons will only ever show as 'server trusted' in this build."
+            elif [ "$ALLOW_MISSING" = "true" ]; then
+              echo "::warning::Releasing without ZEIMA_ADDON_VENDOR_KEYS because ZEIMA_ALLOW_RELEASE_WITHOUT_ADDON_KEY is true."
+            else
+              echo "::error::ZEIMA_ADDON_VENDOR_KEYS (repository variable) is empty. Set it (docs/releasing.md, 'Addon publisher keys'), or set ZEIMA_ALLOW_RELEASE_WITHOUT_ADDON_KEY=true to release without one."
+              exit 1
+            fi
+          fi
       - id: v
         name: Tag is semver and matches the app version
         run: |
@@ -79,17 +96,17 @@ jobs:
           #   target: x86_64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
-      - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: bun install --frozen-lockfile
       - name: macOS signing (only when the Apple secrets are set)
         if: runner.os == 'macOS'
@@ -107,7 +124,7 @@ jobs:
           for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
             if [ -n "${!v}" ]; then echo "$v=${!v}" >> "$GITHUB_ENV"; fi
           done
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signs the updater artifacts (see docs/releasing.md for the key).
@@ -115,6 +132,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Keys of the licence issuers this build trusts (a repository variable).
           ZEIMA_ENTITLEMENT_KEYS: ${{ vars.ZEIMA_ENTITLEMENT_KEYS }}
+          # The vendor's addon publisher keys, compiled into the app (`key-id=Name=public-key;…`; a repository variable).
+          # A server's registry can add publishers but never replace these (docs/addons.md).
+          ZEIMA_ADDON_VENDOR_KEYS: ${{ vars.ZEIMA_ADDON_VENDOR_KEYS }}
         with:
           tauriScript: bunx tauri
           tagName: ${{ github.ref_name }}
@@ -134,11 +154,11 @@ jobs:
     if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: |
             addons/csv-export

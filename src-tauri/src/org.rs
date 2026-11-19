@@ -25,11 +25,16 @@ pub fn allowed(method: &str, path: &str) -> bool {
         && !path.contains("..")
         && !path.contains("//")
         && !path.contains('\\')
+        // Percent-encoded dots and slashes (%2e%2e, %2f) would pass the checks above and be decoded by the server.
+        && !path.contains('%')
         && !path
             .chars()
             .any(|c| c.is_whitespace() || c.is_control() || c == '#');
     let target = path == "/v1/me"
         || path == "/v1/me/avatar"
+        || path == "/v1/admin/ldap"
+        || path == "/v1/admin/ldap/test"
+        || path == "/v1/admin/ldap/sync"
         || path == "/v1/orgs"
         || path
             .strip_prefix("/v1/orgs/")
@@ -38,6 +43,9 @@ pub fn allowed(method: &str, path: &str) -> bool {
     let method_ok = match path {
         "/v1/me" => method == "GET",
         "/v1/me/avatar" => method == "PUT" || method == "DELETE",
+        // The company directory of a self-hosted installation (its administrators only; the server decides).
+        "/v1/admin/ldap" => method == "GET" || method == "PUT" || method == "DELETE",
+        "/v1/admin/ldap/test" | "/v1/admin/ldap/sync" => method == "POST",
         _ => true,
     };
     METHODS.contains(&method) && plain && target && method_ok
@@ -156,5 +164,19 @@ mod tests {
         assert!(!allowed("GET", "http://evil.example/v1/orgs/a"));
         assert!(!allowed("TRACE", "/v1/orgs/a"));
         assert!(!allowed("GET", "/v1/orgs/ä"));
+        // Percent-encoded dots or slashes could be decoded by the server into a path the checks above refuse.
+        assert!(!allowed("GET", "/v1/orgs/%2e%2e/license"));
+        assert!(!allowed("GET", "/v1/orgs/a%2fb"));
+        assert!(!allowed("GET", "/v1/orgs/a%2Fb/members"));
+        // The company directory: exactly its routes, with the methods they have.
+        assert!(allowed("GET", "/v1/admin/ldap"));
+        assert!(allowed("PUT", "/v1/admin/ldap"));
+        assert!(allowed("DELETE", "/v1/admin/ldap"));
+        assert!(allowed("POST", "/v1/admin/ldap/test"));
+        assert!(allowed("POST", "/v1/admin/ldap/sync"));
+        assert!(!allowed("POST", "/v1/admin/ldap"));
+        assert!(!allowed("GET", "/v1/admin/ldap/sync"));
+        assert!(!allowed("GET", "/v1/admin/license"));
+        assert!(!allowed("GET", "/v1/admin/ldap/../x"));
     }
 }

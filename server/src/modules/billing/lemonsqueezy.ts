@@ -68,7 +68,18 @@ const asTime = (v: unknown) => {
 /** Statuses in which the customer has paid for the current period. */
 const PAYING = new Set(['active', 'on_trial', 'past_due'])
 
-export function parseEvent(body: unknown, plans: readonly BillingPlan[], now: number): Parsed {
+/**
+ * Proof that this server made the checkout link for exactly this user and organization. The link is plain text
+ * the buyer can edit before paying; without this, a buyer could name any organization and the (genuinely signed)
+ * provider event would attach the purchase to it. The key is derived from the webhook secret, which only the
+ * server and the provider know. It carries no expiry: the provider repeats the metadata on every renewal.
+ */
+export function checkoutToken(secret: string, userId: string, orgId: string | null | undefined): string {
+  const key = createHmac('sha256', secret).update('zeima-checkout-v1').digest()
+  return createHmac('sha256', key).update(`${userId}|${orgId ?? ''}`).digest('hex').slice(0, 40)
+}
+
+export function parseEvent(body: unknown, plans: readonly BillingPlan[], now: number, secret: string): Parsed {
   const root = asObject(body)
   const meta = asObject(root.meta)
   const event = asString(meta.event_name)
@@ -83,6 +94,11 @@ export function parseEvent(body: unknown, plans: readonly BillingPlan[], now: nu
   const userId = asString(custom.user_id)
   const orgId = asString(custom.org_id)
   if (!userId && !orgId) return { ok: false, reason: 'the checkout carried no user or organization' }
+  const given = asString(custom.token)
+  const expected = userId ? checkoutToken(secret, userId, orgId) : null
+  if (!given || !expected || given.length !== expected.length || !timingSafeEqual(Buffer.from(given), Buffer.from(expected))) {
+    return { ok: false, reason: 'the checkout was not made by this server (its metadata is not signed)' }
+  }
 
   const variantId = String(attributes.variant_id ?? '')
   const plan = plans.find((p) => p.variantId === variantId)
@@ -126,10 +142,11 @@ export function parseEvent(body: unknown, plans: readonly BillingPlan[], now: nu
 }
 
 /** The link that starts a purchase; the user and organization ride along as custom data. */
-export function checkoutUrl(storeUrl: string, plan: BillingPlan, who: { userId: string; orgId?: string; email?: string | null }): string {
+export function checkoutUrl(storeUrl: string, plan: BillingPlan, who: { userId: string; orgId?: string; email?: string | null }, secret: string): string {
   const url = new URL(`${storeUrl}/checkout/buy/${plan.checkoutId}`)
   url.searchParams.set('checkout[custom][user_id]', who.userId)
   if (who.orgId) url.searchParams.set('checkout[custom][org_id]', who.orgId)
+  url.searchParams.set('checkout[custom][token]', checkoutToken(secret, who.userId, who.orgId))
   if (who.email) url.searchParams.set('checkout[email]', who.email)
   return url.toString()
 }

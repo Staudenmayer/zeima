@@ -1,0 +1,6 @@
+# For the CI check of the self-hosted stack only: publishes Keycloak on this machine's loopback so the end-to-end script
+# can create test users with the administration console, which the proxy (rightly) does not publish.
+services:
+  keycloak:
+    ports:
+      - "127.0.0.1:18080:8080"

@@ -1133,6 +1133,7 @@ export default {
   addons: {
     signature: {
       trusted: 'Signed by {signer}',
+      serverTrusted: 'Signed by {signer} (your server vouches for them)',
       unsigned: 'Not signed',
       unknownKey: 'Signed by a publisher this app does not know',
       unknownKeyHint: 'The package says it was signed with the key “{id}”. Nobody this app trusts vouches for it.',

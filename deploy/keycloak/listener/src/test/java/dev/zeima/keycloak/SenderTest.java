@@ -19,6 +19,7 @@ class SenderTest {
     private static final String SECRET = "a-secret-of-16-chars!";
     private final List<String> bodies = new CopyOnWriteArrayList<>();
     private final List<String> signatures = new CopyOnWriteArrayList<>();
+    private final List<String> timestamps = new CopyOnWriteArrayList<>();
     private final AtomicInteger failuresLeft = new AtomicInteger();
     private volatile int failureStatus = 503;
     private HttpServer server;
@@ -36,6 +37,7 @@ class SenderTest {
             }
             bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             signatures.add(exchange.getRequestHeaders().getFirst("x-zeima-signature"));
+            timestamps.add(exchange.getRequestHeaders().getFirst("x-zeima-timestamp"));
             int status = failuresLeft.getAndUpdate(n -> Math.max(0, n - 1)) > 0 ? failureStatus : 202;
             byte[] answer = "{\"organizations\":1}".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("content-type", "application/json");
@@ -61,7 +63,9 @@ class SenderTest {
         new Sender(url, SECRET, 1).deliver(notice());
         assertEquals(1, bodies.size());
         assertEquals(notice().toJson(), bodies.get(0));
-        assertEquals(Signer.sign(SECRET, bodies.get(0).getBytes(StandardCharsets.UTF_8)), signatures.get(0));
+        long stamped = Long.parseLong(timestamps.get(0));
+        assertTrue(Math.abs(System.currentTimeMillis() - stamped) < 10_000, "the call carries the current time");
+        assertEquals(Signer.sign(SECRET, stamped, bodies.get(0).getBytes(StandardCharsets.UTF_8)), signatures.get(0));
     }
 
     @Test

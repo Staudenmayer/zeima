@@ -61,6 +61,10 @@ const Tokens = Type.Object({
 })
 
 const Any = Type.Record(Type.String(), Type.Any())
+/** The SCIM routes check their own key (`onRequest` below), not a Keycloak token. */
+/** Own, lower limit than the rest of the API: provisioning is bursty but not a thousand calls a minute. */
+const SCIM_PUBLIC = { public: 'a SCIM key', rateLimit: { max: 600, timeWindow: '1 minute' } }
+
 /** What the documentation needs of a route the identity provider calls (the bodies are SCIM's own). */
 const doc = (summary: string, ok: number = 200) => ({
   tags: ['scim'],
@@ -304,7 +308,13 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         }
       }
 
-      const apply = async (orgId: string, m: MemberRow, changes: Changes) => {
+      /** Whether the person is a member of another organization too. */
+      const belongsElsewhere = async (orgId: string, userId: string) => {
+        const rows = await database().select({ orgId: schema.kcOrgMember.orgId }).from(schema.kcOrgMember).where(eq(schema.kcOrgMember.userId, userId))
+        return rows.some((r) => r.orgId !== orgId)
+      }
+
+      const apply = async (orgId: string, m: MemberRow, changes: Changes): Promise<'removed' | 'changed'> => {
         const db = database()
         const kc = keycloak()
         if (changes.givenName !== undefined || changes.familyName !== undefined) {
@@ -314,15 +324,24 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
           await kc.setUserName(m.id, first, last)
           await db.update(schema.kcUser).set({ displayName: `${first} ${last}`.trim() || null }).where(eq(schema.kcUser.id, m.id))
         }
+        if (changes.active === false && m.active && (await belongsElsewhere(orgId, m.id))) {
+          // The account is also somebody else's (another organization, or the person's own); switching it off
+          // would lock them out of those too. Taking them out of this organization ends this organization's access.
+          await kc.removeMember(orgId, m.id)
+          await db.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
+          await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim', reason: 'deactivated, account belongs to other organizations' } })
+          return 'removed' as const
+        }
         if (changes.active !== undefined && changes.active !== m.active) {
           await kc.setEnabled(m.id, changes.active)
           if (!changes.active) await kc.logoutUser(m.id).catch(() => {})
           await db.update(schema.kcUser).set({ active: changes.active }).where(eq(schema.kcUser.id, m.id))
           await audit(db, { orgId, actorId: null, action: changes.active ? 'member.reactivate' : 'member.deactivate', target: m.id, detail: { via: 'scim' } })
         }
+        return 'changed'
       }
 
-      scim.get('/ServiceProviderConfig', { schema: doc('What this SCIM service can do') }, async (_request, reply) =>
+      scim.get('/ServiceProviderConfig', { config: SCIM_PUBLIC, schema: doc('What this SCIM service can do') }, async (_request, reply) =>
         send(reply, 200, {
           schemas: ['urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig'],
           patch: { supported: true },
@@ -335,7 +354,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         }),
       )
 
-      scim.get('/ResourceTypes', { schema: doc('The kinds of resources') }, async (_request, reply) =>
+      scim.get('/ResourceTypes', { config: SCIM_PUBLIC, schema: doc('The kinds of resources') }, async (_request, reply) =>
         send(reply, 200, {
           schemas: [LIST],
           totalResults: 1,
@@ -343,12 +362,9 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         }),
       )
 
-      scim.get('/Schemas', { schema: doc('The schemas') }, async (_request, reply) => send(reply, 200, { schemas: [LIST], totalResults: 0, Resources: [] }))
+      scim.get('/Schemas', { config: SCIM_PUBLIC, schema: doc('The schemas') }, async (_request, reply) => send(reply, 200, { schemas: [LIST], totalResults: 0, Resources: [] }))
 
-      scim.get(
-        '/Users',
-        {
-          schema: {
+      scim.get('/Users', { config: SCIM_PUBLIC, schema: {
             ...doc('Lists the organization\'s people, or finds one by `userName eq "…"`'),
             querystring: Type.Object({
               filter: Type.Optional(Type.String()),
@@ -366,9 +382,9 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         },
       )
 
-      scim.get('/Users/:id', { schema: { ...doc('One person'), params: IdParams } }, async (request, reply) => send(reply, 200, toScim(await member(orgOf(request), request.params.id), baseUrl)))
+      scim.get('/Users/:id', { config: SCIM_PUBLIC, schema: { ...doc('One person'), params: IdParams } }, async (request, reply) => send(reply, 200, toScim(await member(orgOf(request), request.params.id), baseUrl)))
 
-      scim.post('/Users', { schema: { ...doc('Adds a person to the organization', 201), body: Any } }, async (request, reply) => {
+      scim.post('/Users', { config: SCIM_PUBLIC, schema: { ...doc('Adds a person to the organization', 201), body: Any } }, async (request, reply) => {
         const orgId = orgOf(request)
         const body = request.body as Record<string, unknown>
         const emails = Array.isArray(body.emails) ? (body.emails as { value?: unknown; primary?: unknown }[]) : []
@@ -387,14 +403,29 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         const db = database()
         const kc = keycloak()
         const existing = await kc.findUserByEmail(email)
-        if (existing && (await listMembers(db, orgId, { userIds: [existing.id] })).length) throw new ScimError(409, 'the user is already in the organization', 'uniqueness')
+        if (existing && (await listMembers(db, orgId, { userIds: [existing.id] })).length) throw new ScimError(409, 'a user with this userName already exists', 'uniqueness')
         requireSeat((await app.licensing.ofOrg(db, orgId))?.seats ?? null, await seatUsage(db, orgId))
 
-        const userId = existing?.id ?? (await kc.createUser({ email, firstName, lastName, enabled: active }))
+        if (existing) {
+          // The address already has an account that this organization did not create: it does not get pulled in
+          // without the person's say. They are invited, and join when they accept.
+          const [row] = await db.insert(schema.orgInvitation).values({ orgId, email, role: 'member', createdAt: Date.now() }).onConflictDoNothing().returning({ id: schema.orgInvitation.id })
+          if (row) {
+            await kc.invite(orgId, email).catch(async (err: unknown) => {
+              await db.delete(schema.orgInvitation).where(eq(schema.orgInvitation.id, row.id))
+              throw err
+            })
+            await audit(db, { orgId, actorId: null, action: 'member.invite', target: email, detail: { role: 'member', via: 'scim' } })
+          }
+          // The same answer as for a person who is already in: what the key holder learns is that this address is taken, not
+          // whether it belongs to somebody else's account.
+          throw new ScimError(409, 'a user with this userName already exists', 'uniqueness')
+        }
+        const userId = await kc.createUser({ email, firstName, lastName, enabled: active, emailVerified: config.sso.verifyDomains })
         await kc.addMember(orgId, userId)
         await kc.setRole(orgId, userId, 'member')
-        const displayName = `${firstName} ${lastName}`.trim() || existing?.name || null
-        const enabled = existing ? existing.enabled : active
+        const displayName = `${firstName} ${lastName}`.trim() || null
+        const enabled = active
         await db.transaction(async (tx) => {
           await tx
             .insert(schema.kcUser)
@@ -412,13 +443,14 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
           const orgId = orgOf(request)
           const m = await member(orgId, request.params.id)
           await changeable(orgId, m)
-          await apply(orgId, m, changesOf(request.body, patch))
-          return send(reply, 200, toScim(await member(orgId, m.id), baseUrl))
+          const outcome = await apply(orgId, m, changesOf(request.body, patch))
+          // A person who was only taken out of this organization is reported as switched off, which is what the provider asked for.
+          return send(reply, 200, outcome === 'removed' ? toScim({ ...m, active: false }, baseUrl) : toScim(await member(orgId, m.id), baseUrl))
         }
-      scim.put('/Users/:id', { schema: { ...doc('Replaces a person\'s name and whether the account is active'), params: IdParams, body: Any } }, change(false))
-      scim.patch('/Users/:id', { schema: { ...doc('Changes whether the account is active, or the name'), params: IdParams, body: Any } }, change(true))
+      scim.put('/Users/:id', { config: SCIM_PUBLIC, schema: { ...doc('Replaces a person\'s name and whether the account is active'), params: IdParams, body: Any } }, change(false))
+      scim.patch('/Users/:id', { config: SCIM_PUBLIC, schema: { ...doc('Changes whether the account is active, or the name'), params: IdParams, body: Any } }, change(true))
 
-      scim.delete('/Users/:id', { schema: { ...doc('Takes a person out of the organization', 204), params: IdParams } }, async (request, reply) => {
+      scim.delete('/Users/:id', { config: SCIM_PUBLIC, schema: { ...doc('Takes a person out of the organization', 204), params: IdParams } }, async (request, reply) => {
         const orgId = orgOf(request)
         const m = await member(orgId, request.params.id)
         await changeable(orgId, m)

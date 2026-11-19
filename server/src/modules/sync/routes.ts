@@ -16,9 +16,10 @@ import { callerOf, type Db, schema, withUser } from '../../db/index.ts'
 import type { AuthUser } from '../../plugins/auth.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
+import { Quota } from '../../plugins/quota.ts'
 import { ensureOrgWorkspace } from '../orgs/service.ts'
 import { checkOrgWrite, visibleToCaller } from './orgrules.ts'
-import { type Change, type Json, merge, type Outcome, type RowState } from '../../sync/merge.ts'
+import { type Change, hlcWallMs, type Json, MAX_CLOCK_AHEAD_MS, merge, type Outcome, type RowState } from '../../sync/merge.ts'
 
 /** Tables that sync, all scoped to a workspace. */
 // Keep in step with SYNCED_TABLES in crates/zeima-core/src/repo/sync_outbox.rs.
@@ -73,6 +74,9 @@ const WorkspaceSchema = Type.Object({
 const FieldsSchema = Type.Record(Type.String(), Type.Object({ v: Type.Any(), h: Type.String() }))
 
 const MAX_CHANGES = 500
+/** What one account may push in a minute: far more than a person produces, far less than it takes to fill a disk. */
+const PUSH_REQUESTS_PER_MINUTE = 120
+const PUSH_CHANGES_PER_MINUTE = 5_000
 const MAX_PULL = 500
 
 /** May the caller change rows of this workspace as a manager would (lock, edit locked)? */
@@ -106,6 +110,8 @@ async function saveRow(tx: Tx, workspaceId: string, table: string, rowId: string
 }
 
 export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
+  const pushRequests = new Quota(PUSH_REQUESTS_PER_MINUTE)
+  const pushChanges = new Quota(PUSH_CHANGES_PER_MINUTE)
   const db = () => {
     if (!app.db) throw new HttpProblem(503, 'unavailable', 'the database is not configured')
     return app.db
@@ -205,6 +211,8 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request) => {
       const user = request.user!
       const { workspaceId, changes } = request.body
+      pushRequests.spend(user.id, 1, 'pushes')
+      pushChanges.spend(user.id, changes.length, 'changes')
       await app.licensing.require(db(), user, 'sync')
       return withUser(db(), callerOf(user), async (tx) => {
         const [ws] = await tx.select().from(schema.workspace).where(eq(schema.workspace.id, workspaceId))
@@ -213,10 +221,25 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
         const orgActor = ws.kind === 'org' && ws.orgId ? { user, orgId: ws.orgId } : null
 
         const results: Outcome[] = []
+        const horizon = Date.now() + MAX_CLOCK_AHEAD_MS
         // Order matters inside a batch (a later change may depend on an earlier one).
         for (const change of changes) {
+          // A stamp from the far future would win every later write to its fields.
+          if (hlcWallMs(change.hlc) > horizon) {
+            results.push({ status: 'rejected', reason: 'clock_ahead' })
+            continue
+          }
           const current = await loadRow(tx, workspaceId, change.table, change.rowId)
           const mergeable: Change = { ...change, fields: change.fields as Record<string, Json> | undefined }
+          // Someone who may not change the lock writes `locked` as it already is (a new entry says `false`): that
+          // changes nothing, and must not carry a stamp that would outrank the manager's later decision.
+          if (!actor.manager && mergeable.table === 'time_entry' && mergeable.fields && 'locked' in mergeable.fields) {
+            const effective = current?.fields.locked?.v === true
+            if ((mergeable.fields.locked === true) === effective) {
+              const { locked: _ignored, ...rest } = mergeable.fields
+              mergeable.fields = rest
+            }
+          }
           if (orgActor) {
             const refused = user.orgs[orgActor.orgId] ? await checkOrgWrite(tx, orgActor, orgActor.orgId, mergeable, current) : ({ status: 'rejected', reason: 'forbidden' } as const)
             if (refused) {

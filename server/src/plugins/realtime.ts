@@ -18,6 +18,8 @@ import { PresenceBoard } from './presence.ts'
 import { eq } from 'drizzle-orm'
 
 export const TOKEN_EXPIRED = 4401
+/** Most devices one account keeps connected; the oldest gives way (a dead connection must not block a reconnect). */
+export const MAX_SOCKETS_PER_USER = 10
 
 interface Client {
   socket: WebSocket
@@ -33,6 +35,11 @@ export class Hub {
     if (!set) {
       set = new Set()
       this.clients.set(userId, set)
+    }
+    while (set.size >= MAX_SOCKETS_PER_USER) {
+      const oldest = set.values().next().value as Client
+      set.delete(oldest)
+      oldest.socket.close(4429, 'too many connections')
     }
     set.add(client)
     return () => {

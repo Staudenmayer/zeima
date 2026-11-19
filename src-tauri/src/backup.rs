@@ -16,7 +16,7 @@ pub fn dir(app: &AppHandle) -> std::io::Result<PathBuf> {
     let dir = crate::instance::data_dir(app)
         .map_err(std::io::Error::other)?
         .join("backups");
-    std::fs::create_dir_all(&dir)?;
+    zeima_core::fsperm::private_dir(&dir)?;
     Ok(dir)
 }
 
@@ -47,6 +47,7 @@ pub async fn run(app: &AppHandle, force: bool) -> Result<(), String> {
     let tmp = dir.join(format!("{PREFIX}{today}{SUFFIX}.tmp"));
     let _ = std::fs::remove_file(&tmp);
     state.core.backup_to(&tmp).await.map_err(|e| e.to_string())?;
+    zeima_core::fsperm::private_file(&tmp).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
     for old in list(&dir).into_iter().skip(KEEP) {
         let _ = std::fs::remove_file(dir.join(old));

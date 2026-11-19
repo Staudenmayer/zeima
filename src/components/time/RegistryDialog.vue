@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { PERMISSION_KEYS } from '@/lib/addons'
-import { call, errorMessage } from '@/lib/ipc'
+import { AppError, call, errorMessage } from '@/lib/ipc'
 
 // Shows what an addon of the server's registry asks for before it is installed. The package is
 // downloaded and its hash and signature checked when the person agrees.
@@ -25,7 +25,8 @@ async function install() {
     open.value = false
     emit('installed', props.addon.name)
   } catch (err) {
-    toast.error(errorMessage(err))
+    // The app asked the person itself and they said no: nothing to report.
+    if (!(err instanceof AppError && err.code === 'cancelled')) toast.error(errorMessage(err))
   } finally {
     installing.value = false
   }

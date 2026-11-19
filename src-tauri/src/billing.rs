@@ -8,7 +8,6 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::AppHandle;
-use tauri_plugin_opener::OpenerExt;
 
 use crate::account::{self, discover};
 use crate::commands::{CmdError, CmdResult};
@@ -118,9 +117,7 @@ pub async fn billing_checkout(app: AppHandle, key: String) -> CmdResult<()> {
         .get("url")
         .and_then(|u| u.as_str())
         .ok_or_else(|| err("server", "the server sent no checkout link"))?;
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|e| err("browser", format!("could not open the browser: {e}")))
+    crate::trust::open_link(&app, url).map_err(|e| err("browser", e))
 }
 
 #[derive(Debug, Deserialize, Serialize, Type)]
@@ -151,7 +148,5 @@ pub async fn billing_open_portal(app: AppHandle) -> CmdResult<()> {
     let url = subscription
         .and_then(|s| s.portal_url)
         .ok_or_else(|| err("server", "there is no subscription to manage"))?;
-    app.opener()
-        .open_url(&url, None::<&str>)
-        .map_err(|e| err("browser", format!("could not open the browser: {e}")))
+    crate::trust::open_link(&app, &url).map_err(|e| err("browser", e))
 }

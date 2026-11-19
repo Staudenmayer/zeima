@@ -386,12 +386,14 @@ build. The signature is the file `addon.sig` in the zip: `{"keyId": "...", "sign
 the message is `zeima-addon-v1\n<sha256 of addon.toml>\n<sha256 of the module>\n`
 (`crates/zeima-core/src/addon_sig.rs`, test vectors in `packages/shared-fixtures/addons`).
 
-The app trusts a key when it is built into the app (`BUILTIN` in `src-tauri/src/registry.rs`) or when
-the signed-in server's registry lists it as a publisher. The install dialog and the addon list show:
+The app trusts a key in two ways. **The vendor's keys are compiled into the app** (`ZEIMA_ADDON_VENDOR_KEYS="key-id=Name=public-key;…"` when the app is built, `src-tauri/src/registry.rs`), so a server cannot replace them. **A publisher the signed-in server
+lists in its registry** is trusted as far as that server's administrator is, and is shown differently ("server trusted"); it can never
+take over a vendor key id. The install dialog and the addon list show:
 
 | Shown | Meaning |
 |---|---|
-| Signed by *Name* | a trusted publisher signed exactly these files |
+| Signed by *Name* | the vendor (a key built into the app) signed exactly these files |
+| Signed by *Name* (your server vouches for them) | a publisher this installation's server lists signed exactly these files |
 | Not signed | no signature |
 | Signed by a publisher this app does not know | a signature, but nobody the app trusts vouches for the key |
 | The signature does not match | the files were changed after signing, or are damaged; **cannot be installed** |
@@ -411,7 +413,9 @@ This copies the packages, writes `index.json` (id, name, version, permissions, h
 key that signed it, and the publishers) and can be run again to add versions. The server serves the
 index (`GET /v1/addons/registry`) and the packages to signed-in users and does nothing else with them:
 **the app checks the hash and the signature itself.** In the app, Addons lists what the server offers
-and installs it after the same consent dialog as for a file.
+and installs it after the same consent dialog as for a file. **The app itself asks again** with a native window (who made it, what it may do and, for an
+update, what is *new*) before every install and update, whatever the page in the app did: what runs on the person's machine does not depend on the
+front end. A permission an update adds is never granted without that question.
 
 ### What an organization can require
 

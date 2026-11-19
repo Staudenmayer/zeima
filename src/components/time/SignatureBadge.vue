@@ -10,6 +10,8 @@ const look = computed(() => {
   switch (props.signature.status) {
     case 'trusted':
       return { icon: ShieldCheck, cls: 'text-green-700 dark:text-green-400', key: 'trusted' }
+    case 'server_trusted':
+      return { icon: ShieldCheck, cls: 'text-sky-700 dark:text-sky-400', key: 'serverTrusted' }
     case 'unknown_key':
       return { icon: ShieldQuestion, cls: 'text-amber-700 dark:text-amber-400', key: 'unknownKey' }
     case 'invalid':

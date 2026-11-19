@@ -4833,6 +4833,15 @@ export interface paths {
                     };
                 };
                 /** @description Problem details (RFC 9457) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
                 502: {
                     headers: {
                         [name: string]: unknown;
@@ -4933,6 +4942,15 @@ export interface paths {
                     };
                 };
                 /** @description Problem details (RFC 9457) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
                 502: {
                     headers: {
                         [name: string]: unknown;
@@ -4981,6 +4999,15 @@ export interface paths {
                 };
                 /** @description Problem details (RFC 9457) */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5088,6 +5115,15 @@ export interface paths {
                     };
                 };
                 /** @description Problem details (RFC 9457) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
                 502: {
                     headers: {
                         [name: string]: unknown;
@@ -5166,6 +5202,15 @@ export interface paths {
                 };
                 /** @description Problem details (RFC 9457) */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+                /** @description Problem details (RFC 9457) */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };

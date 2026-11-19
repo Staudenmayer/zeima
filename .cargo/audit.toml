@@ -1,0 +1,11 @@
+# `cargo audit` (run in CI, .github/workflows/ci.yml). Every ignore needs a reason and a way out.
+
+[advisories]
+ignore = [
+  # libsqlite3-sys 0.30.1 bundles an SQLite older than 3.54.0, which can return stale memory when a database is opened
+  # together with a crafted `-wal` file of a different page size. The attacker has to place both files next to the
+  # database the app opens; Zeima only opens its own database in its own owner-only data folder (and a restore is the
+  # person copying a file they chose). sqlx 0.9.1 still pins libsqlite3-sys 0.30.x.
+  # Way out: remove this line when sqlx moves to libsqlite3-sys >= 0.39.
+  "RUSTSEC-2026-0459",
+]

@@ -18,7 +18,7 @@ import { reconcileOrganization } from './reconcile.ts'
 import { forgetRoles, loadRoles, roleOf } from './roles.ts'
 import { freeBusy } from '../../meetings/freebusy.ts'
 import { roomBookings } from '../../meetings/rooms.ts'
-import { audit, auditEntries, avatarsOf, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers } from './service.ts'
+import { audit, auditEntries, avatarsOf, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers, withOwnerLock } from './service.ts'
 
 /** A role: a built-in one's name (`admin`) or the id of one the organization made. */
 const Role = Type.String({ minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9-]+$' })
@@ -233,11 +233,15 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         if (current && !covers(actor.user.orgs[orgId]!.permissions, current.permissions)) {
           throw new HttpProblem(403, 'forbidden', 'this person has permissions you do not have')
         }
-        if (target.role === 'owner' && (await ownerCount(db, orgId)) <= 1) {
-          throw new HttpProblem(409, 'last_owner', 'an organization needs at least one owner; make someone else an owner first')
-        }
-        await kc.setRole(orgId, userId, role)
-        await db.update(schema.kcOrgMember).set({ role }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
+        await withOwnerLock(db, orgId, async (tx) => {
+          // Looked at again under the lock: another owner may have changed the roles a moment ago.
+          const now = await memberOf(tx, orgId, userId)
+          if (now?.role === 'owner' && role !== 'owner' && (await ownerCount(tx, orgId)) <= 1) {
+            throw new HttpProblem(409, 'last_owner', 'an organization needs at least one owner; make someone else an owner first')
+          }
+          await kc.setRole(orgId, userId, role)
+          await tx.update(schema.kcOrgMember).set({ role }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
+        })
         await audit(db, { orgId, actorId: actor.user.id, action: 'member.role', target: userId, detail: { from: target.role, to: role } })
       }
 
@@ -285,12 +289,13 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         if (userId !== actor.user.id && actor.user.orgs[orgId]!.role !== 'owner') {
           throw new HttpProblem(403, 'forbidden', 'only an owner can remove an owner')
         }
-        if ((await ownerCount(db, orgId)) <= 1) {
+      }
+      await withOwnerLock(db, orgId, async (tx) => {
+        const now = await memberOf(tx, orgId, userId)
+        if (now?.role === 'owner' && (await ownerCount(tx, orgId)) <= 1) {
           throw new HttpProblem(409, 'last_owner', 'an organization needs at least one owner; make someone else an owner first, or delete the organization')
         }
-      }
-      await keycloak().removeMember(orgId, userId)
-      await db.transaction(async (tx) => {
+        await keycloak().removeMember(orgId, userId)
         await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
         await tx.execute(sql`delete from kc_group_member where user_id = ${userId} and group_id in (select id from kc_group where org_id = ${orgId})`)
       })

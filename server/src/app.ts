@@ -1,6 +1,7 @@
 // buildApp(config): the whole API without listening, for the server entry
 // point, tests (`app.inject`) and the OpenAPI export.
 
+import { guardInternalPaths } from './internal-listener.ts'
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 import { sql } from 'drizzle-orm'
 import Fastify, { type FastifyServerOptions } from 'fastify'
@@ -47,6 +48,8 @@ export interface AppOptions {
   dnsTxt?: (name: string) => Promise<string[][]>
   /** Host name lookups for the safety check of a provider's address (tests pass their own). */
   dnsResolver?: (host: string) => Promise<{ address: string }[]>
+  /** Reads a single sign-on provider's metadata document; the real network unless a test gives its own. */
+  ssoFetch?: (url: URL) => Promise<string>
 }
 
 export async function buildApp(config: Config, options: AppOptions = {}) {
@@ -55,12 +58,25 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
       level: config.logLevel,
       redact: ['req.headers.authorization', 'req.headers.cookie'],
     },
-    trustProxy: config.trustProxy,
+    // A number is how many proxies are in front: only that many hops from the socket are believed.
+    trustProxy: typeof config.trustProxy === 'number' ? (_address: string, hop: number) => hop < (config.trustProxy as number) : config.trustProxy,
     // Clients may send ids generated offline; keep them unchanged.
     ajv: { customOptions: { removeAdditional: false, coerceTypes: 'array', useDefaults: true } },
     bodyLimit: 5 * 1024 * 1024,
   }).withTypeProvider<TypeBoxTypeProvider>()
 
+  // Authentication is declared per route (`schema.security`). A route that declares neither that nor
+  // `config: { public: '<why>' }` is a mistake that would silently expose it: the server does not start.
+  app.addHook('onRoute', (route) => {
+    const methods = [route.method].flat()
+    if (methods.every((m) => m === 'HEAD' || m === 'OPTIONS')) return
+    const schema = route.schema as { security?: unknown[] } | undefined
+    const marked = (route.config as { public?: string } | undefined)?.public
+    if (schema?.security?.length || marked || route.url === '/docs' || route.url.startsWith('/docs/')) return
+    throw new Error(`route ${methods.join(',')} ${route.url} is neither protected (schema.security) nor marked public (config.public)`)
+  })
+
+  guardInternalPaths(app, config.internalPort)
   await app.register(errorsPlugin)
   await app.register(securityPlugin, { config })
   // Before the routes: it collects them through onRoute.
@@ -86,7 +102,7 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
     async (v1) => {
       await v1.register(meRoutes)
       await v1.register(orgRoutes)
-      await v1.register(ssoRoutes, { config, ...(options.dnsTxt && { txt: options.dnsTxt }), ...(options.dnsResolver && { resolver: options.dnsResolver }) })
+      await v1.register(ssoRoutes, { config, ...(options.dnsTxt && { txt: options.dnsTxt }), ...(options.dnsResolver && { resolver: options.dnsResolver }), ...(options.ssoFetch && { fetchMetadata: options.ssoFetch }) })
       await v1.register(scimRoutes, { config })
       await v1.register(addonRoutes, { config })
       await v1.register(jurisdictionRoutes, { config })
@@ -103,6 +119,13 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
     { prefix: '/v1' },
   )
   return app
+}
+
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /** Marks a route that is open on purpose, and says why (see the `onRoute` check in `buildApp`). */
+    public?: string
+  }
 }
 
 export type App = Awaited<ReturnType<typeof buildApp>>

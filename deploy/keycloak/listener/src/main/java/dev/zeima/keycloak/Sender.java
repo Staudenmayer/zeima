@@ -46,13 +46,16 @@ public class Sender {
 
     void deliver(Notice notice) {
         byte[] body = notice.toJson().getBytes(StandardCharsets.UTF_8);
-        HttpRequest request = HttpRequest.newBuilder(url)
-                .timeout(Duration.ofSeconds(5))
-                .header("Content-Type", "application/json")
-                .header("x-zeima-signature", Signer.sign(secret, body))
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                .build();
         for (int attempt = 1; attempt <= ATTEMPTS; attempt++) {
+            // Stamped anew for each attempt: the API refuses a call that is more than a few minutes old.
+            long now = System.currentTimeMillis();
+            HttpRequest request = HttpRequest.newBuilder(url)
+                    .timeout(Duration.ofSeconds(5))
+                    .header("Content-Type", "application/json")
+                    .header("x-zeima-timestamp", Long.toString(now))
+                    .header("x-zeima-signature", Signer.sign(secret, now, body))
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+                    .build();
             try {
                 int status = http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
                 if (status >= 200 && status < 300) {

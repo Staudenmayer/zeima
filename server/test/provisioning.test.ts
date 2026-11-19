@@ -202,6 +202,55 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       expect(outside.statusCode).toBe(403)
     })
 
+    it('does not pull an existing account into the organization: the person is invited', async () => {
+      const outsider = id(60)
+      kc.users.set(outsider, { id: outsider, email: 'old@acme.example', name: 'Old Account', enabled: true })
+      kc.calls = []
+      const res = await scim('POST', '/Users', { userName: 'old@acme.example', name: { givenName: 'Old' } })
+      expect(res.statusCode).toBe(409)
+      // The answer is the same as for a person who is already a member: it does not say that an account exists elsewhere.
+      kc.users.set(id(10), { id: id(10), email: 'a@acme.example', name: 'A', enabled: true })
+      const already = await scim('POST', '/Users', { userName: 'a@acme.example', name: { givenName: 'M' } })
+      expect(already.statusCode).toBe(409)
+      expect(res.json().detail).toBe(already.json().detail)
+      expect(res.json().scimType).toBe(already.json().scimType)
+      expect(kc.calls).toEqual([`invite ${ORG} old@acme.example`])
+      expect(kc.calls.join()).not.toContain('addMember')
+      expect((await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.userId, outsider))).length).toBe(0)
+      expect((await db.db.select().from(schema.orgInvitation).where(eq(schema.orgInvitation.email, 'old@acme.example'))).length).toBe(1)
+    })
+
+    it('marks an address verified only when the domain was proven', async () => {
+      kc.calls = []
+      expect((await scim('POST', '/Users', { userName: 'proven@acme.example', name: { givenName: 'P' } })).statusCode).toBe(201)
+      expect(kc.calls).toContain('createUser proven@acme.example verified')
+      const lax = await buildApp(loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'silent', METRICS_ENABLED: 'false', SSO_VERIFY_DOMAINS: 'false' }), { logger: false, keys, readiness: {}, db: db.db, keycloakAdmin: kc, documentAll: true })
+      try {
+        kc.calls = []
+        const res = await lax.inject({ method: 'POST', url: '/v1/scim/v2/Users', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/scim+json' }, payload: JSON.stringify({ userName: 'unproven@acme.example', name: { givenName: 'U' } }) })
+        expect(res.statusCode).toBe(201)
+        expect(kc.calls).toContain('createUser unproven@acme.example unverified')
+      } finally {
+        await lax.close()
+      }
+    })
+
+    it('does not switch off an account that belongs to another organization: it only takes the person out of this one', async () => {
+      const shared = (await scim('GET', `/Users?filter=${encodeURIComponent('userName eq "proven@acme.example"')}`)).json().Resources[0]
+      const other = id(901)
+      await db.db.insert(schema.organization).values({ id: other, name: 'Other', createdAt: 1 })
+      await db.db.insert(schema.kcOrgMember).values({ orgId: other, userId: shared.id, role: 'member' })
+      kc.calls = []
+      const res = await scim('PATCH', `/Users/${shared.id}`, { Operations: [{ op: 'Replace', path: 'active', value: false }] })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().active).toBe(false)
+      expect(kc.calls).toEqual([`removeMember ${ORG} ${shared.id}`])
+      expect(kc.calls.join()).not.toContain('setEnabled')
+      const stillThere = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.userId, shared.id))
+      expect(stillThere.map((m) => m.orgId)).toEqual([other])
+      expect((await db.db.select().from(schema.kcUser).where(eq(schema.kcUser.id, shared.id)))[0]!.active).toBe(true)
+    })
+
     it('stops at the seat limit', async () => {
       await db.db.update(schema.entitlement).set({ seats: 1 })
       const res = await scim('POST', '/Users', { userName: 'late@acme.example', name: { givenName: 'L' } })
@@ -257,6 +306,18 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       const res = await dir('PUT', '', LDAP)
       expect(res.statusCode).toBe(500)
       expect(kc.ldap).toBeNull()
+    })
+
+    it('explains what to do when the service account has no right to change the realm (the default)', async () => {
+      kc.forbidLdap = true
+      try {
+        const res = await dir('GET', '')
+        expect(res.statusCode).toBe(409)
+        expect(res.json().code).toBe('directory_needs_role')
+        expect(res.json().detail).toContain('manage-realm')
+      } finally {
+        kc.forbidLdap = false
+      }
     })
 
     it('imports people on request', async () => {

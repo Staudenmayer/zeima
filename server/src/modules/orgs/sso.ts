@@ -5,7 +5,10 @@
 // src/keycloak/admin.ts); these routes are how an owner or admin sets it up.
 
 import { createHmac } from 'node:crypto'
+import { lookup as dnsLookup } from 'node:dns'
 import { lookup, resolveTxt } from 'node:dns/promises'
+import http from 'node:http'
+import https from 'node:https'
 import { isIP } from 'node:net'
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { Type } from 'typebox'
@@ -90,6 +93,82 @@ export async function checkSourceUrl(raw: string, allowPrivate: boolean, resolve
   return url
 }
 
+/** Most the API reads of a provider's metadata document. */
+const MAX_METADATA_BYTES = 1024 * 1024
+
+/**
+ * Reads the provider's metadata document itself, so that Keycloak never has to go to an address a tenant
+ * chose. The connection goes to the very address that was checked (no second look-up that could answer
+ * differently, DNS rebinding), redirects are not followed, and the answer is size- and time-limited.
+ */
+export async function fetchMetadata(url: URL, allowPrivate: boolean, resolver: Resolver = systemResolver): Promise<string> {
+  const client = url.protocol === 'https:' ? https : http
+  return new Promise<string>((resolve, reject) => {
+    const req = client.request(
+      url,
+      {
+        method: 'GET',
+        timeout: 10_000,
+        headers: { accept: 'application/json, application/samlmetadata+xml, application/xml, text/xml', 'user-agent': 'zeima-api' },
+        // The address that is connected to is the address that was checked.
+        lookup: ((host: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
+          resolver(host).then(
+            (found) => {
+              if (found.length === 0 || (!allowPrivate && found.some((f) => privateAddress(f.address)))) return callback(new Error('the address must be a public host name'))
+              const first = found[0]!.address
+              const entry = { address: first, family: isIP(first) }
+              if (options.all) callback(null, [entry])
+              else callback(null, first, entry.family)
+            },
+            (err: unknown) => callback(err),
+          )
+        }) as unknown as typeof dnsLookup,
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume()
+          return reject(new HttpProblem(400, 'bad_request', `the provider's metadata address answered ${res.statusCode}${res.statusCode && res.statusCode < 400 && res.statusCode >= 300 ? ' (redirects are not followed)' : ''}`))
+        }
+        const chunks: Buffer[] = []
+        let size = 0
+        res.on('data', (chunk: Buffer) => {
+          size += chunk.length
+          if (size > MAX_METADATA_BYTES) {
+            req.destroy(new HttpProblem(400, 'bad_request', 'the provider\'s metadata is larger than 1 MB'))
+            return
+          }
+          chunks.push(chunk)
+        })
+        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+        res.on('error', reject)
+      },
+    )
+    req.on('timeout', () => req.destroy(new HttpProblem(400, 'bad_request', 'the provider\'s metadata address did not answer in time')))
+    req.on('error', (err) => reject(err instanceof HttpProblem ? err : new HttpProblem(400, 'bad_request', `the provider's metadata could not be read: ${err.message}`)))
+    req.end()
+  })
+}
+
+/** The settings of an imported provider that name an address; every one must be public too. */
+const ADDRESS_KEYS = ['authorizationUrl', 'tokenUrl', 'userInfoUrl', 'jwksUrl', 'logoutUrl', 'tokenIntrospectionUrl', 'singleSignOnServiceUrl', 'singleLogoutServiceUrl', 'artifactResolutionServiceUrl', 'metadataDescriptorUrl']
+
+/**
+ * Keycloak contacts these addresses at every sign-in, with the organization's client secret in the token
+ * request: a provider whose metadata names an internal address must not be set up.
+ */
+export async function checkImportedAddresses(config: Record<string, string>, allowPrivate: boolean, resolver: Resolver = systemResolver): Promise<void> {
+  if (allowPrivate) return
+  for (const key of ADDRESS_KEYS) {
+    const value = config[key]
+    if (!value) continue
+    try {
+      await checkSourceUrl(value, false, resolver)
+    } catch {
+      throw new HttpProblem(400, 'bad_request', `the provider's metadata points ${key} at an address that is not public`)
+    }
+  }
+}
+
 export function normalizeDomains(domains: readonly string[]): string[] {
   const out = [...new Set(domains.map((d) => d.trim().toLowerCase().replace(/^@/, '')))]
   for (const d of out) {
@@ -104,9 +183,11 @@ export interface SsoRouteOptions {
   txt?: (name: string) => Promise<string[][]>
   /** Resolves a host name to its addresses; the real DNS unless a test gives its own. */
   resolver?: Resolver
+  /** Reads a provider's metadata document; the real network unless a test gives its own. */
+  fetchMetadata?: (url: URL) => Promise<string>
 }
 
-export const ssoRoutes: FastifyPluginAsyncTypebox<SsoRouteOptions> = async (app, { config, txt = resolveTxt, resolver }) => {
+export const ssoRoutes: FastifyPluginAsyncTypebox<SsoRouteOptions> = async (app, { config, txt = resolveTxt, resolver, fetchMetadata: fetchDocument }) => {
   const keycloak = (): KeycloakAdmin => {
     if (!app.keycloakAdmin) {
       throw new HttpProblem(503, 'org_admin_unavailable', 'organization management is not set up: the API has no Keycloak admin credentials')
@@ -128,8 +209,12 @@ export const ssoRoutes: FastifyPluginAsyncTypebox<SsoRouteOptions> = async (app,
   })
 
   /** Proves the organization owns a domain: the same value for every domain of the organization, from a secret only the API has. */
-  const challengeValue = (orgId: string) =>
-    `zeima-verification=${createHmac('sha256', config.keycloak.admin?.clientSecret ?? 'zeima-development').update(`sso-domain:${orgId}`).digest('hex').slice(0, 32)}`
+  const challengeValue = (orgId: string) => {
+    // Never a built-in value: anyone could compute the proof of any organization from it.
+    const key = config.sso.challengeSecret ?? config.keycloak.admin?.clientSecret
+    if (!key) throw new HttpProblem(503, 'org_admin_unavailable', 'no secret is set to prove domains with (KEYCLOAK_ADMIN_CLIENT_SECRET or SSO_CHALLENGE_SECRET)')
+    return `zeima-verification=${createHmac('sha256', key).update(`sso-domain:${orgId}`).digest('hex').slice(0, 32)}`
+  }
 
   const owns = async (orgId: string, domain: string) => {
     const records = await txt(`${CHALLENGE_NAME}.${domain}`).catch(() => [] as string[][])
@@ -189,7 +274,7 @@ export const ssoRoutes: FastifyPluginAsyncTypebox<SsoRouteOptions> = async (app,
       const actor = actorIn({ user: request.user! }, orgId)
       authorize(actor, 'org.settings', { orgId })
       const body = request.body
-      await checkSourceUrl(body.sourceUrl, config.sso.allowPrivateUrls, resolver)
+      const source = await checkSourceUrl(body.sourceUrl, config.sso.allowPrivateUrls, resolver)
       const domains = normalizeDomains(body.domains)
       if (body.protocol === 'oidc') {
         const existing = await keycloak().getSso(orgId)
@@ -211,7 +296,12 @@ export const ssoRoutes: FastifyPluginAsyncTypebox<SsoRouteOptions> = async (app,
         domains,
         enabled: body.enabled ?? true,
       }
-      await keycloak().setSso(orgId, input)
+      // The API reads the metadata (pinned to the checked address); Keycloak only parses what it is given.
+      const documentUrl = body.protocol === 'oidc' ? new URL(`${source.href.replace(/\/+$/, '')}/.well-known/openid-configuration`) : source
+      const document = await (fetchDocument ?? ((u: URL) => fetchMetadata(u, config.sso.allowPrivateUrls, resolver)))(documentUrl)
+      const imported = await keycloak().parseSsoMetadata(body.protocol, document)
+      await checkImportedAddresses(imported, config.sso.allowPrivateUrls, resolver)
+      await keycloak().setSso(orgId, input, imported)
       await audit(database(), { orgId, actorId: actor.user.id, action: 'sso.set', target: ssoAlias(orgId), detail: { protocol: input.protocol, domains, enabled: input.enabled } })
       return view(orgId)
     },

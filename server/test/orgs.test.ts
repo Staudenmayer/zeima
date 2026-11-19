@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
@@ -71,6 +71,22 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     }
     await db.db.insert(schema.kcUser).values({ id: OTHER, email: 'other@example.com', displayName: 'Otto' }).onConflictDoNothing()
   }
+
+  it('never leaves an organization without an owner when two owners step down at the same moment', async () => {
+    await reset()
+    // Admin Adam becomes the second owner; then the two owners demote each other at once, many times over.
+    await call('PATCH', `/v1/orgs/${ORG}/members/${ADMIN}`, OWNER, 'owner', { role: 'owner' })
+    for (let round = 0; round < 5; round++) {
+      await db.db.update(schema.kcOrgMember).set({ role: 'owner' }).where(and(eq(schema.kcOrgMember.orgId, ORG), inArray(schema.kcOrgMember.userId, [OWNER, ADMIN])))
+      const [a, b] = await Promise.all([
+        call('PATCH', `/v1/orgs/${ORG}/members/${ADMIN}`, OWNER, 'owner', { role: 'member' }),
+        call('PATCH', `/v1/orgs/${ORG}/members/${OWNER}`, ADMIN, 'owner', { role: 'member' }),
+      ])
+      expect([a.statusCode, b.statusCode].sort(), `round ${round}`).toEqual([200, 409])
+      const owners = await db.db.select().from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, ORG), eq(schema.kcOrgMember.role, 'owner')))
+      expect(owners, `round ${round}`).toHaveLength(1)
+    }
+  })
 
   it('creates an organization and makes the creator its owner', async () => {
     await reset()
@@ -177,15 +193,24 @@ describe.skipIf(!(await reachable()))('organizations', () => {
         db: db.db,
         keycloakAdmin: kc,
       })
-      const send = (body: object, signature?: string) =>
+      const send = (body: object, signature?: string, at = Date.now()) =>
         hooked.inject({
           method: 'POST',
           url: '/v1/internal/keycloak-events',
-          headers: { 'content-type': 'application/json', 'x-zeima-signature': signature ?? sign(secret, JSON.stringify(body)) },
+          headers: { 'content-type': 'application/json', 'x-zeima-timestamp': String(at), 'x-zeima-signature': signature ?? sign(secret, JSON.stringify(body), at) },
           payload: JSON.stringify(body),
         })
       expect((await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG }, 'sha256=00')).statusCode).toBe(401)
-      expect((await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG }, sign('another-secret-entirely', JSON.stringify({ type: 'GROUP_MEMBERSHIP', orgId: ORG })))).statusCode).toBe(401)
+      expect((await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG }, sign('another-secret-entirely', JSON.stringify({ type: 'GROUP_MEMBERSHIP', orgId: ORG }), Date.now()))).statusCode).toBe(401)
+      // A correctly signed call that is old (a captured one replayed) or from the future is refused, too.
+      const stale = Date.now() - 10 * 60_000
+      const replayed = await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG }, undefined, stale)
+      expect(replayed.statusCode).toBe(401)
+      expect(replayed.json().detail).toMatch(/too old/)
+      expect((await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG }, undefined, Date.now() + 10 * 60_000)).statusCode).toBe(401)
+      // The timestamp is part of what is signed: an old signature does not pass with a fresh timestamp.
+      const oldSig = sign(secret, JSON.stringify({ type: 'GROUP_MEMBERSHIP', orgId: ORG }), stale)
+      expect((await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG }, oldSig)).statusCode).toBe(401)
       const ok = await send({ type: 'GROUP_MEMBERSHIP', orgId: ORG })
       expect(ok.statusCode).toBe(202)
       expect(ok.json()).toEqual({ organizations: 1 })
@@ -622,7 +647,8 @@ describe.skipIf(!(await reachable()))('organizations', () => {
   })
 
   describe('profile pictures', () => {
-    const PIC = 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+    // A 16 by 16 JPEG header: what the server reads of a picture.
+    const PIC = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x10, 0x00, 0x10, 0x01, 0x01, 0x11, 0x00, 0xff, 0xd9]).toString('base64')}`
 
     it('are set by the person, seen by everyone in the organization, and can be removed', async () => {
       await reset()

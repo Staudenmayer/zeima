@@ -68,3 +68,11 @@ time (raw Ed25519 public keys, base64url, comma-separated); debug builds also
 trust the public development key. A release build with no key cannot verify
 plans, so it behaves as Free. Set it as a repository variable and pass it to
 the build step (see `server/README.md`, "Plans and sync").
+
+## Addon publisher keys
+
+Addons signed with the vendor's key show "Signed by …" without a server vouching for them. Make a key pair with
+`node scripts/addons.mjs keygen <key-id>`, keep the private key offline (it signs the addons you publish), and put the public key in the
+repository variable `ZEIMA_ADDON_VENDOR_KEYS` as `key-id=Name=public-key` (several separated by `;`). The release workflow compiles it into
+the app, so no server can replace it. Rotating a key means releasing an app version that lists both.
+

@@ -1,5 +1,6 @@
 // The signed-in user as the API sees them: identity and org memberships.
 
+import { checkAvatar } from './image.ts'
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { eq } from 'drizzle-orm'
 import { Type } from 'typebox'
@@ -9,7 +10,6 @@ import { HttpProblem, problems } from '../../plugins/errors.ts'
 
 /** What a profile picture may be: a small image as a data URL (the app shrinks it first). */
 export const AVATAR_MAX = 80_000
-const AVATAR = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/
 
 const Me = Type.Object(
   {
@@ -76,7 +76,8 @@ export const meRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
     async (request, reply) => {
       if (!app.db) throw new HttpProblem(503, 'unavailable', 'the database is not configured')
-      if (!AVATAR.test(request.body.image)) throw new HttpProblem(400, 'bad_request', 'the picture must be a PNG, JPEG or WebP data URL')
+      const problem = checkAvatar(request.body.image)
+      if (problem) throw new HttpProblem(400, 'bad_request', problem)
       await app.db.update(schema.kcUser).set({ avatar: request.body.image }).where(eq(schema.kcUser.id, request.user!.id))
       return reply.code(204).send(null)
     },

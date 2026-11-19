@@ -349,6 +349,11 @@ pub fn set_extra(files: &[(String, String)]) -> Vec<String> {
     problems
 }
 
+/// Whether `id` is one of the profiles that ship with the app.
+pub fn is_bundled(id: &str) -> bool {
+    BUNDLED.iter().any(|(b, _)| b.eq_ignore_ascii_case(id))
+}
+
 /// Whether `id` is a profile that came from outside the app (or replaces a bundled one).
 pub fn is_extra(id: &str) -> bool {
     EXTRA.read().unwrap_or_else(|e| e.into_inner()).iter().any(|p| p.id.eq_ignore_ascii_case(id))

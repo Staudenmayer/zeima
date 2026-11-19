@@ -1,8 +1,9 @@
 // Entry point: `node src/server.ts` (Node 24 runs the TypeScript directly).
 
 import { buildApp } from './app.ts'
+import { listenInternal } from './internal-listener.ts'
 import { ConfigError, loadConfig } from './config.ts'
-import { connect, migrateDb } from './db/index.ts'
+import { connect, enableTenantLogin, migrateDb, tenantUrlFor } from './db/index.ts'
 import { reconcileAll } from './modules/orgs/reconcile.ts'
 
 let config: ReturnType<typeof loadConfig>
@@ -14,13 +15,23 @@ try {
   process.exit(1)
 }
 
-const { client, db } = connect(config.databaseUrl)
+const { client, db, tenantClient } = connect(
+  config.databaseUrl,
+  {},
+  config.appDatabasePassword ? tenantUrlFor(config.databaseUrl, config.appDatabasePassword) : undefined,
+)
 // Self-hosted installs have no separate migration step: the API brings its
 // schema up to date before it listens.
 await migrateDb(db)
+if (config.appDatabasePassword) await enableTenantLogin(db, config.appDatabasePassword)
 
 const app = await buildApp(config, { db })
+if (!config.appDatabasePassword && config.env === 'production') {
+  // Not an error (a custom setup may do without), but the weaker arrangement: requests step down from the owner's session.
+  app.log.warn('APP_DATABASE_PASSWORD is not set: requests run through the owner database login with SET ROLE, which a bug in a query could undo. Set it so they use the restricted login (docs/admin-guide.md, "The database logins").')
+}
 app.addHook('onClose', async () => {
+  await tenantClient?.end()
   await client.end()
 })
 
@@ -52,8 +63,14 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   })
 }
 
+let internalServer: Awaited<ReturnType<typeof listenInternal>> | null = null
+app.addHook('onClose', async () => {
+  await new Promise<void>((resolve) => (internalServer ? internalServer.close(() => resolve()) : resolve()))
+})
+
 try {
   await app.listen({ host: config.host, port: config.port })
+  if (config.internalPort !== null) internalServer = await listenInternal(app, config.internalPort, config.host)
 } catch (err) {
   app.log.fatal({ err }, 'could not start')
   process.exit(1)

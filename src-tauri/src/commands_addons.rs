@@ -9,7 +9,6 @@ use serde::Serialize;
 use specta::Type;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_opener::OpenerExt;
 use zeima_addon_sdk as sdk;
 use zeima_core::addon::{AddonManifest, SettingType};
 use zeima_core::addon_sig::SignatureCheck;
@@ -128,11 +127,20 @@ pub(crate) fn read_package(path: &Path) -> Result<Package, CmdError> {
         return Ok(Package { manifest, manifest_src, wasm, signature: None });
     }
 
-    let file = std::fs::File::open(path).map_err(io_err)?;
-    let mut zip = zip::ZipArchive::new(file).map_err(|e| invalid(format!("not a zip file: {e}")))?;
+    read_zip(std::fs::File::open(path).map_err(io_err)?)
+}
+
+/// A package that is already in memory (downloaded and checked): it is parsed from those very bytes, never
+/// written to a file and read back, so nothing can swap it in between.
+pub(crate) fn read_package_bytes(bytes: Vec<u8>) -> Result<Package, CmdError> {
+    read_zip(std::io::Cursor::new(bytes))
+}
+
+fn read_zip<R: Read + std::io::Seek>(reader: R) -> Result<Package, CmdError> {
+    let mut zip = zip::ZipArchive::new(reader).map_err(|e| invalid(format!("not a zip file: {e}")))?;
     // addon.toml at the root or in one top-level folder.
     let manifest_name = (0..zip.len())
-        .filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_string()))
+        .filter_map(|i| zip.by_index(i).ok().and_then(|f| f.name().ok().map(|n| n.to_string())))
         .filter(|n| {
             n == MANIFEST_FILE || n.matches('/').count() == 1 && n.ends_with(&format!("/{MANIFEST_FILE}"))
         })
@@ -172,6 +180,96 @@ pub(crate) fn read_package(path: &Path) -> Result<Package, CmdError> {
         .ok()
         .map(|f| f.take(16 * 1024).read_to_string(&mut signature).is_ok());
     Ok(Package { manifest, manifest_src, wasm, signature: signed.unwrap_or(false).then_some(signature) })
+}
+
+/// The words of the native question: who made it, what it may do, and (for an update) what is new.
+fn consent_text(
+    manifest: &AddonManifest,
+    signature: &SignatureCheck,
+    existing: Option<&AddonRecord>,
+    de: bool,
+) -> String {
+    use zeima_core::addon::Permission as P;
+    use zeima_core::addon_sig::SignatureStatus as S;
+    let label = |p: &P| -> &'static str {
+        match (p, de) {
+            (P::EntriesRead, false) => "read your time entries",
+            (P::EntriesRead, true) => "deine Zeiteinträge lesen",
+            (P::EntriesWrite, false) => "create time entries",
+            (P::EntriesWrite, true) => "Zeiteinträge anlegen",
+            (P::ProjectsRead, false) => "read your projects",
+            (P::ProjectsRead, true) => "deine Projekte lesen",
+            (P::ActivitiesRead, false) => "read your activities",
+            (P::ActivitiesRead, true) => "deine Tätigkeiten lesen",
+            (P::TagsRead, false) => "read your tags",
+            (P::TagsRead, true) => "deine Tags lesen",
+            (P::CostCentersRead, false) => "read your cost centers",
+            (P::CostCentersRead, true) => "deine Kostenstellen lesen",
+            (P::MeetingsRead, false) => "read your meetings and answers",
+            (P::MeetingsRead, true) => "deine Besprechungen und Antworten lesen",
+            (P::AbsencesRead, false) => "read your absences",
+            (P::AbsencesRead, true) => "deine Abwesenheiten lesen",
+            (P::WorkRead, false) => "read your work days",
+            (P::WorkRead, true) => "deine Arbeitstage lesen",
+            (P::Notify, false) => "show notifications",
+            (P::Notify, true) => "Benachrichtigungen anzeigen",
+            (P::Network, false) => "connect to other computers on the network",
+            (P::Network, true) => "sich mit anderen Computern im Netzwerk verbinden",
+        }
+    };
+    let who = match (signature.status, &signature.signer) {
+        (S::Trusted, Some(name)) => if de { format!("Signiert von {name}") } else { format!("Signed by {name}") },
+        (S::ServerTrusted, Some(name)) => {
+            if de { format!("Signiert von {name} (vom Server der Installation bestätigt)") } else { format!("Signed by {name} (vouched for by this installation's server)") }
+        }
+        (S::UnknownKey, _) => (if de { "Von einem unbekannten Herausgeber signiert" } else { "Signed by an unknown publisher" }).into(),
+        _ => (if de { "Nicht signiert" } else { "Not signed" }).into(),
+    };
+    let mut hosts = manifest.allowed_hosts.clone();
+    if !manifest.host_settings.is_empty() {
+        hosts.push(if de { "(Adresse aus den Einstellungen)".into() } else { "(the address in its settings)".into() });
+    }
+    let perms: Vec<String> = manifest
+        .permissions
+        .iter()
+        .map(|p| match p {
+            P::Network if !hosts.is_empty() => format!("  • {}: {}", label(p), hosts.join(", ")),
+            _ => format!("  • {}", label(p)),
+        })
+        .collect();
+    let added: Vec<&P> = existing
+        .map(|r| manifest.permissions.iter().filter(|p| !r.granted.contains(p)).collect())
+        .unwrap_or_default();
+    let mut text = format!("{} {} — {}\n{who}\n\n", manifest.name, manifest.version, manifest.author);
+    text.push_str(if de { "Es darf:\n" } else { "It will be allowed to:\n" });
+    text.push_str(&if perms.is_empty() {
+        if de { "  • nichts außer dem eigenen Speicher".to_string() } else { "  • nothing beyond its own storage".to_string() }
+    } else {
+        perms.join("\n")
+    });
+    if existing.is_some() && !added.is_empty() {
+        text.push_str(if de { "\n\nNEU in dieser Version:\n" } else { "\n\nNEW in this version:\n" });
+        text.push_str(&added.iter().map(|p| format!("  • {}", label(p))).collect::<Vec<_>>().join("\n"));
+    }
+    text
+}
+
+/// The native yes/no. `false` for no (or if the window cannot be shown).
+async fn ask_consent(app: &AppHandle, text: String, de: bool) -> bool {
+    use tauri_plugin_dialog::{MessageDialogButtons, MessageDialogKind};
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .message(text)
+        .title(if de { "Addon installieren?" } else { "Install addon?" })
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            (if de { "Installieren" } else { "Install" }).into(),
+            (if de { "Abbrechen" } else { "Cancel" }).into(),
+        ))
+        .show(move |yes| {
+            let _ = tx.send(yes);
+        });
+    rx.await.unwrap_or(false)
 }
 
 fn manifest_toml(manifest: &AddonManifest) -> Result<String, CmdError> {
@@ -239,6 +337,15 @@ pub(crate) async fn install_package(
             "needs app version {} or newer",
             manifest.min_app_version.clone().unwrap_or_default()
         )));
+    }
+    // Consent is asked here, by the app itself, and not only in the web view: what runs on the person's machine
+    // must not depend on a front end that could be tampered with (or a call that skips it). Everything the
+    // manifest asks for is granted by a yes; an update lists what is new.
+    let existing = state.core.get_addon(&manifest.id).await.ok();
+    let language = state.settings().language();
+    let question = consent_text(&manifest, &signature, existing.as_ref(), language == "de");
+    if !ask_consent(app, question, language == "de").await {
+        return Err(CmdError::other("cancelled", "not installed"));
     }
     let root = addons_dir(app).map_err(io_err)?;
     let target = root.join(&manifest.id);
@@ -445,10 +552,7 @@ pub async fn addon_oauth_connect(
         &services.tokens,
         state.core.now_ms(),
         move |url| {
-            opener
-                .opener()
-                .open_url(url, None::<&str>)
-                .map_err(|e| format!("could not open the browser: {e}"))
+            crate::trust::open_link(&opener, url)
         },
         cancel,
         &pages,
@@ -747,6 +851,46 @@ mod tests {
 
     use super::*;
 
+    fn manifest_with(permissions: &str) -> AddonManifest {
+        AddonManifest::parse(&format!(
+            "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"2.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\npermissions = [{permissions}]\n{}",
+            if permissions.contains("network") { "allowed_hosts = [\"api.example.com\"]\n" } else { "" }
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_question_says_who_made_it_what_it_may_do_and_what_an_update_adds() {
+        use zeima_core::addon::Permission;
+        use zeima_core::addon_sig::SignatureStatus;
+        let signature = SignatureCheck { status: SignatureStatus::ServerTrusted, key_id: Some("k".into()), signer: Some("Acme IT".into()) };
+        let manifest = manifest_with("\"entries:read\", \"network\"");
+        let fresh = consent_text(&manifest, &signature, None, false);
+        assert!(fresh.contains("Demo 2.0.0 — Example"));
+        assert!(fresh.contains("Signed by Acme IT (vouched for by this installation's server)"));
+        assert!(fresh.contains("read your time entries"));
+        assert!(fresh.contains("connect to other computers on the network: api.example.com"));
+        assert!(!fresh.contains("NEW"));
+
+        // An update that adds the network permission says so; one that adds nothing does not.
+        let record = |granted: Vec<Permission>| AddonRecord {
+            id: "dev.example.demo".into(),
+            version: "1.0.0".into(),
+            enabled: true,
+            granted,
+            settings: Default::default(),
+            installed_at: 0,
+            updated_at: 0,
+        };
+        let update = consent_text(&manifest, &signature, Some(&record(vec![Permission::EntriesRead])), false);
+        assert!(update.contains("NEW in this version:\n  • connect to other computers"));
+        let same = consent_text(&manifest, &signature, Some(&record(vec![Permission::EntriesRead, Permission::Network])), false);
+        assert!(!same.contains("NEW"));
+        // Unsigned and in German.
+        let unsigned = consent_text(&manifest_with(""), &SignatureCheck::unsigned(), None, true);
+        assert!(unsigned.contains("Nicht signiert") && unsigned.contains("nichts außer dem eigenen Speicher"));
+    }
+
     /// A signed package built the way `scripts/addons.mjs` makes it is read, and its signature checks out;
     /// changing the module afterwards does not.
     #[test]
@@ -761,6 +905,7 @@ mod tests {
             key_id: v["key"]["keyId"].as_str().unwrap().into(),
             name: "Test".into(),
             key: parse_public_key(v["key"]["publicKey"].as_str().unwrap()).unwrap(),
+            vendor: true,
         }];
 
         let write = |name: &str, wasm: &[u8], sig: Option<&str>| {

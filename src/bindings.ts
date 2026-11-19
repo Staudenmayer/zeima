@@ -1374,8 +1374,13 @@ export type SignatureCheck = {
 export type SignatureStatus = 
 /**  No signature. */
 "unsigned" | 
-/**  Signed by a key the app trusts, and the files match. */
+/**  Signed by a publisher key built into the app (the vendor's), and the files match. */
 "trusted" | 
+/**
+ *  Signed by a publisher the connected server vouches for: as far as the installation's administrator is
+ *  trusted, not more. Shown differently from the vendor's.
+ */
+"server_trusted" | 
 /**  Signed, but by a key the app does not know. */
 "unknown_key" | 
 /**  Signed, but the files do not match the signature (changed after signing, or damaged). */

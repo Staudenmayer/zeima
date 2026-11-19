@@ -16,8 +16,12 @@ declare module 'fastify' {
   }
 }
 
-export function sign(secret: string, body: Buffer | string): string {
-  return `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`
+/** The call is refused when its timestamp is further than this from the server's clock, so a captured call cannot be replayed later. */
+export const MAX_WEBHOOK_AGE_MS = 5 * 60_000
+
+/** `sha256=<hex>`: HMAC-SHA256 over `<timestamp>.<body>`. */
+export function sign(secret: string, body: Buffer | string, timestamp: number | string): string {
+  return `sha256=${createHmac('sha256', secret).update(`${timestamp}.`).update(body).digest('hex')}`
 }
 
 export const internalRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (app, { config }) => {
@@ -37,13 +41,14 @@ export const internalRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asy
   app.post(
     '/internal/keycloak-events',
     {
+      config: { public: 'signed by Keycloak (HMAC)' },
       schema: {
         tags: ['internal'],
         summary: 'Keycloak says something changed (signed)',
         description:
-          'Sent by the Keycloak event listener for membership, group and user events. The body is signed with HMAC-SHA256 using KEYCLOAK_WEBHOOK_SECRET in the header `x-zeima-signature` (`sha256=<hex>`). ' +
+          'Sent by the Keycloak event listener for membership, group and user events. The signature is HMAC-SHA256 over `<timestamp>.<body>` using KEYCLOAK_WEBHOOK_SECRET, in the header `x-zeima-signature` (`sha256=<hex>`), with the time in milliseconds in `x-zeima-timestamp`; a call more than five minutes off the server\'s clock is refused. ' +
           'Give `orgId` to check one organization, or `userId` to check the organizations that person is in.',
-        headers: Type.Object({ 'x-zeima-signature': Type.String() }),
+        headers: Type.Object({ 'x-zeima-signature': Type.String(), 'x-zeima-timestamp': Type.String({ pattern: '^[0-9]{10,16}$' }) }),
         body: Type.Object({
           type: Type.String({ maxLength: 100 }),
           orgId: Type.Optional(Type.String({ format: 'uuid' })),
@@ -53,11 +58,14 @@ export const internalRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asy
       },
     },
     async (request, reply) => {
+      const stamp = request.headers['x-zeima-timestamp']
       const given = Buffer.from(request.headers['x-zeima-signature'])
-      const expected = Buffer.from(sign(secret, request.rawBody ?? ''))
+      const expected = Buffer.from(sign(secret, request.rawBody ?? '', stamp))
       if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
         throw new HttpProblem(401, 'unauthorized', 'the signature does not match')
       }
+      // Signed correctly, but is it fresh? Checked after the signature so the clock is not probed by strangers.
+      if (Math.abs(Date.now() - Number(stamp)) > MAX_WEBHOOK_AGE_MS) throw new HttpProblem(401, 'unauthorized', 'the call is too old (or the clocks differ by more than five minutes)')
       if (!app.db || !app.keycloakAdmin) throw new HttpProblem(503, 'unavailable', 'organization management is not set up')
       const { orgId, userId } = request.body
       const orgs = orgId ? [orgId] : userId ? await orgsOfUser(app.db, userId) : []

@@ -60,6 +60,10 @@ impl Core {
     /// Opens (or creates) the database file, runs migrations and bootstraps
     /// the local workspace and user on first start.
     pub async fn open(path: &Path, clock: Arc<dyn Clock>) -> Result<Self> {
+        // The folder is the owner's alone (Unix), and so is the file with everything in it.
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            crate::fsperm::private_dir(parent).map_err(|e| sqlx::Error::Io(e))?;
+        }
         let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
@@ -71,6 +75,12 @@ impl Core {
             .max_connections(4)
             .connect_with(options)
             .await?;
+        // The write-ahead files exist now, too.
+        for suffix in ["", "-wal", "-shm"] {
+            let mut file = path.as_os_str().to_owned();
+            file.push(suffix);
+            let _ = crate::fsperm::private_file(Path::new(&file));
+        }
         Self::init(pool, clock).await
     }
 
@@ -524,5 +534,19 @@ mod tests {
         let second = Core::open(&path, clock).await.unwrap().ctx().clone();
         assert_eq!(first, second);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_database_and_its_folder_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("zeima-core-perm-{}", new_id())).join("data");
+        let path = dir.join("zeima.db");
+        let core = Core::open(&path, Arc::new(ManualClock::new(1_000))).await.unwrap();
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&path), 0o600);
+        drop(core);
+        std::fs::remove_dir_all(dir.parent().unwrap()).ok();
     }
 }

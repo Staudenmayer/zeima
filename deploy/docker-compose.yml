@@ -19,8 +19,14 @@ name: zeima
 
 services:
   postgres:
-    image: docker.io/library/postgres:17
+    # Only the API and Keycloak can reach it, on a network that has no way out to the internet.
+    networks: [db]
+    image: docker.io/library/postgres:17@sha256:0d938e975177bef9f1f61f3f9dbcf2e0aa0a139568f66d3415ed8892eb97f6ac
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]   # what the image's start-up needs to prepare its data folder
+    mem_limit: 1g
     environment:
       POSTGRES_USER: zeima
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
@@ -36,11 +42,15 @@ services:
       retries: 20
 
   keycloak:
+    networks: [default, db]
     # Keycloak plus the event listener that tells the API about changes (keycloak/listener).
     build:
       context: ./keycloak
     image: zeima-keycloak:26.8.1
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    mem_limit: 1536m
     command: ["start", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
@@ -66,10 +76,13 @@ services:
       ZEIMA_SMTP_AUTH: ${SMTP_AUTH:-false}
       ZEIMA_SMTP_USER: ${SMTP_USER:-}
       ZEIMA_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      ZEIMA_VERIFY_EMAIL: ${VERIFY_EMAIL:-false}
+      # On by default: without it anyone can register any address (also a colleague's before the colleague does).
+      ZEIMA_VERIFY_EMAIL: ${VERIFY_EMAIL:-true}
+      # A decision, not a default: may people create their own accounts on the sign-in page? (docs/admin-guide.md)
+      ZEIMA_REGISTRATION_ALLOWED: ${REGISTRATION_ALLOWED:?decide whether people may register themselves: set REGISTRATION_ALLOWED=true or false in deploy/.env}
       # The event listener calls the API when KEYCLOAK_WEBHOOK_SECRET is set (the API's side of it);
       # without a secret it does nothing and the API's nightly check keeps its copy right.
-      ZEIMA_WEBHOOK_URL: ${KEYCLOAK_WEBHOOK_SECRET:+http://api:3000/v1/internal/keycloak-events}
+      ZEIMA_WEBHOOK_URL: ${KEYCLOAK_WEBHOOK_SECRET:+http://api:3001/v1/internal/keycloak-events}
       ZEIMA_WEBHOOK_SECRET: ${KEYCLOAK_WEBHOOK_SECRET:-}
     volumes:
       - ./keycloak/realm-zeima.json:/opt/keycloak/data/import/realm-zeima.json:ro,z
@@ -79,18 +92,30 @@ services:
         condition: service_healthy
 
   api:
+    networks: [default, db]
     build:
       context: ..
       dockerfile: server/Dockerfile
     # The name the air-gapped bundle loads the image under (docs/airgap.md).
     image: zeima-api:${ZEIMA_VERSION:-latest}
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 512m
     restart: unless-stopped
     environment:
       NODE_ENV: production
       DEPLOYMENT_MODE: self_hosted
-      TRUST_PROXY: "true"
+      # One proxy (Caddy) is in front: believe only the address it saw. "true" would trust any X-Forwarded-For.
+      TRUST_PROXY: "1"
+      # Keycloak's events and the metrics are served on this port only (not through Caddy).
+      INTERNAL_PORT: "3001"
       PUBLIC_URL: ${PUBLIC_URL}
       DATABASE_URL: postgres://zeima:${POSTGRES_PASSWORD}@postgres:5432/zeima
+      # Requests run through a restricted login (`zeima_app`: no superuser, row-level security applies and cannot be
+      # stepped out of); the API sets the login up with this password. Letters, digits and _ . ~ - only.
+      APP_DATABASE_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in deploy/.env (16+ letters and digits)}
       KEYCLOAK_URL: ${ID_URL}
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080
       DOCS_ENABLED: ${DOCS_ENABLED:-false}
@@ -115,8 +140,14 @@ services:
         condition: service_started
 
   caddy:
-    image: docker.io/library/caddy:2
+    image: docker.io/library/caddy:2@sha256:4851e54a46b206517c574821bb5cc67f170d2156041e9fbc4c9193b45e84a75b
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    read_only: true
+    tmpfs: [/tmp]
+    mem_limit: 256m
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env}
     ports:
@@ -128,6 +159,10 @@ services:
     depends_on:
       - api
       - keycloak
+
+networks:
+  db:
+    internal: true
 
 volumes:
   postgres:

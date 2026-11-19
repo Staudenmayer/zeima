@@ -5,7 +5,7 @@
 //   PUBLIC_URL=http://localhost:3000 ID_URL=http://localhost:8080 KEYCLOAK_ADMIN_PASSWORD=admin \
 //   node deploy/e2e/org-smoke.mjs
 //
-// Add E2E_SSO=1 to also check single sign-on; the API then needs SSO_ALLOW_PRIVATE_URLS=true.
+// Add E2E_SSO=1 to also check single sign-on; the API then needs SSO_ALLOW_PRIVATE_URLS=true and SSO_VERIFY_DOMAINS=false.
 //
 // The API needs KEYCLOAK_ADMIN_CLIENT_SECRET (see deploy/compose.dev.yml) and
 // the realm from deploy/keycloak applied. Needs Node 24. Exit code 1 on the
@@ -15,6 +15,9 @@ import { randomUUID } from 'node:crypto'
 import { adminToken, createUser, json, reporter, signIn } from './lib.mjs'
 
 const { PUBLIC_URL, ID_URL, KEYCLOAK_ADMIN_PASSWORD } = process.env
+// Keycloak's administration console is not published on the public sign-in host: give its address when it is only
+// reachable inside the network.
+const ADMIN_URL = process.env.KEYCLOAK_ADMIN_URL ?? ID_URL
 if (!PUBLIC_URL || !ID_URL || !KEYCLOAK_ADMIN_PASSWORD) {
   console.error('set PUBLIC_URL, ID_URL and KEYCLOAK_ADMIN_PASSWORD')
   process.exit(2)
@@ -22,11 +25,11 @@ if (!PUBLIC_URL || !ID_URL || !KEYCLOAK_ADMIN_PASSWORD) {
 const { must, fail } = reporter()
 
 const discovery = await json(await fetch(`${PUBLIC_URL}/.well-known/zeima-server`))
-const admin = await adminToken(ID_URL, KEYCLOAK_ADMIN_PASSWORD)
+const admin = await adminToken(ADMIN_URL, KEYCLOAK_ADMIN_PASSWORD)
 must(admin, 'admin signed in to Keycloak')
 
-const ownerUser = await createUser(ID_URL, admin, 'owner')
-const memberUser = await createUser(ID_URL, admin, 'member')
+const ownerUser = await createUser(ADMIN_URL, admin, 'owner')
+const memberUser = await createUser(ADMIN_URL, admin, 'member')
 const owner = await signIn(discovery, ownerUser)
 const member = await signIn(discovery, memberUser)
 must(owner.sub !== member.sub, 'two people signed in')
@@ -102,9 +105,9 @@ if (process.env.E2E_SSO) {
   )
   must(set.configured && set.domains[0] === domain && !JSON.stringify(set).includes('e2e-secret'), 'it is configured and the secret is not given back', set)
   // Keycloak: the provider exists, is linked to the organization and is hidden from the sign-in page.
-  const kcIdp = await json(await fetch(`${ID_URL}/admin/realms/zeima/identity-provider/instances/sso-${org.id}`, { headers: { authorization: `Bearer ${admin}` } }))
+  const kcIdp = await json(await fetch(`${ADMIN_URL}/admin/realms/zeima/identity-provider/instances/sso-${org.id}`, { headers: { authorization: `Bearer ${admin}` } }))
   must(kcIdp.hideOnLogin === true && kcIdp.config.authorizationUrl?.includes('/realms/master/'), 'Keycloak has the provider, read from its metadata and hidden from the sign-in page', kcIdp)
-  const kcOrg = await json(await fetch(`${ID_URL}/admin/realms/zeima/organizations/${org.id}`, { headers: { authorization: `Bearer ${admin}` } }))
+  const kcOrg = await json(await fetch(`${ADMIN_URL}/admin/realms/zeima/organizations/${org.id}`, { headers: { authorization: `Bearer ${admin}` } }))
   must(kcOrg.domains?.some((d) => d.name === domain && d.identityProviderAlias === `sso-${org.id}` && d.autoRedirect), 'the organization\'s domain is tied to the provider', kcOrg)
   // A person with an address in the domain is sent to the provider when they sign in.
   const redirected = await (async () => {
@@ -129,7 +132,7 @@ if (process.env.E2E_SSO) {
   })()
   must(redirected === 'ok', 'signing in with an address in the domain leads to the identity provider', redirected)
   await expect(await call(owner, 'DELETE', `/v1/orgs/${org.id}/sso`), 204, 'the owner removed the single sign-on')
-  const gone = await fetch(`${ID_URL}/admin/realms/zeima/identity-provider/instances/sso-${org.id}`, { headers: { authorization: `Bearer ${admin}` } })
+  const gone = await fetch(`${ADMIN_URL}/admin/realms/zeima/identity-provider/instances/sso-${org.id}`, { headers: { authorization: `Bearer ${admin}` } })
   must(gone.status === 404, 'Keycloak no longer has the provider', gone.status)
 }
 

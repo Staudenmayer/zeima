@@ -20,6 +20,7 @@ export const healthRoutes: FastifyPluginAsyncTypebox<{ checks: Record<string, Re
   app.get(
     '/healthz',
     {
+      config: { public: 'liveness probe' },
       schema: {
         tags: ['health'],
         summary: 'Liveness: the process is running',
@@ -32,6 +33,7 @@ export const healthRoutes: FastifyPluginAsyncTypebox<{ checks: Record<string, Re
   app.get(
     '/readyz',
     {
+      config: { public: 'readiness probe' },
       schema: {
         tags: ['health'],
         summary: 'Readiness: the dependencies (Keycloak, the database) are reachable',

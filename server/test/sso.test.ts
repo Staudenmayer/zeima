@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
 import { schema } from '../src/db/index.ts'
-import { CHALLENGE_NAME, checkSourceUrl, normalizeDomains } from '../src/modules/orgs/sso.ts'
+import http from 'node:http'
+import { CHALLENGE_NAME, checkImportedAddresses, checkSourceUrl, fetchMetadata, normalizeDomains } from '../src/modules/orgs/sso.ts'
 import { FakeKeycloak } from './fake-keycloak.ts'
 import { keys, token } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
@@ -48,6 +49,57 @@ describe('the address of a provider', () => {
   })
 })
 
+describe('reading a provider\'s metadata', () => {
+  let server: http.Server
+  let port = 0
+  const seen: string[] = []
+  beforeAll(async () => {
+    server = http.createServer((req, res) => {
+      seen.push(`${req.headers.host} ${req.url}`)
+      if (req.url === '/redirect') return void res.writeHead(302, { location: 'http://169.254.169.254/latest' }).end()
+      if (req.url === '/huge') return void res.writeHead(200).end(Buffer.alloc(2 * 1024 * 1024, 97))
+      res.writeHead(200).end('{"ok":true}')
+    })
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+    port = (server.address() as { port: number }).port
+  })
+  afterAll(() => new Promise<void>((r) => server.close(() => r())))
+
+  it('connects to the address that was checked, not to a second answer of the name (DNS rebinding)', async () => {
+    let lookups = 0
+    // The name answers with a private address the first time and a public one later: only the first counts.
+    const rebinding = async () => (lookups++ === 0 ? [{ address: '127.0.0.1' }] : [{ address: '93.184.216.34' }])
+    const text = await fetchMetadata(new URL(`http://rebind.example:${port}/doc`), true, rebinding)
+    expect(text).toBe('{"ok":true}')
+    expect(lookups).toBe(1)
+    expect(seen.at(-1)).toBe(`rebind.example:${port} /doc`)
+  })
+
+  it('refuses a name that resolves to a private address when private ones are not allowed', async () => {
+    await expect(fetchMetadata(new URL(`http://evil.example:${port}/doc`), false, async () => [{ address: '10.0.0.5' }])).rejects.toMatchObject({ status: 400 })
+    await expect(fetchMetadata(new URL(`http://evil.example:${port}/doc`), false, async () => [{ address: '169.254.169.254' }])).rejects.toMatchObject({ status: 400 })
+    await expect(fetchMetadata(new URL(`http://evil.example:${port}/doc`), false, async () => [{ address: '127.0.0.1' }])).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('does not follow redirects and stops reading a huge answer', async () => {
+    const resolver = async () => [{ address: '127.0.0.1' }]
+    await expect(fetchMetadata(new URL(`http://x.example:${port}/redirect`), true, resolver)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('redirects') })
+    expect(seen.some((s) => s.includes('169.254'))).toBe(false)
+    await expect(fetchMetadata(new URL(`http://x.example:${port}/huge`), true, resolver)).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('refuses a provider whose metadata names an address on a private network', async () => {
+    const public_ = async () => [{ address: '93.184.216.34' }]
+    await expect(checkImportedAddresses({ tokenUrl: 'https://login.acme.example/token' }, false, public_)).resolves.toBeUndefined()
+    for (const [key, value] of [['tokenUrl', 'https://127.0.0.1/token'], ['jwksUrl', 'https://169.254.169.254/keys'], ['userInfoUrl', 'https://10.0.0.1/me'], ['authorizationUrl', 'http://login.acme.example/auth'], ['tokenUrl', 'https://intranet/token'], ['singleSignOnServiceUrl', 'https://localhost/sso']] as const) {
+      await expect(checkImportedAddresses({ [key]: value }, false, public_), `${key} ${value}`).rejects.toMatchObject({ status: 400 })
+    }
+    await expect(checkImportedAddresses({ tokenUrl: 'https://sneaky.example/token' }, false, async () => [{ address: '10.1.1.1' }])).rejects.toMatchObject({ status: 400 })
+    // Development setups may use private addresses.
+    await expect(checkImportedAddresses({ tokenUrl: 'http://localhost:8080/token' }, true)).resolves.toBeUndefined()
+  })
+})
+
 describe.skipIf(!(await reachable()))('single sign-on of an organization', () => {
   let db: Awaited<ReturnType<typeof createTestDatabase>>
   let kc: FakeKeycloak
@@ -63,6 +115,7 @@ describe.skipIf(!(await reachable()))('single sign-on of an organization', () =>
       db: db.db,
       keycloakAdmin: kc,
       dnsResolver: PUBLIC,
+      ssoFetch: async () => '{}',
       ...extra,
     })
 
@@ -75,8 +128,8 @@ describe.skipIf(!(await reachable()))('single sign-on of an organization', () =>
   beforeAll(async () => {
     db = await createTestDatabase()
     kc = new FakeKeycloak()
-    app = await build()
-    strict = await build({ SSO_VERIFY_DOMAINS: 'true' }, { dnsTxt: async (name) => published.get(name) ?? [] })
+    app = await build({ SSO_VERIFY_DOMAINS: 'false' })
+    strict = await build({ SSO_VERIFY_DOMAINS: 'true', SSO_CHALLENGE_SECRET: 'a-test-challenge-secret' }, { dnsTxt: async (name) => published.get(name) ?? [] })
     await db.db.insert(schema.organization).values({ id: ORG, name: 'Acme', createdAt: 1 })
     for (const [uid, role] of [[OWNER, 'owner'], [ADMIN, 'admin'], [MEMBER, 'member']] as const) {
       await db.db.insert(schema.kcUser).values({ id: uid, email: `${uid.slice(-1)}@example.com`, displayName: role }).onConflictDoNothing()
@@ -98,6 +151,20 @@ describe.skipIf(!(await reachable()))('single sign-on of an organization', () =>
     expect(body.samlMetadataUrl).toBe(`${body.redirectUri}/descriptor`)
   })
 
+  it('refuses to set up a provider whose metadata points at an internal address', async () => {
+    kc.metadata = { ...kc.metadata, tokenUrl: 'https://169.254.169.254/token' }
+    const strictResolver = await build({ SSO_VERIFY_DOMAINS: 'false' })
+    try {
+      const res = await call(strictResolver, 'PUT', OWNER, 'owner', OIDC)
+      expect(res.statusCode).toBe(400)
+      expect(res.json().detail).toContain('tokenUrl')
+      expect(kc.sso.has(ORG)).toBe(false)
+    } finally {
+      kc.metadata = { issuer: 'https://login.acme.example', tokenUrl: 'https://login.acme.example/token', authorizationUrl: 'https://login.acme.example/auth', jwksUrl: 'https://login.acme.example/keys' }
+      await strictResolver.close()
+    }
+  })
+
   it('is for owners and admins; members and strangers are refused', async () => {
     for (const [uid, role] of [[MEMBER, 'member'], [STRANGER, null]] as const) {
       for (const method of ['GET', 'PUT', 'DELETE'] as const) {
@@ -114,7 +181,7 @@ describe.skipIf(!(await reachable()))('single sign-on of an organization', () =>
     expect(res.statusCode).toBe(200)
     expect(res.json()).toMatchObject({ configured: true, protocol: 'oidc', name: 'Acme sign-in', clientId: 'zeima', domains: ['acme.example'], enabled: true })
     expect(JSON.stringify(res.json())).not.toContain('s3cret')
-    expect(kc.calls).toEqual([`setSso ${ORG} oidc acme.example`])
+    expect(kc.calls).toEqual(["parseSsoMetadata oidc", `setSso ${ORG} oidc acme.example`])
     const log = await db.db.select().from(schema.auditLog).where(eq(schema.auditLog.orgId, ORG))
     expect(log.map((l) => l.action)).toContain('sso.set')
     expect(JSON.stringify(log.map((l) => l.detail))).not.toContain('s3cret')
@@ -150,6 +217,17 @@ describe.skipIf(!(await reachable()))('single sign-on of an organization', () =>
     expect((await call(app, 'GET', OWNER, 'owner')).json()).toMatchObject({ configured: false, domains: [] })
     const log = await db.db.select().from(schema.auditLog).where(eq(schema.auditLog.orgId, ORG))
     expect(log.map((l) => l.action)).toContain('sso.delete')
+  })
+
+  it('has no built-in secret for the domain proof: without one it says so instead of making a guessable value', async () => {
+    const bare = await build({ SSO_VERIFY_DOMAINS: 'true' })
+    try {
+      const res = await call(bare, 'GET', OWNER, 'owner')
+      expect(res.statusCode).toBe(503)
+      expect(res.json().detail).toMatch(/secret/)
+    } finally {
+      await bare.close()
+    }
   })
 
   it('makes an organization prove its domains where that is required', async () => {

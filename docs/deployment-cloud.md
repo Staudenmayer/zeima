@@ -16,7 +16,7 @@ Internet ─ CDN/WAF ─ load balancer (TLS) ─┬─ API ×2+      (server/Doc
 - **Region**: EU (customers are EU-based; the data processing agreement and
   VAT handling assume it). Keep API, Keycloak and both databases in one region.
 - **API**: run the image from `server/Dockerfile` with `DEPLOYMENT_MODE=cloud`,
-  `TRUST_PROXY=true`, `NODE_ENV=production`. It applies its migrations on
+  `TRUST_PROXY=1` (the number of proxies in front, not `true`), `INTERNAL_PORT` for the events and metrics, `NODE_ENV=production`. It applies its migrations on
   start (`DATABASE_URL` needs a role that may create the `zeima_app` role and
   tables). Give it `ENTITLEMENT_SIGNING_KEY` (Ed25519 PKCS#8, base64url) from a
   secret store, never from the image. The matching public key goes into the

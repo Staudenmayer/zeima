@@ -11,6 +11,9 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
 const { PUBLIC_URL, ID_URL, KEYCLOAK_ADMIN_PASSWORD } = process.env
+// Keycloak's administration console is not published on the public sign-in host (deploy/Caddyfile): a stack
+// whose Keycloak is only reachable inside the network gives its admin address here.
+const ADMIN_URL = process.env.KEYCLOAK_ADMIN_URL ?? ID_URL
 if (!PUBLIC_URL || !ID_URL || !KEYCLOAK_ADMIN_PASSWORD) {
   console.error('set PUBLIC_URL, ID_URL and KEYCLOAK_ADMIN_PASSWORD')
   process.exit(2)
@@ -36,7 +39,7 @@ const json = async (res) => {
 // ---- 1. a user, created through the admin API
 const adminToken = (
   await json(
-    await fetch(`${ID_URL}/realms/master/protocol/openid-connect/token`, {
+    await fetch(`${ADMIN_URL}/realms/master/protocol/openid-connect/token`, {
       method: 'POST',
       body: new URLSearchParams({ client_id: 'admin-cli', grant_type: 'password', username: 'admin', password: KEYCLOAK_ADMIN_PASSWORD }),
     }),
@@ -46,7 +49,7 @@ must(adminToken, 'admin signed in to Keycloak')
 
 const username = `e2e-${randomBytes(4).toString('hex')}`
 const password = randomBytes(12).toString('base64url')
-const created = await fetch(`${ID_URL}/admin/realms/zeima/users`, {
+const created = await fetch(`${ADMIN_URL}/admin/realms/zeima/users`, {
   method: 'POST',
   headers: { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' },
   body: JSON.stringify({

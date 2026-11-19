@@ -379,4 +379,28 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       forgetRoles(ORG)
     }
   })
+
+  describe('clocks', () => {
+    const E = id(970)
+    const entry = (extra: Record<string, unknown> = {}) => ({ userId: ANNA, startAt: 1_000, endAt: 2_000, note: 'n', projectId: id(10), tagIds: [id(11)], activityId: id(12), locked: false, ...extra })
+
+    it('refuse a change stamped far ahead of the server, so nobody can make a field unchangeable', async () => {
+      const hour = Date.now() + 3_600_000
+      expect(await results(ANNA, [upsert('time_entry', E, hour, entry())])).toEqual([{ status: 'rejected', reason: 'clock_ahead' }])
+      // Nothing was stored.
+      expect(await pulledIds(ANNA)).not.toContain(E)
+    })
+
+    it('let a clock be a little off', async () => {
+      expect(await results(ANNA, [upsert('time_entry', E, Date.now() + 60_000, entry())])).toEqual([{ status: 'applied' }])
+    })
+
+    it('do not let an employee outrank a manager\'s lock with a no-op write of `locked: false`', async () => {
+      // Anna writes locked:false again, stamped as far ahead as the server tolerates ...
+      await results(ANNA, [upsert('time_entry', E, Date.now() + 100_000, { locked: false, note: 'again' })])
+      // ... and the manager then locks the entry, with the (earlier) current time.
+      expect(await results(MANAGER, [upsert('time_entry', E, Date.now(), { locked: true })])).toEqual([{ status: 'applied' }])
+      expect(await results(ANNA, [upsert('time_entry', E, Date.now() + 100_000, { note: 'after the lock' })])).toEqual([{ status: 'rejected', reason: 'locked' }])
+    })
+  })
 })

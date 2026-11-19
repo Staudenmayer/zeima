@@ -22,12 +22,36 @@ use zeima_core::addon_sig::{self, SignatureCheck, SignatureStatus, TrustedKey};
 use crate::account::{self, discover};
 use crate::addons::{addons_dir, Addons};
 use crate::commands::{CmdError, CmdResult};
-use crate::commands_addons::{install_package, read_package, AddonInfo};
+use crate::commands_addons::{install_package, read_package_bytes, AddonInfo};
 use crate::state::AppState;
 
-/// Publisher keys built into this app: (key id, name, public key in base64url). The vendor's key
-/// goes here when it exists; installations add their own through their server's registry.
-pub const BUILTIN: &[(&str, &str, &str)] = &[];
+/// Publisher keys built into this app, the vendor's: `key-id=Name=public-key` separated by `;`. A release build sets
+/// them with the environment variable `ZEIMA_ADDON_VENDOR_KEYS` at compile time, so the key is part of the signed
+/// app and cannot be replaced by a server. Installations add their own publishers through their server's registry;
+/// those are shown as "server trusted", never as the vendor's.
+pub const BUILTIN: &str = match option_env!("ZEIMA_ADDON_VENDOR_KEYS") {
+    Some(keys) => keys,
+    None => "",
+};
+
+/// The built-in keys as publishers.
+pub fn builtin_publishers() -> Vec<Publisher> {
+    parse_builtin(BUILTIN)
+}
+
+fn parse_builtin(spec: &str) -> Vec<Publisher> {
+    spec.split(';')
+        .filter_map(|entry| {
+            let mut parts = entry.trim().splitn(3, '=');
+            let (id, name, key) = (parts.next()?, parts.next()?, parts.next()?);
+            (!id.is_empty() && !name.is_empty() && !key.is_empty()).then(|| Publisher {
+                key_id: id.into(),
+                name: name.into(),
+                public_key: key.into(),
+            })
+        })
+        .collect()
+}
 
 const SIGNATURE_RECORD: &str = "signature.json";
 const STATE_FILE: &str = ".registry-state.json";
@@ -77,16 +101,18 @@ pub fn refused_by(rules: &[OrgRule], addon_id: &str, signature: &SignatureCheck)
 
 /// The keys this app trusts: its own and the publishers of the server's registry.
 pub fn trusted_keys(publishers: &[Publisher]) -> Vec<TrustedKey> {
-    let builtin = BUILTIN.iter().map(|(id, name, key)| Publisher {
-        key_id: (*id).into(),
-        name: (*name).into(),
-        public_key: (*key).into(),
-    });
-    builtin
-        .chain(publishers.iter().cloned())
-        .filter_map(|p| {
-            Some(TrustedKey { key_id: p.key_id, name: p.name, key: addon_sig::parse_public_key(&p.public_key)? })
-        })
+    keys_of(&builtin_publishers(), publishers)
+}
+
+/// `vendor` keys come first, so a server cannot override a vendor key id with its own key.
+fn keys_of(vendor: &[Publisher], server: &[Publisher]) -> Vec<TrustedKey> {
+    let make = |p: &Publisher, is_vendor: bool| {
+        Some(TrustedKey { key_id: p.key_id.clone(), name: p.name.clone(), key: addon_sig::parse_public_key(&p.public_key)?, vendor: is_vendor })
+    };
+    vendor
+        .iter()
+        .filter_map(|p| make(p, true))
+        .chain(server.iter().filter(|p| !vendor.iter().any(|v| v.key_id == p.key_id)).filter_map(|p| make(p, false)))
         .collect()
 }
 
@@ -271,8 +297,14 @@ pub async fn addon_registry(app: AppHandle, state: State<'_, AppState>, addons: 
             .key_id
             .as_ref()
             .and_then(|k| trusted_keys(&index.publishers).into_iter().find(|t| &t.key_id == k).map(|t| t.name));
+        let vendor_key = e.key_id.as_ref().is_some_and(|k| builtin_publishers().iter().any(|p| &p.key_id == k));
         let claimed = SignatureCheck {
-            status: if signer.is_some() { SignatureStatus::Trusted } else if e.key_id.is_some() { SignatureStatus::UnknownKey } else { SignatureStatus::Unsigned },
+            status: match (signer.is_some(), vendor_key) {
+                (true, true) => SignatureStatus::Trusted,
+                (true, false) => SignatureStatus::ServerTrusted,
+                (false, _) if e.key_id.is_some() => SignatureStatus::UnknownKey,
+                _ => SignatureStatus::Unsigned,
+            },
             key_id: e.key_id.clone(),
             signer: signer.clone(),
         };
@@ -321,11 +353,8 @@ pub async fn addon_registry_install(
     if !digest.eq_ignore_ascii_case(&entry.sha256) {
         return Err(err("validation", "the downloaded package does not match what the server announced"));
     }
-    let tmp = std::env::temp_dir().join(format!("zeima-addon-{}-{}.zip", std::process::id(), entry.file.replace(['/', '\\'], "_")));
-    std::fs::write(&tmp, &bytes).map_err(|e| err("io", e))?;
-    let package = read_package(&tmp);
-    let _ = std::fs::remove_file(&tmp);
-    let package = package?;
+    // From the bytes that were just checked: not through a file in a shared folder that another process could replace.
+    let package = read_package_bytes(bytes)?;
     if package.manifest.id != entry.id || package.manifest.version != entry.version {
         return Err(err("validation", "the package is not the addon the server announced"));
     }
@@ -422,7 +451,7 @@ mod tests {
         OrgRule { org_id: "o".into(), org_name: "Acme".into(), mode: mode.into(), require_signed: signed, allowed: allowed.iter().map(|s| (*s).into()).collect() }
     }
     fn trusted() -> SignatureCheck {
-        SignatureCheck { status: SignatureStatus::Trusted, key_id: Some("k".into()), signer: Some("Pub".into()) }
+        SignatureCheck { status: SignatureStatus::ServerTrusted, key_id: Some("k".into()), signer: Some("Pub".into()) }
     }
 
     #[test]
@@ -458,6 +487,24 @@ mod tests {
     fn publishers_with_a_bad_key_are_not_trusted() {
         let keys = trusted_keys(&[Publisher { key_id: "k".into(), name: "n".into(), public_key: "not a key".into() }]);
         assert!(keys.is_empty());
+    }
+
+    #[test]
+    fn vendor_keys_come_from_the_build_and_cannot_be_replaced_by_a_server() {
+        let v: serde_json::Value = serde_json::from_str(include_str!("../../packages/shared-fixtures/addons/vectors.json")).unwrap();
+        let real_key = v["key"]["publicKey"].as_str().unwrap().to_string();
+        let vendor = parse_builtin(&format!("acme-1=Acme={real_key}; broken ;x=y"));
+        assert_eq!(vendor.len(), 1);
+        assert_eq!((vendor[0].key_id.as_str(), vendor[0].name.as_str()), ("acme-1", "Acme"));
+        assert!(parse_builtin("").is_empty());
+        // A server that lists another key under the vendor's key id is ignored for that id; its own ids are kept.
+        let fake = Publisher { key_id: "acme-1".into(), name: "Evil".into(), public_key: real_key.clone() };
+        let local = Publisher { key_id: "local".into(), name: "Local".into(), public_key: real_key };
+        let keys = keys_of(&vendor, &[fake, local]);
+        assert_eq!(keys.len(), 2);
+        assert!(keys.iter().find(|k| k.key_id == "acme-1").unwrap().vendor);
+        assert_eq!(keys.iter().find(|k| k.key_id == "acme-1").unwrap().name, "Acme");
+        assert!(!keys.iter().find(|k| k.key_id == "local").unwrap().vendor);
     }
 
     #[test]

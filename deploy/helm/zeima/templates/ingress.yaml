@@ -28,7 +28,20 @@ spec:
     - host: {{ $id | quote }}
       http:
         paths:
+          {{- if .Values.exposeKeycloakAdmin }}
           - path: /
             pathType: Prefix
             backend: { service: { name: {{ .Release.Name }}-keycloak, port: { name: http } } }
+          {{- else }}
+          # Only what browsers and apps need of the sign-in service. Keycloak's administration console and the master
+          # realm are not published (exposeKeycloakAdmin).
+          {{- range $path := list "/realms/zeima" "/resources" }}
+          - path: {{ $path }}
+            pathType: Prefix
+            backend: { service: { name: {{ $.Release.Name }}-keycloak, port: { name: http } } }
+          {{- end }}
+          - path: /robots.txt
+            pathType: Exact
+            backend: { service: { name: {{ .Release.Name }}-keycloak, port: { name: http } } }
+          {{- end }}
 {{- end }}
