@@ -101,6 +101,7 @@ describe.skipIf(!haveHelm)('the Helm chart', () => {
 
   it('asks people to confirm their address, and refuses to install that way without a mail server', () => {
     expect(render()).toMatch(/name: ZEIMA_VERIFY_EMAIL, value: "true"/)
+    expect(render()).toMatch(/name: ZEIMA_REQUIRE_MFA, value: "false"/)
     const base = ['template', 'zeima', chart, '--set', 'publicUrl=https://zeima.example.com', '--set', 'idUrl=https://id.zeima.example.com', '--set', 'keycloak.registrationAllowed=true']
     const run = spawnSync('helm', base, { encoding: 'utf8' })
     expect(run.status).not.toBe(0)
@@ -152,6 +153,7 @@ describe('the compose file and the proxy', () => {
 
   it('check email addresses by default, trust one proxy, and restrict the containers', () => {
     expect(compose).toContain('VERIFY_EMAIL:-true')
+    expect(compose).toContain('REQUIRE_MFA:-false')
     expect(compose).toContain('TRUST_PROXY: "1"')
     expect((compose.match(/no-new-privileges:true/g) ?? []).length).toBeGreaterThanOrEqual(4)
     expect(compose).toMatch(/postgres:17@sha256:[0-9a-f]{64}/)

@@ -16,6 +16,8 @@ use crate::{Error, Result};
 pub const KV_MAX_KEYS: i64 = 10_000;
 pub const KV_MAX_VALUE_BYTES: usize = 1024 * 1024;
 pub const KV_MAX_KEY_BYTES: usize = 256;
+/// All values of one addon together: a store for settings and caches, not a second disk.
+pub const KV_MAX_TOTAL_BYTES: i64 = 5 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -157,6 +159,14 @@ impl Core {
                 "key",
                 format!("at most {KV_MAX_KEYS} keys per addon"),
             ));
+        }
+        let used: i64 = sqlx::query_scalar("SELECT COALESCE(SUM(LENGTH(CAST(value AS BLOB))), 0) FROM addon_kv WHERE addon_id = ? AND key != ?")
+            .bind(addon_id)
+            .bind(key)
+            .fetch_one(&mut *tx)
+            .await?;
+        if used + value.len() as i64 > KV_MAX_TOTAL_BYTES {
+            return Err(Error::validation("value", "an addon may store at most 5 MB in all"));
         }
         sqlx::query(
             "INSERT INTO addon_kv (addon_id, key, value) VALUES (?, ?, ?)

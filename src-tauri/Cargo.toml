@@ -42,6 +42,7 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 extism = "1.41"
 keyring = "4.2"
 url = "2"
+psl = "2"
 sha2 = "0.10"
 base64 = "0.22"
 getrandom = "0.3"

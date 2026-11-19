@@ -12,6 +12,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { type Db, schema } from '../../db/index.ts'
 import { roomIsTaken } from '../../meetings/rooms.ts'
+import { meetingShapeProblem } from '../../meetings/occurrences.ts'
 import { type Actor, can, scopeOf } from '../../plugins/authz.ts'
 import type { Change, Outcome, RowState } from '../../sync/merge.ts'
 import { flatten } from '../../sync/schema.ts'
@@ -203,6 +204,20 @@ async function checkMeetingResponse(db: Db, orgId: string, me: string, merged: R
   return asked ? null : { status: 'rejected', reason: 'forbidden' }
 }
 
+/** A meeting must be of a sane shape (times, repeat rule, zone) and invite only members of the organization. */
+async function meetingProblem(db: Db, orgId: string, merged: Record<string, unknown>): Promise<string | null> {
+  const shape = meetingShapeProblem(plain(merged.startAt), plain(merged.endAt), plain(merged.tz), plain(merged.rrule))
+  if (shape) return shape
+  const attendees = plain(merged.attendeeIds)
+  if (Array.isArray(attendees) && attendees.length > 0) {
+    if (attendees.length > 200) return 'too many attendees'
+    const ids = [...new Set(attendees.filter((a): a is string => typeof a === 'string'))]
+    const found = await db.select({ id: schema.kcOrgMember.userId }).from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), inArray(schema.kcOrgMember.userId, ids)))
+    if (found.length !== ids.length) return 'attendee is not a member'
+  }
+  return null
+}
+
 const DECISION_FIELDS = ['decidedBy', 'decidedAt', 'decisionNote']
 
 /**
@@ -259,7 +274,12 @@ export async function checkOrgWrite(
   current: RowState | null,
 ): Promise<Outcome | null> {
   const merged = flatten(change.table, { ...(current?.fields ?? {}), ...(change.fields ?? {}) })
-  const kind = kindOf(change.table, merged)
+  // The kind comes from the row as stored: the writer must not be able to turn a shared row into their own (or back)
+  // with the very change that edits it.
+  if (current && change.fields && 'userId' in change.fields && (change.fields.userId ?? null) !== (plain(current.fields.userId) ?? null)) {
+    return { status: 'rejected', reason: 'forbidden_field' }
+  }
+  const kind = current ? kindOf(change.table, flatten(change.table, current.fields)) : kindOf(change.table, merged)
   if (kind === 'never') return { status: 'rejected', reason: 'forbidden_table' }
   const dangling = await checkReferences(db, actor, orgId, change)
   if (dangling) return dangling
@@ -280,6 +300,8 @@ export async function checkOrgWrite(
   if (change.table === 'absence') return checkAbsence(db, actor, orgId, change, current, owner)
   if (change.table === 'meeting_response' && owner === actor.user.id) return checkMeetingResponse(db, orgId, actor.user.id, merged)
   if (change.table === 'meeting' && owner === actor.user.id && change.op !== 'delete') {
+    const bad = await meetingProblem(db, orgId, merged)
+    if (bad) return { status: 'rejected', reason: 'forbidden_field' }
     const workspace = await orgWorkspaceId(db, orgId)
     if (workspace && (await roomIsTaken(db, workspace, change.rowId, merged))) return { status: 'rejected', reason: 'room_taken' }
   }

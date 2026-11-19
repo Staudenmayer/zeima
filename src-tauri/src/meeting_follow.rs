@@ -141,6 +141,13 @@ pub async fn check(app: &AppHandle) {
             if !takes_over(running_entry.start_at, o.start_at, took_part, o.meeting.cancelled) {
                 continue;
             }
+            // The project of a meeting someone else made may be one this person cannot use (the server does not even
+            // send it to them): then the meeting's time goes on no project, never on that one.
+            let usable_project = match &o.meeting.project_id {
+                Some(id) => core.get_project(id).await.ok().map(|p| p.id),
+                None => None,
+            };
+            let hidden = o.meeting.project_id.is_some() && usable_project.is_none();
             let origin = StartTimer {
                 activity_id: running_entry.activity_id.clone(),
                 project_id: running_entry.project_id.clone(),
@@ -154,8 +161,8 @@ pub async fn check(app: &AppHandle) {
                     .activity_id
                     .clone()
                     .or_else(|| running_entry.activity_id.clone()),
-                project_id: o.meeting.project_id.clone(),
-                tag_ids: o.meeting.tag_ids.clone(),
+                project_id: usable_project,
+                tag_ids: if hidden { Vec::new() } else { o.meeting.tag_ids.clone() },
                 note: o.meeting.title.clone(),
                 billable: Some(o.meeting.billable),
             };

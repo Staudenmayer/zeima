@@ -49,7 +49,7 @@ export const SYNCED_TABLES = [
 ] as const
 
 const Uuid = Type.String({ format: 'uuid' })
-const Hlc = Type.String({ pattern: '^[0-9]{15}-[0-9]{6}-[^\\s]+$', description: '`{wall_ms:015}-{counter:06}-{node}`' })
+const Hlc = Type.String({ pattern: '^[0-9]{15}-[0-9]{6}-[A-Za-z0-9._:-]{1,64}$', description: '`{wall_ms:015}-{counter:06}-{node}`' })
 
 const ChangeSchema = Type.Object({
   table: Type.Union(SYNCED_TABLES.map((t) => Type.Literal(t))),

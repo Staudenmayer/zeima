@@ -132,3 +132,23 @@ A white-box review with proofs of concept against a running API and PostgreSQL f
 | PT3-08 | Licence token not bound to the account | Fixed | A licence that names an organization (`orgId`) is bound to it: the server serves it only for the organization it is filed under and only to that organization's members (`Licensing.resolve`, `ofOrg`), and the app keeps it only for a person whose token lists that organization (`license::store`). The offline vendor format is unchanged; a licence without `orgId` (a personal one) is still not tied to a user. |
 | PT3-09 | Swagger client accepted by default; Keycloak paths | Fixed (partly) | `ALLOWED_CLIENTS` defaults to the desktop client (the docs client is added while `DOCS_ENABLED`); the realm's Swagger client is off by default. *Open: narrowing the proxy's `/realms/zeima/*` needs a test on a live Keycloak.* |
 | PT3-10, 11, 12 | One-replica state; maintenance advisories; earlier open items | Unchanged | One API replica is a requirement (quotas, presence and caches are in memory). `chrono` and `chrono-tz` are flagged unmaintained; no vulnerability. |
+
+## Fourth penetration test of 19 November 2026 (PT4-01 to PT4-13)
+
+A white-box review with proofs of concept (the report is kept outside the repository) found no critical issue, 1 high, 2 medium, 5 low and 5 informational ones.
+
+| ID | Finding | Status | Where, and what to know |
+|---|---|---|---|
+| PT4-01 | Recurring meetings froze the API (free/busy, room bookings) | Fixed | Meetings are checked on write (`meetingShapeProblem`: times within 10 years back and 5 ahead, at most 31 days long, known zone, repeat count at most 1000); `occurrences` skips ahead cheaply and reuses one formatter per zone; both lookups have a per-account budget (30 a minute). `server/test/pt4.test.ts`. |
+| PT4-02 | A member could turn the organization's default country rule into their own row | Fixed | `checkOrgWrite` decides the kind from the stored row and refuses changes to `userId` of an existing row. |
+| PT4-03 | Whole-workspace scans | Fixed (partly) | Free/busy and room lookups read only meeting, response and absence rows. *Open: a cache of the meeting list and a load test with a very large workspace.* |
+| PT4-04 | Sync stamp node part unbounded | Fixed | The stamp's node part is at most 64 plain characters. |
+| PT4-05 | Add-on store could fill the disk; notification flood | Fixed | 5 MB of values per add-on; 5 notifications a minute per add-on. |
+| PT4-06 | Free/busy ignores read scopes | Fixed | An organization or department policy `planningVisibility: off` (Organization → Rules) hides its people from free/busy lookups (`/orgs/:id/freebusy`); the stricter of organization and department wins. Default stays on. |
+| PT4-07 | Meeting attendees unchecked | Fixed | Attendees must be members (at most 200); the app follows a meeting onto its project only if the person can use that project (`meeting_follow.rs`). |
+| PT4-08 | No add-on downgrade protection | Fixed | An older version than the installed one is refused (uninstall first). The version is in the signed manifest, so no separate serial is needed. |
+| PT4-09 | Public-suffix list partial | Fixed | `trust.rs` uses the full list (`psl` crate). |
+| PT4-10 | Web view reaches every organization route | Fixed (partly) | Deleting an organization is confirmed by a native dialog in the app (`org.rs`). |
+| PT4-11 | No MFA | Fixed (partly) | `REQUIRE_MFA` (Compose) / `keycloak.requireMfa` (Helm) makes the *Configure OTP* step a default required action for new accounts. *Open: existing accounts need the action added by an administrator (docs/admin-guide.md), and a per-role requirement is not possible because organization roles are groups, not Keycloak roles.* |
+| PT4-12 | Dependency notes | Accepted | Upstream advisories without a fix. |
+| PT4-13 | Sample `NODE_ENV=development` | Fixed | `server/.env.example` carries a warning. |

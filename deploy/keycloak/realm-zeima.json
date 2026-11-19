@@ -45,6 +45,17 @@
   "otpPolicyDigits": 6,
   "otpPolicyPeriod": 30,
 
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": "${ZEIMA_REQUIRE_MFA:false}",
+      "priority": 10
+    }
+  ],
+
   "eventsEnabled": true,
   "eventsListeners": ["jboss-logging", "zeima-webhook"],
   "eventsExpiration": 2592000,

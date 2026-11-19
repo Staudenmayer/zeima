@@ -376,6 +376,27 @@ fn zeima_create_entry(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserDa
     )
 }
 
+/// An addon may show at most this many notifications a minute (a flood is a nuisance and a way to bury real ones).
+const NOTIFICATIONS_PER_MINUTE: usize = 5;
+
+fn notification_allowed(addon_id: &str) -> bool {
+    use std::collections::{HashMap, VecDeque};
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+    static RECENT: OnceLock<Mutex<HashMap<String, VecDeque<Instant>>>> = OnceLock::new();
+    let mut all = RECENT.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    let list = all.entry(addon_id.to_string()).or_default();
+    let now = Instant::now();
+    while list.front().is_some_and(|t| now.duration_since(*t) > Duration::from_secs(60)) {
+        list.pop_front();
+    }
+    if list.len() >= NOTIFICATIONS_PER_MINUTE {
+        return false;
+    }
+    list.push_back(now);
+    true
+}
+
 fn zeima_notify(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<HostCtx>) -> HostResult {
     host(
         p,
@@ -384,6 +405,9 @@ fn zeima_notify(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<Hos
         u,
         Some(Permission::Notify),
         |ctx, n: sdk::Notification| {
+            if !notification_allowed(&ctx.addon_id) {
+                return Err(extism::Error::msg("too many notifications; try again in a minute"));
+            }
             // The addon's name in the title, so users know where it comes from.
             let title = format!("{} · {}", ctx.addon_name, n.title);
             (ctx.services.notify)(&title, &n.body);

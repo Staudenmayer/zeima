@@ -78,6 +78,7 @@ spec:
             - name: ZEIMA_SMTP_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ include "zeima.secretName" . }}, key: smtp-password, optional: true } }
             - { name: ZEIMA_VERIFY_EMAIL, value: {{ .Values.keycloak.verifyEmail | quote }} }
+            - { name: ZEIMA_REQUIRE_MFA, value: {{ .Values.keycloak.requireMfa | default false | quote }} }
             - { name: ZEIMA_REGISTRATION_ALLOWED, value: {{ .Values.keycloak.registrationAllowed | quote }} }
             # The event listener tells the API about changes.
             - { name: ZEIMA_WEBHOOK_URL, value: {{ printf "http://%s-api:3001/v1/internal/keycloak-events" .Release.Name | quote }} }

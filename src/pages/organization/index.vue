@@ -82,6 +82,7 @@ function policySummary(p: OrgPolicy | null): string {
   if (p.requireTags) parts.push(t('org.policy.requireTags'))
   if (p.managerVisibility && p.managerVisibility !== 'full') parts.push(t(`org.policy.manager.${p.managerVisibility}`))
   if (p.presenceVisibility === 'off') parts.push(t('org.policy.presence.off'))
+  if (p.planningVisibility === 'off') parts.push(t('org.policy.planning.offShort'))
   if (p.weeklyTargetMinutes) parts.push(t('org.policy.targetShort', { h: p.weeklyTargetMinutes / 60 }))
   return parts.join(' · ') || t('org.policy.none')
 }

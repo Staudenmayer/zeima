@@ -104,6 +104,8 @@ const OrgInfo = Type.Object({ id: Type.String(), name: Type.String(), role: Role
 export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
   /** A device reports about once a minute and on each change; far more than that is somebody making the others' sockets busy. */
   const presenceReports = new Quota(90)
+  /** Free/busy and room lookups read a whole workspace's meetings: a person asks a few times a minute. */
+  const planningLookups = new Quota(30)
   const keycloak = (): KeycloakAdmin => {
     if (!app.keycloakAdmin) {
       throw new HttpProblem(503, 'org_admin_unavailable', 'organization management is not set up: the API has no Keycloak admin credentials')
@@ -1245,13 +1247,22 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request) => {
       const { orgId } = request.params
       actorIn({ user: request.user! }, orgId)
+      planningLookups.spend(request.user!.id, 1, 'planning lookups')
       const { userIds, from, to, timezone } = request.body
       if (to <= from || to - from > 31 * 86_400_000) throw new HttpProblem(400, 'bad_request', '`to` must be after `from`, within 31 days')
       const workspace = await orgWorkspaceId(database(), orgId)
       if (!workspace) return Object.fromEntries(userIds.map((u) => [u, []]))
       // Only people of this organization.
       const members = new Set((await listMembers(database(), orgId)).map((m) => m.id))
-      return freeBusy(database(), workspace, userIds.filter((u) => members.has(u)), from, to, timezone ?? 'UTC')
+      // People whose organization (or department) policy switches the lookup off are not shown to others.
+      const policies = await loadPolicies(database(), workspace)
+      const asked = userIds.filter((u) => members.has(u))
+      const shown: string[] = []
+      for (const u of asked) {
+        if (u === request.user!.id || policies.length === 0 || effective(policies, await departmentsOf(database(), orgId, u)).planningVisibility !== 'off') shown.push(u)
+      }
+      const found = await freeBusy(database(), workspace, shown, from, to, timezone ?? 'UTC')
+      return Object.fromEntries(userIds.map((u) => [u, found[u] ?? []]))
     },
   )
 
@@ -1275,6 +1286,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request) => {
       const { orgId } = request.params
       actorIn({ user: request.user! }, orgId)
+      planningLookups.spend(request.user!.id, 1, 'planning lookups')
       const { from, to, exclude } = request.body
       if (to <= from || to - from > 31 * 86_400_000) throw new HttpProblem(400, 'bad_request', '`to` must be after `from`, within 31 days')
       const workspace = await orgWorkspaceId(database(), orgId)

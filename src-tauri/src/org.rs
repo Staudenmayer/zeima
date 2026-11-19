@@ -51,6 +51,27 @@ pub fn allowed(method: &str, path: &str) -> bool {
     METHODS.contains(&method) && plain && target && method_ok
 }
 
+/// Whether the app itself asks the person before sending this: deleting a whole organization cannot be undone, and
+/// must not depend on the web view alone (script running in it could otherwise send it).
+pub fn needs_confirmation(method: &str, path: &str) -> bool {
+    let path = path.split('?').next().unwrap_or("");
+    method == "DELETE" && path.strip_prefix("/v1/orgs/").is_some_and(|rest| !rest.is_empty() && !rest.contains('/'))
+}
+
+async fn confirm(app: &AppHandle, text: &str) -> bool {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .message(text)
+        .title("Zeima")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom("Delete / Löschen".into(), "Cancel / Abbrechen".into()))
+        .show(move |yes| {
+            let _ = tx.send(yes);
+        });
+    rx.await.unwrap_or(false)
+}
+
 /// The answer: status and body text.
 pub(crate) fn call(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<(u16, String), String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -99,6 +120,15 @@ pub async fn org_request(
     if !allowed(&method, &path) {
         return Err(err("forbidden", "this request is not allowed"));
     }
+    if needs_confirmation(&method, &path)
+        && !confirm(
+            &app,
+            "Delete this organization, its memberships and its shared data? This cannot be undone.\n\nDiese Organisation samt Mitgliedschaften und gemeinsamen Daten löschen? Das lässt sich nicht rückgängig machen.",
+        )
+        .await
+    {
+        return Err(err("cancelled", "not deleted"));
+    }
     let Some((server, token)) = account::current_token(&app).await.map_err(|e| err("server", e))? else {
         return Err(err("signed_out", "sign in to manage an organization"));
     };
@@ -140,7 +170,14 @@ pub async fn org_request(
 
 #[cfg(test)]
 mod tests {
-    use super::allowed;
+    use super::{allowed, needs_confirmation};
+
+    #[test]
+    fn only_deleting_an_organization_is_confirmed_by_the_app() {
+        assert!(needs_confirmation("DELETE", "/v1/orgs/0b2f"));
+        assert!(!needs_confirmation("DELETE", "/v1/orgs/0b2f/members/8a1c"));
+        assert!(!needs_confirmation("GET", "/v1/orgs/0b2f"));
+    }
 
     #[test]
     fn only_organization_routes_are_allowed() {

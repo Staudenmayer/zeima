@@ -8,12 +8,15 @@ import { type Db, schema } from '../../db/index.ts'
 
 export type ManagerVisibility = 'full' | 'hide_notes' | 'totals_only'
 export type PresenceVisibility = 'org' | 'off'
+/** Whether others can look up when the person is busy (free/busy). */
+export type PlanningVisibility = 'org' | 'off'
 
 export interface Policy {
   requireProject: boolean
   requireTags: boolean
   managerVisibility: ManagerVisibility
   presenceVisibility: PresenceVisibility
+  planningVisibility: PlanningVisibility
   weeklyTargetMinutes: number | null
   autoPauseIdleMinutes: number | null
 }
@@ -29,6 +32,7 @@ export const DEFAULT_POLICY: Policy = {
   requireTags: false,
   managerVisibility: 'full',
   presenceVisibility: 'org',
+  planningVisibility: 'org',
   weeklyTargetMinutes: null,
   autoPauseIdleMinutes: null,
 }
@@ -43,6 +47,7 @@ export function stricter(a: Policy, b: Policy): Policy {
     requireTags: a.requireTags || b.requireTags,
     managerVisibility: MANAGER_RANK.indexOf(b.managerVisibility) > MANAGER_RANK.indexOf(a.managerVisibility) ? b.managerVisibility : a.managerVisibility,
     presenceVisibility: a.presenceVisibility === 'off' || b.presenceVisibility === 'off' ? 'off' : 'org',
+    planningVisibility: a.planningVisibility === 'off' || b.planningVisibility === 'off' ? 'off' : 'org',
     weeklyTargetMinutes: smaller(a.weeklyTargetMinutes, b.weeklyTargetMinutes),
     autoPauseIdleMinutes: smaller(a.autoPauseIdleMinutes, b.autoPauseIdleMinutes),
   }

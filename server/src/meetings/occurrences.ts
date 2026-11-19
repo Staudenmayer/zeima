@@ -57,9 +57,45 @@ function parse(text: string): Rule | null {
 
 export const isValidRule = (rule: string) => parse(rule) !== null
 
+const formatters = new Map<string, Intl.DateTimeFormat>()
+/** One formatter per zone: building one is the dearest step of the calculation. */
+const formatter = (tz: string) => {
+  let f = formatters.get(tz)
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    if (formatters.size > 500) formatters.clear()
+    formatters.set(tz, f)
+  }
+  return f
+}
+
+const YEAR_MS = 365 * 86_400_000
+/** Most repeats a rule may name, and how far from now a meeting may start. */
+export const MAX_REPEATS = 1000
+
+/** Why a meeting's times, zone or repeat rule are not acceptable, or null. */
+export function meetingShapeProblem(startAt: unknown, endAt: unknown, tz: unknown, rrule: unknown, now = Date.now()): string | null {
+  if (typeof startAt !== 'number' || typeof endAt !== 'number' || !Number.isFinite(startAt) || !Number.isFinite(endAt)) return 'times'
+  if (startAt < now - 10 * YEAR_MS || startAt > now + 5 * YEAR_MS) return 'start out of range'
+  if (endAt < startAt || endAt - startAt > 31 * 86_400_000) return 'length'
+  if (typeof tz === 'string') {
+    try {
+      formatter(tz)
+    } catch {
+      return 'zone'
+    }
+  }
+  if (typeof rrule === 'string' && rrule !== '') {
+    const rule = parse(rrule)
+    if (!rule) return 'rule'
+    if (rule.count !== null && (rule.count < 1 || rule.count > MAX_REPEATS)) return 'count'
+  }
+  return null
+}
+
 const parts = (ms: number, tz: string) => {
   const v = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    formatter(tz)
       .formatToParts(new Date(ms))
       .filter((p) => p.type !== 'literal')
       .map((p) => [p.type, Number(p.value)]),
@@ -130,6 +166,11 @@ export function occurrences(startAt: number, endAt: number, tz: string, rrule: s
       const key = dateKey(y, m, d)
       if (key < dateKey(...d0)) continue
       if ((rule.until !== null && key > rule.until) || (rule.count !== null && produced >= rule.count)) return out
+      // Far before the window: counted, but not worth the zone arithmetic (a day's wall time is within a day of UTC's).
+      if (Date.UTC(y, m - 1, d) + 3 * 86_400_000 + len < from) {
+        produced++
+        continue
+      }
       const s = zoned(y, m, d, seconds, tz)
       if (s >= to) return out
       produced++

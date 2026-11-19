@@ -1114,6 +1114,9 @@ export type PlanStatus = "valid" | "grace" |
 /**  No token, or it lapsed. */
 "free";
 
+/**  Whether colleagues can look up when they are busy (meetings, approved absences) while planning a meeting. */
+export type PlanningVisibility = "org" | "off";
+
 export type PolicySettings = {
 	/**  Finished entries must name a project. */
 	requireProject?: boolean,
@@ -1121,6 +1124,8 @@ export type PolicySettings = {
 	requireTags?: boolean,
 	managerVisibility?: ManagerVisibility,
 	presenceVisibility?: PresenceVisibility,
+	/**  Whether others can see when the person is busy (free/busy lookups). */
+	planningVisibility?: PlanningVisibility,
 	/**  Target per week, for comparing with the tracked time (overtime). */
 	weeklyTargetMinutes?: number | null,
 	/**  Suggested idle time before auto-pause; people may choose less. */

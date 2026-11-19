@@ -18,31 +18,18 @@ pub fn is_loopback(host: &str) -> bool {
         || host.parse::<std::net::Ipv6Addr>().is_ok_and(|ip| ip.is_loopback())
 }
 
-/// Two-label public suffixes that make "the last two labels" a wrong guess of the registrable domain. A short list of the
-/// common ones; the check only has to tell a company's own hosts from a stranger's.
-const MULTI_LABEL_SUFFIXES: &[&str] = &[
-    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "co.kr", "co.in",
-    "co.za", "com.br", "com.cn", "com.mx", "com.tr", "com.sg", "com.hk", "co.il", "com.ar",
-    // Hosting platforms where every customer has a name of their own below the suffix: two hosts under one of these
-    // are two strangers, not one site.
-    "github.io", "gitlab.io", "vercel.app", "netlify.app", "pages.dev", "workers.dev", "herokuapp.com", "azurewebsites.net",
-    "cloudfront.net", "amazonaws.com", "appspot.com", "web.app", "firebaseapp.com", "onrender.com", "fly.dev", "ngrok.io",
-    "ngrok-free.app", "trycloudflare.com", "repl.co", "glitch.me", "surge.sh", "dyndns.org", "duckdns.org", "myfritz.net",
-];
-
-/// The registrable domain (`id.zeima.example.co.uk` → `example.co.uk`); an address given as numbers is its own.
+/// The registrable domain (`id.zeima.example.co.uk` → `example.co.uk`), by the full Public Suffix List (hosting
+/// platforms such as `github.io` or `blogspot.com` are suffixes too: two hosts below one are two strangers). An address
+/// given as numbers, or a name the list does not know, is its own.
 fn registrable(host: &str) -> String {
     let host = host.to_ascii_lowercase();
     if host.parse::<std::net::IpAddr>().is_ok() || host.starts_with('[') {
         return host;
     }
-    let labels: Vec<&str> = host.split('.').collect();
-    if labels.len() <= 2 {
-        return host;
+    match psl::domain_str(&host) {
+        Some(domain) => domain.to_string(),
+        None => host,
     }
-    let last_two = labels[labels.len() - 2..].join(".");
-    let take = if MULTI_LABEL_SUFFIXES.contains(&last_two.as_str()) { 3 } else { 2 };
-    labels[labels.len().saturating_sub(take)..].join(".")
 }
 
 /// Whether two hosts belong to the same site: equal, one inside the other, or under one registrable domain.
@@ -152,6 +139,9 @@ mod tests {
         assert!(!same_site("a.vercel.app", "b.vercel.app"));
         assert!(!same_site("x.github.io", "y.github.io"));
         assert!(same_site("id.x.github.io", "time.x.github.io"));
+        for (a, b) in [("a.blogspot.com", "b.blogspot.com"), ("a.ts.net", "b.ts.net"), ("a.web.app", "b.web.app"), ("a.netlify.app", "b.netlify.app")] {
+            assert!(!same_site(a, b), "{a} {b}");
+        }
         assert!(!same_site("example.com", "example.com.evil.com"));
     }
 

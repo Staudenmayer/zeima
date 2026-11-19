@@ -14,6 +14,17 @@ crate::model::string_enum!(
     /// Whether colleagues see who is online.
     PresenceVisibility { Org => "org", Off => "off" }
 );
+crate::model::string_enum!(
+    /// Whether colleagues can look up when they are busy (meetings, approved absences) while planning a meeting.
+    PlanningVisibility { Org => "org", Off => "off" }
+);
+
+#[allow(clippy::derivable_impls)]
+impl Default for PlanningVisibility {
+    fn default() -> Self {
+        Self::Org
+    }
+}
 
 #[allow(clippy::derivable_impls)] // the enums come from `string_enum!`
 impl Default for ManagerVisibility {
@@ -39,6 +50,8 @@ pub struct PolicySettings {
     pub require_tags: bool,
     pub manager_visibility: ManagerVisibility,
     pub presence_visibility: PresenceVisibility,
+    /// Whether others can see when the person is busy (free/busy lookups).
+    pub planning_visibility: PlanningVisibility,
     /// Target per week, for comparing with the tracked time (overtime).
     #[cfg_attr(feature = "specta", specta(type = Option<specta_typescript::Number>))]
     pub weekly_target_minutes: Option<i64>,
@@ -74,6 +87,13 @@ impl PolicySettings {
                 PresenceVisibility::Off
             } else {
                 PresenceVisibility::Org
+            },
+            planning_visibility: if self.planning_visibility == PlanningVisibility::Off
+                || other.planning_visibility == PlanningVisibility::Off
+            {
+                PlanningVisibility::Off
+            } else {
+                PlanningVisibility::Org
             },
             weekly_target_minutes: min(self.weekly_target_minutes, other.weekly_target_minutes),
             auto_pause_idle_minutes: min(self.auto_pause_idle_minutes, other.auto_pause_idle_minutes),
@@ -173,5 +193,13 @@ mod tests {
         assert_eq!(json["managerVisibility"], "full");
         let back: OrgPolicy = serde_json::from_value(json).unwrap();
         assert_eq!(back, p);
+    }
+
+    #[test]
+    fn planning_off_in_any_policy_wins() {
+        let on = PolicySettings::default();
+        let off = PolicySettings { planning_visibility: PlanningVisibility::Off, ..Default::default() };
+        assert_eq!(on.stricter(&off).planning_visibility, PlanningVisibility::Off);
+        assert_eq!(on.stricter(&on).planning_visibility, PlanningVisibility::Org);
     }
 }

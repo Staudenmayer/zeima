@@ -319,6 +319,18 @@ pub async fn addon_install(
     install_package(&app, &state, &addons, package).await
 }
 
+/// Whether `a` is an older version than `b` (dot-separated numbers; a pre-release suffix is ignored).
+pub(crate) fn version_older(a: &str, b: &str) -> bool {
+    let nums = |v: &str| -> Vec<u64> {
+        v.split(['-', '+']).next().unwrap_or("").split('.').map(|p| p.trim().parse().unwrap_or(0)).collect()
+    };
+    let (mut x, mut y) = (nums(a), nums(b));
+    let n = x.len().max(y.len());
+    x.resize(n, 0);
+    y.resize(n, 0);
+    x < y
+}
+
 /// Checks a package against what this device allows and installs it (enabled, all requested
 /// permissions granted).
 pub(crate) async fn install_package(
@@ -332,6 +344,15 @@ pub(crate) async fn install_package(
         return Err(invalid(reason));
     }
     let Package { manifest, wasm, .. } = package;
+    // An older build is refused: a signature says who made a package, not that it is the newest, and old builds have known flaws.
+    if let Ok(installed) = state.core.get_addon(&manifest.id).await {
+        if version_older(&manifest.version, &installed.version) {
+            return Err(invalid(format!(
+                "version {} is older than the installed {}; uninstall the add-on first to go back",
+                manifest.version, installed.version
+            )));
+        }
+    }
     if !manifest.supports_app(&app.package_info().version.to_string()) {
         return Err(invalid(format!(
             "needs app version {} or newer",
@@ -942,5 +963,19 @@ mod tests {
         for f in [path, path2, path3] {
             let _ = std::fs::remove_file(f);
         }
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::version_older;
+
+    #[test]
+    fn older_builds_are_refused_equal_and_newer_are_not() {
+        assert!(version_older("1.0.0", "1.0.1"));
+        assert!(version_older("1.9", "1.10.0"));
+        assert!(!version_older("1.0.0", "1.0.0"));
+        assert!(!version_older("2.0.0", "1.9.9"));
+        assert!(!version_older("1.0", "1.0.0"));
     }
 }

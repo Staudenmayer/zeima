@@ -41,6 +41,8 @@ keycloak:
   # address (a colleague's, before the colleague does). It needs working mail: set smtp.host. To run without mail,
   # switch it off knowingly.
   verifyEmail: true
+  # New accounts must set up an authenticator app (TOTP) at their first sign-in. Existing accounts: docs/admin-guide.md.
+  requireMfa: false
   # REQUIRED: set it to true or false. May people create their own accounts on the sign-in page? `true` for a service open
   # to the public; `false` for a private installation whose people come in through single sign-on, a directory, SCIM or an
   # administrator. The chart does not install until you decide.

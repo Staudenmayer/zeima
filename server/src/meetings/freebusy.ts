@@ -2,7 +2,7 @@
 // or accepted (or have not answered), and absences that were approved.
 // Only times are returned, never what they are for.
 
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { type Db, schema } from '../db/index.ts'
 import { occurrences } from './occurrences.ts'
 import { startOfDay } from './zones.ts'
@@ -25,7 +25,7 @@ export async function freeBusy(db: Db, workspaceId: string, userIds: readonly st
   const rows = await db
     .select({ table: schema.syncRow.tableName, rowId: schema.syncRow.rowId, fields: schema.syncRow.fields, deleted: schema.syncRow.deleted })
     .from(schema.syncRow)
-    .where(eq(schema.syncRow.workspaceId, workspaceId))
+    .where(and(eq(schema.syncRow.workspaceId, workspaceId), inArray(schema.syncRow.tableName, ['meeting', 'meeting_response', 'absence'])))
   const live = rows.filter((r) => r.deleted === null)
   // What each person answered: to the whole series (`meeting|user`) and to single dates (`meeting|user|start`).
   const answers = new Map<string, unknown>()

@@ -4,7 +4,7 @@
 // Mirrors the check of the desktop app (crates/zeima-core/src/repo/meetings.rs),
 // which only knows the meetings its person was asked to.
 
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { type Db, schema } from '../db/index.ts'
 import { occurrences } from './occurrences.ts'
 
@@ -32,7 +32,7 @@ async function heldRooms(db: Db, workspaceId: string): Promise<Held[]> {
   const rows = await db
     .select({ rowId: schema.syncRow.rowId, fields: schema.syncRow.fields, deleted: schema.syncRow.deleted, table: schema.syncRow.tableName })
     .from(schema.syncRow)
-    .where(eq(schema.syncRow.workspaceId, workspaceId))
+    .where(and(eq(schema.syncRow.workspaceId, workspaceId), eq(schema.syncRow.tableName, 'meeting')))
   const out: Held[] = []
   for (const r of rows) {
     if (r.table !== 'meeting' || r.deleted !== null) continue
