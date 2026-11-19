@@ -40,7 +40,11 @@ async function mayGiveRole(db: Db, actor: Actor, orgId: string, role: string) {
   if (!covers(mine.permissions, target.permissions)) {
     throw new HttpProblem(403, 'forbidden', 'this role has permissions you do not have yourself')
   }
+  if (mine.role !== 'owner' && administers(target.permissions)) throw new HttpProblem(403, 'forbidden', 'only an owner gives a role that manages roles')
 }
+
+/** A role that can edit or hand out roles is administrator-level, whatever it is called: only owners make or give it. */
+const administers = (permissions: Permissions) => 'role.edit' in permissions || 'role.assign' in permissions
 
 /**
  * Whether the actor outranks a member who has `targetRole`: an owner always does; anyone else only holds more than the
@@ -994,6 +998,9 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     }
     if (!covers(actor.user.orgs[orgId]!.permissions, permissions)) {
       throw new HttpProblem(403, 'forbidden', 'a role cannot have permissions you do not have yourself')
+    }
+    if (actor.user.orgs[orgId]!.role !== 'owner' && administers(permissions)) {
+      throw new HttpProblem(403, 'forbidden', 'only an owner makes a role that can edit or give roles')
     }
     return permissions
   }

@@ -606,7 +606,9 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       // An admin does not hold billing, so cannot give it away.
       expect((await roles(ADMIN, 'admin', 'POST', { name: 'Lead', permissions: { 'billing.manage': 'org' } })).statusCode).toBe(403)
       kc.calls = []
-      const made = await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', description: 'Runs projects', permissions: editor })
+      // PT3-06: a role that can edit or give roles is administrator-level; only an owner makes it.
+      expect((await roles(ADMIN, 'admin', 'POST', { name: 'Second admin', permissions: editor })).statusCode).toBe(403)
+      const made = await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', description: 'Runs projects', permissions: { 'member.read': 'org', 'project.write': 'org' } })
       expect(made.statusCode).toBe(201)
       expect(made.json()).toMatchObject({ name: 'Project lead', builtin: false, locked: false, people: 0 })
       expect(kc.calls).toEqual([`createRole ${ORG} ${made.json().key}`])

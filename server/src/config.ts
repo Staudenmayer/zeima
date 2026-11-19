@@ -46,7 +46,7 @@ export const EnvSchema = Type.Object({
   /** `aud` access tokens must carry. */
   API_AUDIENCE: Type.String({ minLength: 1, default: 'zeima-api' }),
   /** Clients (`azp`) whose tokens are accepted, comma-separated. */
-  ALLOWED_CLIENTS: Type.String({ default: 'zeima-desktop,zeima-swagger' }),
+  ALLOWED_CLIENTS: Type.String({ default: 'zeima-desktop' }),
   /** Public client of the Swagger UI "Authorize" button. */
   DOCS_CLIENT_ID: Type.String({ default: 'zeima-swagger' }),
 
@@ -261,7 +261,8 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     reconcileIntervalHours: env.RECONCILE_INTERVAL_HOURS,
     addonRegistryDir: env.ADDON_REGISTRY_DIR ?? null,
     jurisdictionsDir: env.JURISDICTIONS_DIR ?? null,
-    allowedClients: list(env.ALLOWED_CLIENTS),
+    // The Swagger client is accepted only while the API docs are switched on.
+    allowedClients: [...new Set([...list(env.ALLOWED_CLIENTS), ...(env.DOCS_ENABLED ? [env.DOCS_CLIENT_ID] : [])])],
     docsClientId: env.DOCS_CLIENT_ID,
     docsEnabled: env.DOCS_ENABLED,
     metricsEnabled: env.METRICS_ENABLED,

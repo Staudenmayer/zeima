@@ -3,7 +3,7 @@
 // mirror as it was.
 
 import { randomBytes, randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
@@ -140,7 +140,7 @@ export async function seatUsage(db: Db, orgId: string) {
   const [pending] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(schema.orgInvitation)
-    .where(and(eq(schema.orgInvitation.orgId, orgId), isNull(schema.orgInvitation.acceptedAt)))
+    .where(and(eq(schema.orgInvitation.orgId, orgId), isNull(schema.orgInvitation.acceptedAt), gt(schema.orgInvitation.createdAt, Date.now() - INVITATION_TTL_MS)))
   return { members: members!.n, pending: pending!.n }
 }
 
@@ -194,15 +194,24 @@ export async function auditEntries(db: Db, orgId: string, opts: { before?: numbe
  * link); this adds the role group and the mirror row. Needs a verified
  * email, so nobody can claim an invitation by typing someone else's address.
  */
+/** An invitation not answered within this time is void. */
+export const INVITATION_TTL_MS = 14 * 86_400_000
+
 export async function acceptInvitations(db: Db, kc: KeycloakAdmin, user: { id: string; email: string | null; emailVerified: boolean }) {
   if (!user.email || !user.emailVerified) return
   const email = user.email.toLowerCase()
   const pending = await db
     .select()
     .from(schema.orgInvitation)
-    .where(and(eq(schema.orgInvitation.email, email), isNull(schema.orgInvitation.acceptedAt)))
+    .where(and(eq(schema.orgInvitation.email, email), isNull(schema.orgInvitation.acceptedAt), gt(schema.orgInvitation.createdAt, Date.now() - INVITATION_TTL_MS)))
   for (const invitation of pending) {
-    const role = invitation.role
+    // The inviter must still be there, and still be allowed to give this role; otherwise the person joins as a member.
+    const [inviter] = invitation.invitedBy
+      ? await db.select({ role: schema.kcOrgMember.role }).from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, invitation.orgId), eq(schema.kcOrgMember.userId, invitation.invitedBy)))
+      : []
+    const known = invitation.role === 'member' || (await db.select({ id: schema.orgRole.id }).from(schema.orgRole).where(and(eq(schema.orgRole.orgId, invitation.orgId), invitation.role.length > 30 ? eq(schema.orgRole.id, invitation.role) : eq(schema.orgRole.key, invitation.role)))).length > 0 || ['admin', 'manager', 'owner'].includes(invitation.role)
+    const mayGive = inviter && (invitation.role === 'member' || (['admin', 'owner'].includes(invitation.role) ? inviter.role === 'owner' : true))
+    const role = mayGive && known ? invitation.role : 'member'
     await kc.addMember(invitation.orgId, user.id)
     await kc.setRole(invitation.orgId, user.id, role)
     // The departments the inviter chose (those that still exist in the organization).

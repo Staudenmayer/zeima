@@ -9,7 +9,7 @@
 //            entries of their people
 //   never    display settings are per device and stay out of org workspaces
 
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { type Db, schema } from '../../db/index.ts'
 import { roomIsTaken } from '../../meetings/rooms.ts'
 import { type Actor, can, scopeOf } from '../../plugins/authz.ts'
@@ -99,6 +99,51 @@ async function checkEntryPolicy(db: Db, actor: Actor, orgId: string, change: Cha
   return null
 }
 
+/**
+ * A pause is part of the time it interrupts: it cannot be added to, or moved into, a locked entry of the same person
+ * (that would change the net time of a period a manager has closed) unless the writer may edit locked entries.
+ */
+async function checkPause(db: Db, actor: Actor, orgId: string, owner: string, merged: Record<string, unknown>): Promise<Outcome | null> {
+  if (scopeOf(actor, 'entry.write_locked') === 'org') return null
+  const workspace = await orgWorkspaceId(db, orgId)
+  if (!workspace) return null
+  const start = plain(merged.startAt)
+  const end = plain(merged.endAt)
+  const resume = plain(merged.resumeEntryId)
+  const rows = await db
+    .select({ rowId: schema.syncRow.rowId, fields: schema.syncRow.fields })
+    .from(schema.syncRow)
+    .where(and(eq(schema.syncRow.workspaceId, workspace), eq(schema.syncRow.tableName, 'time_entry'), sql`${schema.syncRow.fields} -> 'userId' ->> 'v' = ${owner}`, sql`${schema.syncRow.fields} -> 'locked' ->> 'v' = 'true'`))
+  for (const r of rows) {
+    const f = r.fields as Record<string, { v: unknown }>
+    const entryStart = f.startAt?.v
+    const entryEnd = f.endAt?.v
+    const overlaps =
+      typeof start === 'number' && typeof entryStart === 'number' && typeof entryEnd === 'number' && start < entryEnd && (typeof end !== 'number' || end > entryStart)
+    if (r.rowId === resume || overlaps) return { status: 'rejected', reason: 'locked' }
+  }
+  return null
+}
+
+/** Rows an entry points at must exist in the workspace, and a members-only project must be one the author may see. */
+async function checkReferences(db: Db, actor: Actor, orgId: string, change: Change, merged: Record<string, unknown>): Promise<Outcome | null> {
+  if (change.op === 'delete' || !change.fields || !('projectId' in change.fields)) return null
+  const projectId = plain(merged.projectId)
+  if (projectId == null) return null
+  const workspace = await orgWorkspaceId(db, orgId)
+  if (!workspace || typeof projectId !== 'string') return { status: 'rejected', reason: 'forbidden_field' }
+  const [row] = await db
+    .select({ fields: schema.syncRow.fields })
+    .from(schema.syncRow)
+    .where(and(eq(schema.syncRow.workspaceId, workspace), eq(schema.syncRow.tableName, 'project'), eq(schema.syncRow.rowId, projectId)))
+  if (!row) return { status: 'rejected', reason: 'forbidden_field' }
+  const fields = row.fields as Record<string, unknown>
+  if (plain(fields.visibility) === 'members' && !canSeeProject(actor.user, orgId, fields) && scopeOf(actor, 'entry.write_locked') !== 'org') {
+    return { status: 'rejected', reason: 'forbidden_field' }
+  }
+  return null
+}
+
 /** A person answers only a meeting they are asked to (and not their own). */
 async function checkMeetingResponse(db: Db, orgId: string, me: string, merged: Record<string, unknown>): Promise<Outcome | null> {
   const meetingId = plain(merged.meetingId)
@@ -137,6 +182,12 @@ async function checkAbsence(
   const fields = change.fields ?? {}
   if (owner === actor.user.id) {
     if (change.op === 'delete') return null
+    // The decision fields are the approver's: the owner clears them only by asking again (status `requested`).
+    if (DECISION_FIELDS.some((f) => f in fields) && fields.status !== 'requested') return badField
+    // A decided absence changes only by a change newer than the decision: the stamp is the client's claim, and a
+    // back-dated one would otherwise change the other fields while the decision keeps standing.
+    const decisionStamp = current ? (current.fields.status?.h ?? null) : null
+    if (current && plain(current.fields.status) !== 'requested' && decisionStamp !== null && change.hlc <= decisionStamp) return forbidden
     if (fields.status !== undefined && fields.status !== 'requested') return badField
     // A new request, or a decided one that is changed, goes back to waiting.
     const decided = current && plain(current.fields.status) !== 'requested'
@@ -191,12 +242,19 @@ export async function checkOrgWrite(
   }
   const moved = change.fields?.userId
   if (current && typeof moved === 'string' && moved !== owner) return { status: 'rejected', reason: 'forbidden_field' }
+  // Records of the employer, not of the employee: overtime corrections and the vacation entitlement.
+  if (change.table === 'balance_adjustment') return scopeOf(actor, 'member.manage') === 'org' ? null : { status: 'rejected', reason: 'forbidden' }
+  if (change.table === 'work_settings' && scopeOf(actor, 'member.manage') !== 'org' && Object.keys(change.fields ?? {}).some((f) => /^vacation/i.test(f))) {
+    return { status: 'rejected', reason: 'forbidden_field' }
+  }
   if (owner === actor.user.id) {
+    if (change.table === 'pause') return checkPause(db, actor, orgId, owner, merged)
     if (change.table !== 'time_entry') return null
     // A locked entry is frozen for the person it belongs to as well. Only someone who may edit everybody's locked
     // entries (organization-wide) can change their own: a manager of one department does not lift an admin's lock on themselves.
     if (current && plain(current.fields.locked) === true && scopeOf(actor, 'entry.write_locked') !== 'org') return { status: 'rejected', reason: 'locked' }
-    return checkEntryPolicy(db, actor, orgId, change, merged)
+    const refused = await checkReferences(db, actor, orgId, change, merged)
+    return refused ?? (await checkEntryPolicy(db, actor, orgId, change, merged))
   }
   // Someone else's row: only managers editing time entries (locking, corrections).
   if (change.table !== 'time_entry') return { status: 'rejected', reason: 'forbidden' }

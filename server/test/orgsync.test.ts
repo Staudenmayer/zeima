@@ -322,7 +322,7 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       const second = start + 7 * 86_400_000
       expect(await results(ANNA, [upsert('meeting_response', id(88), 725, answer({ userId: ANNA, status: 'declined', occurrenceAt: second }))])).toEqual([{ status: 'applied' }])
       expect((await meetingsOf(ANNA)).map((b) => b.from)).toEqual([start])
-      expect(await results(ANNA, [upsert('meeting_response', id(89), 726, answer({ userId: ANNA, status: 'declined', occurrenceAt: 'soon' }))])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await results(ANNA, [upsert('meeting_response', id(89), 726, answer({ userId: ANNA, status: 'declined', occurrenceAt: 'soon' }))])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
       await results(ANNA, [upsert('meeting_response', R_ANNA, 730, { status: 'declined' })])
       await results(ANNA, [upsert('meeting_response', id(88), 731, { status: 'accepted' })])
       expect((await meetingsOf(ANNA)).map((b) => b.from)).toEqual([second])
@@ -417,5 +417,43 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     expect(await results(ANNA, [upsert('time_entry', E, 10, { userId: ANNA, startAt: 1, endAt: 2, projectId: id(10), tagIds: [id(11)], [`k${'x'.repeat(100)}`]: 1 })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
     expect(await results(ANNA, [upsert('time_entry', E, 11, { userId: ANNA, startAt: 1, endAt: 2, projectId: id(10), tagIds: [id(11)], note: 'A'.repeat(70_000) })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
     expect(await results(ANNA, [upsert('time_entry', E, 12, { userId: ANNA, startAt: 1, endAt: 2, projectId: id(10), tagIds: [id(11)], note: 'fine' })])).toEqual([{ status: 'applied' }])
+  })
+
+  describe('penetration test 3 (PT3)', () => {
+    const NOW = Date.now()
+    it('PT3-01: a back-dated change cannot alter a decided absence or erase the decision', async () => {
+      const A = id(950)
+      const t0 = NOW - 3_600_000, t1 = NOW - 1_800_000
+      const request = { userId: ANNA, typeId: id(51), startDate: '2026-12-01', endDate: '2026-12-02', halfDay: null, note: '', status: 'requested', decidedBy: null, decisionNote: '' }
+      expect(await results(ANNA, [upsert('absence', A, t0, request)])).toEqual([{ status: 'applied' }])
+      expect(await results(OWNER, [upsert('absence', A, t1, { status: 'approved', decidedBy: OWNER, decisionNote: 'ok' })])).toEqual([{ status: 'applied' }])
+      expect(await results(ANNA, [upsert('absence', A, t0 + 1, { status: 'requested', endDate: '2026-12-31' })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await results(ANNA, [upsert('absence', A, NOW, { decidedBy: null, decisionNote: '' })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      // An honest, newer re-request still goes back to waiting.
+      expect(await results(ANNA, [upsert('absence', A, NOW, { status: 'requested', endDate: '2026-12-31', decidedBy: null, decisionNote: '' })])).toEqual([{ status: 'applied' }])
+    })
+
+    it('PT3-02: employees do not write their overtime adjustments or vacation entitlement', async () => {
+      expect(await results(ANNA, [upsert('balance_adjustment', id(951), NOW, { userId: ANNA, date: '2026-11-01', minutes: 99999, reason: 'self' })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
+      expect(await results(ANNA, [upsert('work_settings', id(952), NOW, { userId: ANNA, vacationDaysPerYear: 365 })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      expect(await results(OWNER, [upsert('balance_adjustment', id(953), NOW, { userId: ANNA, date: '2026-11-01', minutes: 60, reason: 'payout' })])).toEqual([{ status: 'applied' }])
+    })
+
+    it('PT3-03: values must have the type of their field', async () => {
+      expect(await results(ANNA, [upsert('time_entry', id(954), NOW, { userId: ANNA, startAt: 'x'.repeat(100), locked: false })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      expect(await results(ANNA, [upsert('time_entry', id(955), NOW, { userId: ANNA, startAt: 1, endAt: { a: 1 }, locked: false })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      expect(await results(ANNA, [upsert('time_entry', id(956), NOW, { userId: ANNA, startAt: 1, note: 'x'.repeat(20_000), locked: false })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+    })
+
+    it('PT3-04/05: no pause in a locked entry, no booking on a project the person may not see', async () => {
+      const E = id(957), P = id(958)
+      await results(ANNA, [upsert('time_entry', E, NOW - 5000, { userId: ANNA, startAt: 1_000, endAt: 28_800_000, projectId: id(10), tagIds: [id(11)], locked: false })])
+      await results(ADMIN, [upsert('time_entry', E, NOW - 4000, { locked: true })])
+      expect(await results(ANNA, [upsert('pause', id(959), NOW - 2000, { userId: ANNA, startAt: 2_000, endAt: 3_000, kind: 'manual' })])).toEqual([{ status: 'rejected', reason: 'locked' }])
+      expect(await results(ANNA, [upsert('pause', id(960), NOW - 2000, { userId: ANNA, startAt: 90_000_000, endAt: 91_000_000, kind: 'manual' })])).toEqual([{ status: 'applied' }])
+      await results(ADMIN, [upsert('project', P, NOW - 5000, { name: 'Secret', visibility: 'members', memberIds: [ADMIN], managerId: ADMIN })])
+      expect(await results(BEN, [upsert('time_entry', id(961), NOW - 1000, { userId: BEN, startAt: 1, endAt: 2, projectId: P, tagIds: [], locked: false })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      expect(await results(BEN, [upsert('time_entry', id(962), NOW - 1000, { userId: BEN, startAt: 1, endAt: 2, projectId: id(999), tagIds: [], locked: false })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+    })
   })
 })

@@ -164,7 +164,7 @@
       "clientId": "zeima-swagger",
       "name": "Zeima API docs",
       "description": "\"Authorize\" button of the Swagger UI at /docs.",
-      "enabled": "${ZEIMA_SWAGGER_ENABLED:true}",
+      "enabled": "${ZEIMA_SWAGGER_ENABLED:false}",
       "publicClient": true,
       "defaultClientScopes": ["basic", "profile", "email", "roles", "web-origins"],
       "standardFlowEnabled": true,

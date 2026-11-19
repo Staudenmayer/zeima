@@ -114,3 +114,21 @@ A third review (static, white-box; the report is kept outside the repository) fo
 | PT2-10, 11, 13, 14 | Presence project id, identity provider pre-registration (test on a live Keycloak), maintenance advisories, LDAP address | Open / accepted | Informational. |
 | PT2-12 | Development license key | Fixed | The server refuses to start with it in cloud mode and warns otherwise. |
 | PT2-15 | `zeima://` redirect | Fixed | Removed from the realm (existing installations: `deploy/keycloak/apply.sh`). |
+
+## Third penetration test of 19 November 2026 (PT3-01 to PT3-12)
+
+A white-box review with proofs of concept against a running API and PostgreSQL found no critical or high issue, 3 medium, 5 low and 4 informational ones
+(the report is kept outside the repository). The shared-workspace rules had trusted the client's timestamps and checked tables, not row state.
+
+| ID | Finding | Status | Where, and what to know |
+|---|---|---|---|
+| PT3-01 | A back-dated change altered an approved absence; the owner could clear the decision | Fixed | `checkAbsence` (`server/src/modules/sync/orgrules.ts`): a decided absence accepts only a change stamped after the decision, and the owner writes the decision fields only together with `status: requested`. |
+| PT3-02 | Employees wrote their own overtime adjustments, vacation entitlement and schedule | Fixed (partly) | `balance_adjustment` needs `member.manage` (organization scope); `vacation*` fields of `work_settings` likewise. *Open: `work_schedule` is still the employee's own (the app creates it at first start).* |
+| PT3-03 | No value types, no storage cap | Fixed (partly) | `valueAcceptable` pins the type of known fields (times, flags, id lists), caps text at 10 kB and nesting at 4; 100 MB per account per day. *Open: a full per-table schema and a per-workspace total.* |
+| PT3-04 | Pause added to a locked entry | Fixed | `checkPause`: no pause overlapping or resuming a locked entry of the same person. |
+| PT3-05 | Entries on projects the author may not use | Fixed (partly) | `checkReferences`: the project must exist and a members-only project must be visible to the author. Tags, activities and cost centers are not checked yet. |
+| PT3-06 | Admins could mint administrator-level roles | Fixed | A role with `role.edit` or `role.assign` is created, edited and given by an owner only. |
+| PT3-07 | Invitations never expired | Fixed | Void after 14 days (`INVITATION_TTL_MS`, also for the seat count); on acceptance the inviter must still be a member and allowed to give the role, otherwise the person joins as member. |
+| PT3-08 | Licence token not bound to the account | Open | Vendor licence tokens name a licensee that need not be the user id; binding needs a decision on what `sub` means for offline licences. |
+| PT3-09 | Swagger client accepted by default; Keycloak paths | Fixed (partly) | `ALLOWED_CLIENTS` defaults to the desktop client (the docs client is added while `DOCS_ENABLED`); the realm's Swagger client is off by default. *Open: narrowing the proxy's `/realms/zeima/*` needs a test on a live Keycloak.* |
+| PT3-10, 11, 12 | One-replica state; maintenance advisories; earlier open items | Unchanged | One API replica is a requirement (quotas, presence and caches are in memory). `chrono` and `chrono-tz` are flagged unmaintained; no vulnerability. |

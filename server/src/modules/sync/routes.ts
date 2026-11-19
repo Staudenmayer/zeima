@@ -87,12 +87,39 @@ const MAX_CHANGE_BYTES = 256 * 1024
 /** Field names of every synced table are plain camel-case words. */
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/
 
+/** Fields whose type is fixed in every synced table: anything else in them is refused, whatever the table. */
+const NUMBER_FIELDS = ['startAt', 'endAt', 'minutes', 'occurrenceAt', 'createdAt', 'updatedAt']
+const BOOLEAN_FIELDS = ['locked', 'billable']
+const STRING_LIST_FIELDS = ['tagIds', 'memberIds', 'attendeeIds']
+/** Plain text is short; only these hold a JSON document. */
+const MAX_TEXT = 10_000
+const DOCUMENT_FIELDS = ['days', 'settingsJson', 'autoPause']
+/** What one account may write in a day: far more than a person produces, far less than a disk. */
+const PUSH_BYTES_PER_DAY = 100 * 1024 * 1024
+
+function depth(value: unknown, level = 0): number {
+  if (value === null || typeof value !== 'object') return level
+  return Math.max(level + 1, ...Object.values(value).map((v) => depth(v, level + 1)))
+}
+
+/** Whether one value has the type its field name stands for. */
+export function valueAcceptable(name: string, value: unknown): boolean {
+  if (value === null) return true
+  if (NUMBER_FIELDS.includes(name)) return typeof value === 'number' && Number.isFinite(value)
+  if (BOOLEAN_FIELDS.includes(name)) return typeof value === 'boolean'
+  if (STRING_LIST_FIELDS.includes(name)) return Array.isArray(value) && value.length <= 500 && value.every((x) => typeof x === 'string' && x.length <= 64)
+  if (typeof value === 'string') return value.length <= (DOCUMENT_FIELDS.includes(name) ? MAX_FIELD_BYTES : MAX_TEXT)
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (typeof value === 'boolean') return true
+  return depth(value) <= 4
+}
+
 /** Whether a change carries only plausible fields: sane names, and values and totals within bounds. */
 export function fieldsAcceptable(fields: Record<string, unknown> | undefined): boolean {
   if (!fields) return true
   let total = 0
   for (const [name, value] of Object.entries(fields)) {
-    if (!FIELD_NAME.test(name)) return false
+    if (!FIELD_NAME.test(name) || !valueAcceptable(name, value)) return false
     const size = JSON.stringify(value ?? null).length
     total += size
     if (size > MAX_FIELD_BYTES || total > MAX_CHANGE_BYTES) return false
@@ -134,6 +161,7 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
   const pushRequests = new Quota(PUSH_REQUESTS_PER_MINUTE)
   const pushChanges = new Quota(PUSH_CHANGES_PER_MINUTE)
   const pushBytes = new Quota(PUSH_BYTES_PER_MINUTE)
+  const pushBytesDay = new Quota(PUSH_BYTES_PER_DAY, 24 * 60 * 60_000)
   const pullRequests = new Quota(PULL_REQUESTS_PER_MINUTE)
   const db = () => {
     if (!app.db) throw new HttpProblem(503, 'unavailable', 'the database is not configured')
@@ -238,7 +266,9 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
       pushRequests.spend(user.id, 1, 'pushes')
       pushChanges.spend(user.id, changes.length, 'changes')
       // The size of what was parsed, not the header (a chunked request has none).
-      pushBytes.spend(user.id, Math.max(1, JSON.stringify(request.body).length), 'bytes')
+      const size = Math.max(1, JSON.stringify(request.body).length)
+      pushBytes.spend(user.id, size, 'bytes')
+      pushBytesDay.spend(user.id, size, 'bytes today')
       await app.licensing.require(db(), user, 'sync')
       return withUser(db(), callerOf(user), async (tx) => {
         const [ws] = await tx.select().from(schema.workspace).where(eq(schema.workspace.id, workspaceId))
