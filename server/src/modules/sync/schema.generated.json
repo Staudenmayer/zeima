@@ -1,0 +1,619 @@
+{
+  "project": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "workspaceId": {
+      "type": "string",
+      "nullable": false
+    },
+    "name": {
+      "type": "string",
+      "nullable": false
+    },
+    "alias": {
+      "type": "string",
+      "nullable": true
+    },
+    "color": {
+      "type": "string",
+      "nullable": false
+    },
+    "parentId": {
+      "type": "string",
+      "nullable": true
+    },
+    "client": {
+      "type": "string",
+      "nullable": true
+    },
+    "budgetMinutes": {
+      "type": "number",
+      "nullable": true
+    },
+    "budgetPeriod": {
+      "type": "string",
+      "nullable": false
+    },
+    "budgetWarnPct": {
+      "type": "number",
+      "nullable": false
+    },
+    "billableDefault": {
+      "type": "boolean",
+      "nullable": false
+    },
+    "status": {
+      "type": "string",
+      "nullable": false
+    },
+    "costCenterId": {
+      "type": "string",
+      "nullable": true
+    },
+    "visibility": {
+      "type": "string",
+      "nullable": false
+    },
+    "managerId": {
+      "type": "string",
+      "nullable": true
+    },
+    "memberIds": {
+      "type": "strings",
+      "nullable": false
+    },
+    "createdAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "updatedAt": {
+      "type": "number",
+      "nullable": false
+    }
+  },
+  "tag": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "workspaceId": {
+      "type": "string",
+      "nullable": false
+    },
+    "name": {
+      "type": "string",
+      "nullable": false
+    },
+    "color": {
+      "type": "string",
+      "nullable": false
+    },
+    "projectId": {
+      "type": "string",
+      "nullable": true
+    },
+    "groupName": {
+      "type": "string",
+      "nullable": true
+    },
+    "createdAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "updatedAt": {
+      "type": "number",
+      "nullable": false
+    }
+  },
+  "time_entry": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "workspaceId": {
+      "type": "string",
+      "nullable": false
+    },
+    "userId": {
+      "type": "string",
+      "nullable": false
+    },
+    "activityId": {
+      "type": "string",
+      "nullable": true
+    },
+    "projectId": {
+      "type": "string",
+      "nullable": true
+    },
+    "startAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "endAt": {
+      "type": "number",
+      "nullable": true
+    },
+    "tz": {
+      "type": "string",
+      "nullable": false
+    },
+    "note": {
+      "type": "string",
+      "nullable": false
+    },
+    "billable": {
+      "type": "boolean",
+      "nullable": false
+    },
+    "source": {
+      "type": "string",
+      "nullable": false
+    },
+    "sourceRef": {
+      "type": "string",
+      "nullable": true
+    },
+    "locked": {
+      "type": "boolean",
+      "nullable": false
+    },
+    "tagIds": {
+      "type": "strings",
+      "nullable": false
+    },
+    "costCenterId": {
+      "type": "string",
+      "nullable": true
+    },
+    "createdAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "updatedAt": {
+      "type": "number",
+      "nullable": false
+    }
+  },
+  "pause": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "workspaceId": {
+      "type": "string",
+      "nullable": false
+    },
+    "userId": {
+      "type": "string",
+      "nullable": false
+    },
+    "startAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "endAt": {
+      "type": "number",
+      "nullable": true
+    },
+    "kind": {
+      "type": "string",
+      "nullable": false
+    },
+    "resumeEntryId": {
+      "type": "string",
+      "nullable": true
+    },
+    "followupEntryId": {
+      "type": "string",
+      "nullable": true
+    },
+    "applied": {
+      "type": "boolean",
+      "nullable": false
+    },
+    "accepted": {
+      "type": "boolean",
+      "nullable": true
+    },
+    "createdAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "updatedAt": {
+      "type": "number",
+      "nullable": false
+    }
+  },
+  "activity": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "workspaceId": {
+      "type": "string",
+      "nullable": false
+    },
+    "name": {
+      "type": "string",
+      "nullable": false
+    },
+    "color": {
+      "type": "string",
+      "nullable": false
+    },
+    "archived": {
+      "type": "boolean",
+      "nullable": false
+    },
+    "createdAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "updatedAt": {
+      "type": "number",
+      "nullable": false
+    }
+  },
+  "cost_center": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "workspaceId": {
+      "type": "string",
+      "nullable": false
+    },
+    "code": {
+      "type": "string",
+      "nullable": false
+    },
+    "name": {
+      "type": "string",
+      "nullable": false
+    },
+    "parentId": {
+      "type": "string",
+      "nullable": true
+    },
+    "active": {
+      "type": "boolean",
+      "nullable": false
+    },
+    "validFrom": {
+      "type": "string",
+      "nullable": true
+    },
+    "validTo": {
+      "type": "string",
+      "nullable": true
+    },
+    "createdAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "updatedAt": {
+      "type": "number",
+      "nullable": false
+    }
+  },
+  "cost_center_assignment": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "costCenterId": {
+      "type": "string",
+      "nullable": false
+    },
+    "validFrom": {
+      "type": "string",
+      "nullable": false
+    },
+    "validTo": {
+      "type": "string",
+      "nullable": true
+    }
+  },
+  "jurisdiction_selection": {
+    "profileId": {
+      "type": "string",
+      "nullable": false
+    },
+    "region": {
+      "type": "string",
+      "nullable": true
+    }
+  },
+  "work_settings": {
+    "vacationDaysPerYear": {
+      "type": "number",
+      "nullable": true
+    },
+    "deductBreaks": {
+      "type": "boolean",
+      "nullable": true
+    },
+    "autoPause": {
+      "type": "json",
+      "nullable": true
+    }
+  },
+  "work_schedule": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "validFrom": {
+      "type": "string",
+      "nullable": false
+    },
+    "model": {
+      "type": "string",
+      "nullable": false
+    },
+    "days": {
+      "type": "json",
+      "nullable": false
+    }
+  },
+  "absence_type": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "key": {
+      "type": "string",
+      "nullable": true
+    },
+    "name": {
+      "type": "string",
+      "nullable": false
+    },
+    "color": {
+      "type": "string",
+      "nullable": false
+    },
+    "reducesTarget": {
+      "type": "boolean",
+      "nullable": false
+    },
+    "affectsVacation": {
+      "type": "boolean",
+      "nullable": false
+    }
+  },
+  "absence": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "userId": {
+      "type": "string",
+      "nullable": false
+    },
+    "typeId": {
+      "type": "string",
+      "nullable": false
+    },
+    "startDate": {
+      "type": "string",
+      "nullable": false
+    },
+    "endDate": {
+      "type": "string",
+      "nullable": false
+    },
+    "halfDay": {
+      "type": "string",
+      "nullable": true
+    },
+    "status": {
+      "type": "string",
+      "nullable": false
+    },
+    "note": {
+      "type": "string",
+      "nullable": false
+    },
+    "decidedBy": {
+      "type": "string",
+      "nullable": true
+    },
+    "decisionNote": {
+      "type": "string",
+      "nullable": false
+    }
+  },
+  "custom_holiday": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "date": {
+      "type": "string",
+      "nullable": false
+    },
+    "name": {
+      "type": "string",
+      "nullable": false
+    }
+  },
+  "balance_adjustment": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "date": {
+      "type": "string",
+      "nullable": false
+    },
+    "minutes": {
+      "type": "number",
+      "nullable": false
+    },
+    "reason": {
+      "type": "string",
+      "nullable": false
+    }
+  },
+  "display_settings": {},
+  "work_location": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "userId": {
+      "type": "string",
+      "nullable": false
+    },
+    "date": {
+      "type": "string",
+      "nullable": false
+    },
+    "kind": {
+      "type": "string",
+      "nullable": false
+    },
+    "officeId": {
+      "type": "string",
+      "nullable": true
+    }
+  },
+  "org_policy": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "groupPath": {
+      "type": "string",
+      "nullable": true
+    }
+  },
+  "office": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "name": {
+      "type": "string",
+      "nullable": false
+    },
+    "capacity": {
+      "type": "number",
+      "nullable": true
+    }
+  },
+  "room": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "name": {
+      "type": "string",
+      "nullable": false
+    },
+    "capacity": {
+      "type": "number",
+      "nullable": true
+    }
+  },
+  "meeting": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "userId": {
+      "type": "string",
+      "nullable": false
+    },
+    "title": {
+      "type": "string",
+      "nullable": false
+    },
+    "startAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "endAt": {
+      "type": "number",
+      "nullable": false
+    },
+    "tz": {
+      "type": "string",
+      "nullable": false
+    },
+    "location": {
+      "type": "string",
+      "nullable": true
+    },
+    "roomId": {
+      "type": "string",
+      "nullable": true
+    },
+    "onlineUrl": {
+      "type": "string",
+      "nullable": true
+    },
+    "projectId": {
+      "type": "string",
+      "nullable": true
+    },
+    "activityId": {
+      "type": "string",
+      "nullable": true
+    },
+    "tagIds": {
+      "type": "strings",
+      "nullable": false
+    },
+    "billable": {
+      "type": "boolean",
+      "nullable": false
+    },
+    "costCenterId": {
+      "type": "string",
+      "nullable": true
+    },
+    "note": {
+      "type": "string",
+      "nullable": false
+    },
+    "rrule": {
+      "type": "string",
+      "nullable": true
+    },
+    "attendeeIds": {
+      "type": "strings",
+      "nullable": false
+    },
+    "cancelled": {
+      "type": "boolean",
+      "nullable": false
+    }
+  },
+  "meeting_response": {
+    "id": {
+      "type": "string",
+      "nullable": false
+    },
+    "userId": {
+      "type": "string",
+      "nullable": false
+    },
+    "meetingId": {
+      "type": "string",
+      "nullable": false
+    },
+    "status": {
+      "type": "string",
+      "nullable": false
+    },
+    "occurrenceAt": {
+      "type": "number",
+      "nullable": true
+    }
+  }
+}

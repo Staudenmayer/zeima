@@ -58,6 +58,12 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     expect((await list(BEN))[0]!.id).toBe(ws)
     expect(await list(OUTSIDER)).toEqual([])
     expect(await db.db.select().from(schema.workspace).where(eq(schema.workspace.orgId, ORG))).toHaveLength(1)
+    // Rows that entries and absences point at (references must exist: PT3-05).
+    const stamp = (v: unknown) => ({ v, h: hlc(1) })
+    await db.db.insert(schema.syncRow).values([
+      { workspaceId: ws, tableName: 'activity', rowId: id(13), fields: { name: stamp('Work') }, deleted: null },
+      { workspaceId: ws, tableName: 'absence_type', rowId: id(51), fields: { name: stamp('Vacation') }, deleted: null },
+    ])
   })
 
   it('lets only people with the right change shared data', async () => {
@@ -70,7 +76,7 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     ])
     expect(await results(OWNER, [upsert('cost_center', CC, 20, { code: '100' })])).toEqual([{ status: 'applied' }])
     // Everyone in the organization reads them; outsiders cannot push at all.
-    for (const who of [ANNA, BEN, MANAGER]) expect(await pulledIds(who)).toEqual([P, T, CC].sort())
+    for (const who of [ANNA, BEN, MANAGER]) expect(await pulledIds(who)).toEqual([P, T, CC, id(13), id(51)].sort())
     expect((await push(OUTSIDER, [])).statusCode).toBe(404)
   })
 
@@ -134,7 +140,7 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
     })
 
     it('are seen as far as the role reaches', async () => {
-      const shared = [id(10), id(11), id(12), id(30), id(31), id(33)]
+      const shared = [id(10), id(11), id(12), id(13), id(30), id(31), id(33), id(51)]
       const rows = async (who: string) => (await pulledIds(who)).filter((r) => !shared.includes(r))
       expect(await rows(ANNA)).toEqual([E_ANNA])
       expect(await rows(BEN)).toEqual([E_BEN])
@@ -195,7 +201,7 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
   describe('policies', () => {
     const POL = id(70), POL_DEV = id(71)
     const E1 = id(72), E2 = id(73)
-    const entry = (userId: string, extra: Record<string, unknown> = {}) => ({ userId, startAt: 1_000, endAt: 2_000, note: 'secret', projectId: id(10), tagIds: [id(11)], activityId: id(12), locked: false, ...extra })
+    const entry = (userId: string, extra: Record<string, unknown> = {}) => ({ userId, startAt: 1_000, endAt: 2_000, note: 'secret', projectId: id(10), tagIds: [id(11)], activityId: id(13), locked: false, ...extra })
 
     it('are set by people with the right and read by everyone', async () => {
       expect(await results(ANNA, [upsert('org_policy', POL, 600, { groupPath: null, requireProject: true })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
@@ -382,7 +388,7 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
 
   describe('clocks', () => {
     const E = id(970)
-    const entry = (extra: Record<string, unknown> = {}) => ({ userId: ANNA, startAt: 1_000, endAt: 2_000, note: 'n', projectId: id(10), tagIds: [id(11)], activityId: id(12), locked: false, ...extra })
+    const entry = (extra: Record<string, unknown> = {}) => ({ userId: ANNA, startAt: 1_000, endAt: 2_000, note: 'n', projectId: id(10), tagIds: [id(11)], activityId: id(13), locked: false, ...extra })
 
     it('refuse a change stamped far ahead of the server, so nobody can make a field unchangeable', async () => {
       const hour = Date.now() + 3_600_000
@@ -433,16 +439,45 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       expect(await results(ANNA, [upsert('absence', A, NOW, { status: 'requested', endDate: '2026-12-31', decidedBy: null, decisionNote: '' })])).toEqual([{ status: 'applied' }])
     })
 
-    it('PT3-02: employees do not write their overtime adjustments or vacation entitlement', async () => {
-      expect(await results(ANNA, [upsert('balance_adjustment', id(951), NOW, { userId: ANNA, date: '2026-11-01', minutes: 99999, reason: 'self' })])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
-      expect(await results(ANNA, [upsert('work_settings', id(952), NOW, { userId: ANNA, vacationDaysPerYear: 365 })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
-      expect(await results(OWNER, [upsert('balance_adjustment', id(953), NOW, { userId: ANNA, date: '2026-11-01', minutes: 60, reason: 'payout' })])).toEqual([{ status: 'applied' }])
+    it('PT3-02: schedule, entitlement and overtime corrections are set by the organization, not by the employee', async () => {
+      const forbidden = [{ status: 'rejected', reason: 'forbidden' }]
+      expect(await results(ANNA, [upsert('balance_adjustment', id(951), NOW, { userId: ANNA, date: '2026-11-01', minutes: 99999, reason: 'self' })])).toEqual(forbidden)
+      expect(await results(ANNA, [upsert('work_settings', id(952), NOW, { userId: ANNA, vacationDaysPerYear: 365 })])).toEqual(forbidden)
+      expect(await results(ANNA, [upsert('work_schedule', id(953), NOW, { userId: ANNA, validFrom: '2026-01-01', model: 'trust', days: [] })])).toEqual(forbidden)
+      // The manager of a department has no say over them either; owners and admins (`member.manage`) do.
+      expect(await results(MANAGER, [upsert('work_schedule', id(953), NOW, { userId: ANNA, validFrom: '2026-01-01', model: 'fixed', days: [] })])).toEqual(forbidden)
+      expect(await results(OWNER, [upsert('work_schedule', id(953), NOW, { userId: ANNA, validFrom: '2026-01-01', model: 'fixed', days: [{ targetMinutes: 480 }] })])).toEqual([{ status: 'applied' }])
+      expect(await results(ADMIN, [upsert('work_settings', id(952), NOW, { userId: ANNA, vacationDaysPerYear: 30 })])).toEqual([{ status: 'applied' }])
+      expect(await results(OWNER, [upsert('balance_adjustment', id(954), NOW, { userId: ANNA, date: '2026-11-01', minutes: 60, reason: 'payout' })])).toEqual([{ status: 'applied' }])
+      // The person sees what was set for them.
+      expect(await pulledIds(ANNA)).toEqual(expect.arrayContaining([id(952), id(953), id(954)]))
     })
 
     it('PT3-03: values must have the type of their field', async () => {
       expect(await results(ANNA, [upsert('time_entry', id(954), NOW, { userId: ANNA, startAt: 'x'.repeat(100), locked: false })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      // Group fields (what the app sends: `span`) are checked member by member.
+      expect(await results(ANNA, [upsert('time_entry', id(963), NOW, { userId: ANNA, span: { startAt: 'x', endAt: 2, tz: 'UTC' }, locked: false })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
       expect(await results(ANNA, [upsert('time_entry', id(955), NOW, { userId: ANNA, startAt: 1, endAt: { a: 1 }, locked: false })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
       expect(await results(ANNA, [upsert('time_entry', id(956), NOW, { userId: ANNA, startAt: 1, note: 'x'.repeat(20_000), locked: false })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+    })
+
+    it('PT3-05: every row an entry points at must exist, be the right kind and be visible', async () => {
+      const bad = (extra: Record<string, unknown>) => results(ANNA, [upsert('time_entry', id(964), NOW, { userId: ANNA, span: { startAt: 1, endAt: 2, tz: 'UTC' }, projectId: id(10), tagIds: [id(11)], activityId: id(13), locked: false, ...extra })])
+      expect(await bad({})).toEqual([{ status: 'applied' }])
+      expect(await bad({ activityId: id(997) })).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      expect(await bad({ activityId: id(10) })).toEqual([{ status: 'rejected', reason: 'forbidden_field' }]) // a project, not an activity
+      expect(await bad({ tagIds: [id(11), id(998)] })).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+      expect(await bad({ costCenterId: id(999) })).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+    })
+
+    it('the app\'s real shape (grouped `span`) is read by the rules: policy and locked pauses', async () => {
+      const E = id(965)
+      const span = { startAt: 5_000, endAt: 9_000, tz: 'UTC' }
+      // A finished entry without a project breaks the organization's policy even when its times arrive in `span`.
+      expect((await results(ANNA, [upsert('time_entry', E, NOW - 5000, { userId: ANNA, span, tagIds: [id(11)], locked: false })]))[0]!.reason).toBe('policy_project')
+      await results(ANNA, [upsert('time_entry', E, NOW - 4900, { userId: ANNA, span, projectId: id(10), tagIds: [id(11)], locked: false })])
+      await results(ADMIN, [upsert('time_entry', E, NOW - 4000, { locked: true })])
+      expect(await results(ANNA, [upsert('pause', id(966), NOW - 2000, { userId: ANNA, span: { startAt: 6_000, endAt: 7_000 }, kind: 'manual' })])).toEqual([{ status: 'rejected', reason: 'locked' }])
     })
 
     it('PT3-04/05: no pause in a locked entry, no booking on a project the person may not see', async () => {

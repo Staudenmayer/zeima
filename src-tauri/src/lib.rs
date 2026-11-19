@@ -18,17 +18,17 @@ mod license;
 mod meeting_follow;
 mod meeting_prompt;
 mod oauth;
-mod registry;
 mod org;
 mod os;
 mod presence;
+mod registry;
 mod secrets;
 mod settings;
 mod shortcuts;
 mod state;
 mod sync;
-mod trust;
 mod tray;
+mod trust;
 mod updates;
 mod windows;
 mod workspaces;
@@ -95,6 +95,14 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands_work::work_settings_set,
             commands_work::schedule_list,
             commands_work::schedule_save,
+            commands_work::managed_settings_get,
+            commands_work::managed_settings_set,
+            commands_work::managed_schedule_list,
+            commands_work::managed_schedule_save,
+            commands_work::managed_schedule_delete,
+            commands_work::managed_adjustment_list,
+            commands_work::managed_adjustment_create,
+            commands_work::managed_adjustment_delete,
             commands_work::schedule_delete,
             commands_work::absence_type_list,
             commands_work::absence_type_save,

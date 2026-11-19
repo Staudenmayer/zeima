@@ -54,11 +54,27 @@ pub async fn current(app: &AppHandle) -> Option<Entitlement> {
         .filter(|e| e.status != Status::Expired)
 }
 
+/// Whether the token's groups put the person in organization `org`.
+fn belongs_to(groups: &[String], org: &str) -> bool {
+    let prefix = format!("/orgs/{org}/");
+    groups.iter().any(|g| g.starts_with(&prefix))
+}
+
 /// Keeps a token the server sent, if it verifies.
 pub async fn store(app: &AppHandle, token: &str) -> Result<(), String> {
     let state = app.state::<AppState>();
     let now = state.core.now_ms() / 1000;
-    entitlement::verify(token, &trusted_keys(), now).map_err(|e| format!("the server's entitlement: {e}"))?;
+    let verified =
+        entitlement::verify(token, &trusted_keys(), now).map_err(|e| format!("the server's entitlement: {e}"))?;
+    // A licence that names an organization is that organization's: it is kept only for a person who belongs to it
+    // (a token copied from another organization's installation does not unlock this one).
+    if let Some(org) = verified.claims.org_id.as_deref() {
+        if let Ok(Some((_, access))) = crate::account::current_token(app).await {
+            if !belongs_to(&crate::account::groups_from_token(&access), org) {
+                return Err("this licence belongs to another organization".into());
+            }
+        }
+    }
     state
         .core
         .set_meta(TOKEN_KEY, token)
@@ -121,6 +137,15 @@ pub async fn plan_status(app: AppHandle) -> CmdResult<PlanInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_licence_for_an_organization_needs_membership() {
+        let groups = vec!["/orgs/o1/roles/member".to_string(), "/orgs/o1/groups/dev".to_string()];
+        assert!(belongs_to(&groups, "o1"));
+        assert!(!belongs_to(&groups, "o2"));
+        assert!(!belongs_to(&groups, "o"));
+        assert!(!belongs_to(&[], "o1"));
+    }
 
     #[test]
     fn debug_builds_trust_the_development_key() {

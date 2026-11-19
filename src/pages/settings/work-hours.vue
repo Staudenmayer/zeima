@@ -21,6 +21,8 @@ import { call, errorMessage } from '@/lib/ipc'
 import { MINUTE, addDays, parseDate, toDateInput } from '@/lib/time'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkStore } from '@/stores/work'
+import { useOrgStore } from '@/stores/org'
+import { useWorkspaceStore } from '@/stores/workspace'
 import SortHead from '@/components/time/SortHead.vue'
 import { useSort } from '@/composables/useSort'
 import TableToolbar from '@/components/time/TableToolbar.vue'
@@ -32,6 +34,31 @@ const { t } = useI18n()
 const work = useWorkStore()
 const settings = useSettingsStore()
 const format = useFormat()
+const org = useOrgStore()
+const workspace = useWorkspaceStore()
+
+// In an organization the schedule, vacation entitlement and overtime corrections are the organization's records: set by
+// someone who manages members (for any member), read-only for everybody else. In the personal workspace the person
+// sets them. The server enforces the same rule.
+const managing = computed(() => workspace.inOrg && workspace.scopeOf('member.manage') === 'org')
+const readOnly = computed(() => workspace.inOrg && !managing.value)
+const picked = ref<string | null>(null)
+/** Whose records the page shows and edits when managing. */
+const subject = computed(() => picked.value ?? org.myId ?? '')
+if (managing.value && org.members.length === 0) org.load().catch(() => {})
+
+const schedules = ref<WorkSchedule[]>([])
+const workSettings = ref(work.settings)
+async function loadManaged() {
+  if (!managing.value || !subject.value) {
+    schedules.value = work.schedules
+    workSettings.value = work.settings
+    return
+  }
+  schedules.value = (await run(call(commands.managedScheduleList(subject.value)))) ?? []
+  workSettings.value = (await run(call(commands.managedSettingsGet(subject.value)))) ?? work.settings
+  adjustments.value = (await run(call(commands.managedAdjustmentList(subject.value)))) ?? []
+}
 
 async function run<T>(promise: Promise<T>, success?: string): Promise<T | undefined> {
   try {
@@ -77,7 +104,7 @@ interface ScheduleForm {
 
 const forms = ref<ScheduleForm[]>([])
 watch(
-  () => work.schedules,
+  () => schedules.value,
   (list) => {
     forms.value = [...list]
       .sort((a, b) => b.validFrom.localeCompare(a.validFrom))
@@ -110,7 +137,8 @@ async function saveSchedule(form: ScheduleForm) {
     toast.error(t('entry.invalidTime'))
     return
   }
-  await run(call(commands.scheduleSave(form.id, input)), t('common.saved'))
+  await run(managing.value ? call(commands.managedScheduleSave(subject.value, form.id, input)) : call(commands.scheduleSave(form.id, input)), t('common.saved'))
+  await loadManaged()
 }
 
 const newFrom = ref(toDateInput(addDays(Date.now(), 1)))
@@ -118,7 +146,9 @@ async function addSchedule() {
   const latest = forms.value[0]
   const base = latest ? toInput(latest) : null
   const days = base?.days ?? Array.from({ length: 7 }, (_, i) => ({ targetMinutes: i < 5 ? 480 : 0, coreStart: null, coreEnd: null }))
-  await run(call(commands.scheduleSave(null, { validFrom: newFrom.value, model: latest?.model ?? 'flextime', days })))
+  const created = { validFrom: newFrom.value, model: latest?.model ?? 'flextime', days }
+  await run(managing.value ? call(commands.managedScheduleSave(subject.value, null, created)) : call(commands.scheduleSave(null, created)))
+  await loadManaged()
 }
 
 const deletingSchedule = ref<string | null>(null)
@@ -127,13 +157,17 @@ function askDeleteSchedule(id: string) {
   deletingSchedule.value = id
   confirmScheduleOpen.value = true
 }
-const deleteSchedule = () => deletingSchedule.value && run(call(commands.scheduleDelete(deletingSchedule.value)))
+const deleteSchedule = async () => {
+  if (!deletingSchedule.value) return
+  await run(managing.value ? call(commands.managedScheduleDelete(subject.value, deletingSchedule.value)) : call(commands.scheduleDelete(deletingSchedule.value)))
+  await loadManaged()
+}
 
 // ----- Vacation & breaks -----
 const vacationDays = ref('')
 const deductBreaks = ref(true)
 watch(
-  () => work.settings,
+  () => workSettings.value,
   (s) => {
     vacationDays.value = s?.vacationDaysPerYear == null ? '' : String(s.vacationDaysPerYear)
     deductBreaks.value = s?.deductBreaks ?? true
@@ -141,22 +175,28 @@ watch(
   { immediate: true },
 )
 async function saveWorkSettings() {
-  if (!work.settings) return
+  if (!workSettings.value) return
   const days = vacationDays.value.trim() === '' ? null : Number(vacationDays.value.replace(',', '.'))
   if (days !== null && Number.isNaN(days)) {
     toast.error(t('work.vacationDays'))
     return
   }
-  await run(
-    call(commands.workSettingsSet({ ...work.settings, vacationDaysPerYear: days, deductBreaks: deductBreaks.value })),
-    t('common.saved'),
-  )
+  const next = { ...workSettings.value, vacationDaysPerYear: days, deductBreaks: deductBreaks.value }
+  await run(managing.value ? call(commands.managedSettingsSet(subject.value, next)) : call(commands.workSettingsSet(next)), t('common.saved'))
+  await loadManaged()
 }
 
 // ----- Balance corrections -----
 const adjustments = ref<BalanceAdjustment[]>([])
-const loadAdjustments = async () => (adjustments.value = (await run(call(commands.adjustmentList()))) ?? [])
-watch(() => work.balance, loadAdjustments, { immediate: true })
+const loadAdjustments = async () => {
+  if (managing.value) return loadManaged()
+  adjustments.value = (await run(call(commands.adjustmentList()))) ?? []
+}
+// The records follow the workspace, the person picked and whatever the app syncs in.
+watch([() => work.balance, () => work.schedules, () => work.settings, subject, managing], async () => {
+  await loadManaged()
+  if (!managing.value) await loadAdjustments()
+}, { immediate: true })
 
 const adjDate = ref(toDateInput(Date.now()))
 const adjMinutes = ref<number | null>(null)
@@ -167,11 +207,18 @@ async function addAdjustment() {
     toast.error(t('work.hoursSigned'))
     return
   }
-  const ok = await run(call(commands.adjustmentCreate({ date: adjDate.value, minutes, reason: adjReason.value })))
+  const input = { date: adjDate.value, minutes, reason: adjReason.value }
+  const ok = await run(managing.value ? call(commands.managedAdjustmentCreate(subject.value, input)) : call(commands.adjustmentCreate(input)))
+  await loadManaged()
   if (ok) {
     adjMinutes.value = null
     adjReason.value = ''
   }
+}
+
+async function deleteAdjustment(id: string) {
+  await run(managing.value ? call(commands.managedAdjustmentDelete(subject.value, id)) : call(commands.adjustmentDelete(id)))
+  await loadManaged()
 }
 
 const { search: adjSearch, filtered: shownAdjustments, searching: adjSearching } = useTableSearch(adjustments, (a) => [a.date, a.reason, a.minutes])
@@ -183,6 +230,16 @@ const { sort, sorted: sortedAdjustments } = useSort(shownAdjustments, { date: (a
   <SettingsNav />
 
   <div class="grid max-w-4xl gap-6">
+    <p v-if="readOnly" class="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">{{ $t('work.managedBy') }}</p>
+    <div v-else-if="managing" class="flex flex-wrap items-center gap-3 rounded-lg border p-3">
+      <Label>{{ $t('work.managedPerson') }}</Label>
+      <Select :model-value="subject" @update:model-value="(v) => (picked = String(v))">
+        <SelectTrigger class="w-72"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem v-for="m in org.members" :key="m.id" :value="m.id">{{ m.name || m.email || m.id }}</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
     <Card>
       <CardHeader>
         <CardTitle>{{ $t('work.country') }}</CardTitle>
@@ -223,7 +280,7 @@ const { sort, sorted: sortedAdjustments } = useSort(shownAdjustments, { date: (a
       </CardContent>
     </Card>
 
-    <Card>
+    <Card :inert="readOnly" :class="{ 'opacity-60': readOnly }">
       <CardHeader>
         <CardTitle>{{ $t('work.schedules') }}</CardTitle>
         <CardDescription>{{ $t('work.schedulesHint') }}</CardDescription>
@@ -272,7 +329,7 @@ const { sort, sorted: sortedAdjustments } = useSort(shownAdjustments, { date: (a
       </CardContent>
     </Card>
 
-    <Card>
+    <Card :inert="readOnly" :class="{ 'opacity-60': readOnly }">
       <CardHeader>
         <CardTitle>{{ $t('absences.title') }} &amp; {{ $t('work.breaks') }}</CardTitle>
       </CardHeader>
@@ -297,7 +354,7 @@ const { sort, sorted: sortedAdjustments } = useSort(shownAdjustments, { date: (a
       </CardContent>
     </Card>
 
-    <Card>
+    <Card :inert="readOnly" :class="{ 'opacity-60': readOnly }">
       <CardHeader>
         <CardTitle>{{ $t('work.adjustments') }}</CardTitle>
         <CardDescription>{{ $t('work.adjustmentsHint') }}</CardDescription>
@@ -339,7 +396,7 @@ const { sort, sorted: sortedAdjustments } = useSort(shownAdjustments, { date: (a
                 <td class="max-w-0 w-full truncate px-3 py-1.5">{{ a.reason }}</td>
                 <td class="px-1 py-0.5">
                   <div class="flex justify-end opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="run(call(commands.adjustmentDelete(a.id)))"><Trash2 /></Button>
+                    <Button size="icon" variant="ghost" class="size-7" :title="$t('common.delete')" @click="deleteAdjustment(a.id)"><Trash2 /></Button>
                   </div>
                 </td>
               </tr>

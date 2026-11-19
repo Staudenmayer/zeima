@@ -95,6 +95,114 @@ pub async fn work_settings_set(
     Ok(saved)
 }
 
+// What an organization sets for a person: their schedule, vacation entitlement, break rules and overtime corrections
+// (SPEC §5.9, PT3-02). In the personal workspace the person sets them (the commands above); in an organization only
+// someone with the right to manage members does, for any member, through these. The server decides who may.
+
+/// A handle that acts for `user_id` in the active organization workspace.
+fn managed(state: &AppState, user_id: &str) -> CmdResult<std::sync::Arc<zeima_core::Core>> {
+    let data = state.data();
+    if !data.ctx().shared {
+        return Err(CmdError::other(
+            "not_in_organization",
+            "this is only for an organization's workspace; in your own workspace you set it yourself",
+        ));
+    }
+    Ok(std::sync::Arc::new(data.managing(user_id)))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn managed_settings_get(state: State<'_, AppState>, user_id: String) -> CmdResult<WorkSettings> {
+    Ok(managed(&state, &user_id)?.work_settings().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn managed_settings_set(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    user_id: String,
+    settings: WorkSettings,
+) -> CmdResult<WorkSettings> {
+    let saved = managed(&state, &user_id)?.set_work_settings(settings).await?;
+    work_changed(&app).await;
+    Ok(saved)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn managed_schedule_list(
+    state: State<'_, AppState>,
+    user_id: String,
+) -> CmdResult<Vec<WorkSchedule>> {
+    Ok(managed(&state, &user_id)?.list_schedules().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn managed_schedule_save(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    user_id: String,
+    id: Option<String>,
+    input: WorkScheduleInput,
+) -> CmdResult<WorkSchedule> {
+    let schedule = managed(&state, &user_id)?
+        .save_schedule(id.as_deref(), input)
+        .await?;
+    work_changed(&app).await;
+    Ok(schedule)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn managed_schedule_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    user_id: String,
+    id: String,
+) -> CmdResult<()> {
+    managed(&state, &user_id)?.delete_schedule(&id).await?;
+    work_changed(&app).await;
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn managed_adjustment_list(
+    state: State<'_, AppState>,
+    user_id: String,
+) -> CmdResult<Vec<BalanceAdjustment>> {
+    Ok(managed(&state, &user_id)?.list_adjustments().await?)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn managed_adjustment_create(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    user_id: String,
+    input: BalanceAdjustmentInput,
+) -> CmdResult<BalanceAdjustment> {
+    let a = managed(&state, &user_id)?.create_adjustment(input).await?;
+    work_changed(&app).await;
+    Ok(a)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn managed_adjustment_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    user_id: String,
+    id: String,
+) -> CmdResult<()> {
+    managed(&state, &user_id)?.delete_adjustment(&id).await?;
+    work_changed(&app).await;
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn schedule_list(state: State<'_, AppState>) -> CmdResult<Vec<WorkSchedule>> {

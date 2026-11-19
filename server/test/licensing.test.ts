@@ -89,6 +89,26 @@ describe.skipIf(!(await reachable()))('entitlements', () => {
     await app.close()
   })
 
+  it('PT3-08: a vendor license that names an organization is served only for it, and only to its members', async () => {
+    const license = signEntitlement(
+      { v: 1, sub: ADA, orgId: ORG, plan: 'enterprise', seats: 100, features: ['sync', 'sso'], iat: now(), exp: now() + 86_400 * 365 },
+      privateKeyFromPkcs8(dev.privateKeyPkcs8),
+    )
+    const app = await appWith()
+    // Filed under another organization (copied): not honoured.
+    await db.db.delete(schema.entitlement)
+    await db.db.insert(schema.organization).values({ id: id(777), name: 'Other', createdAt: 1 }).onConflictDoNothing()
+    await db.db.insert(schema.entitlement).values({ id: id(605), orgId: id(777), plan: 'enterprise', token: license, updatedAt: 1 })
+    expect((await get(app)).json().plan).toBe('free')
+    // Right organization, but the caller is not a member of it.
+    await db.db.delete(schema.entitlement)
+    await db.db.insert(schema.entitlement).values({ id: id(606), orgId: ORG, plan: 'enterprise', token: license, updatedAt: 1 })
+    const outsider = await app.inject({ url: '/v1/entitlement', headers: { authorization: `Bearer ${await token({ sub: ADA, groups: [] })}` } })
+    expect(outsider.json().plan).toBe('free')
+    expect((await get(app)).json().plan).toBe('enterprise')
+    await app.close()
+  })
+
   it('lets lapsed entitlements fall back to Free', async () => {
     await db.db.delete(schema.entitlement)
     await db.db.insert(schema.entitlement).values({ id: id(605), userId: ADA, plan: 'pro', validUntil: Date.now() - 1000, updatedAt: 1 })

@@ -88,6 +88,8 @@ pub enum Reason {
     RoomTaken,
     /// The change is stamped with a time well ahead of the server's: this device's clock is wrong.
     ClockAhead,
+    /// The workspace holds as much as the server allows; nothing new is accepted.
+    WorkspaceFull,
 }
 
 impl Reason {
@@ -103,6 +105,7 @@ impl Reason {
             Reason::PolicyTags => "The organization's rules ask for tags on every entry.",
             Reason::RoomTaken => "The room is booked at that time. Pick another room or time.",
             Reason::ClockAhead => "This device's clock is ahead of the server's. Correct the date and time, then change it again.",
+            Reason::WorkspaceFull => "This workspace is full: the server accepts no new records. Delete old ones or ask your administrator.",
         }
     }
 }

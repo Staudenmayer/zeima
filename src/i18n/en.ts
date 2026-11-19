@@ -364,6 +364,8 @@ export default {
     none: '–',
     schedules: 'Work schedule',
     schedulesHint: 'Target hours per weekday. A new schedule applies from its start date; earlier days keep the old one.',
+    managedBy: 'Set by your organization. An administrator sets your schedule, vacation entitlement and overtime corrections.',
+    managedPerson: 'Person',
     validFrom: 'Valid from',
     model: 'Model',
     models: { fixed: 'Fixed hours', flextime: 'Flexitime', trust: 'Trust-based (no balance)' },

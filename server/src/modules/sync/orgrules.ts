@@ -14,6 +14,7 @@ import { type Db, schema } from '../../db/index.ts'
 import { roomIsTaken } from '../../meetings/rooms.ts'
 import { type Actor, can, scopeOf } from '../../plugins/authz.ts'
 import type { Change, Outcome, RowState } from '../../sync/merge.ts'
+import { flatten } from '../../sync/schema.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId, type PolicyRow } from './policy.ts'
 
 type Kind = 'shared' | 'own' | 'never'
@@ -52,6 +53,9 @@ const READ: Record<string, string> = {
 
 /** Own rows everyone in the organization may read (where people work is for planning together). */
 const PUBLIC = new Set(['work_location'])
+
+/** Own tables that the person does not write in an organization: see `checkOrgWrite`. */
+export const MANAGED = new Set(['balance_adjustment', 'work_schedule', 'work_settings'])
 
 const OWN = new Set([...Object.keys(READ), 'jurisdiction_selection'])
 
@@ -115,9 +119,9 @@ async function checkPause(db: Db, actor: Actor, orgId: string, owner: string, me
     .from(schema.syncRow)
     .where(and(eq(schema.syncRow.workspaceId, workspace), eq(schema.syncRow.tableName, 'time_entry'), sql`${schema.syncRow.fields} -> 'userId' ->> 'v' = ${owner}`, sql`${schema.syncRow.fields} -> 'locked' ->> 'v' = 'true'`))
   for (const r of rows) {
-    const f = r.fields as Record<string, { v: unknown }>
-    const entryStart = f.startAt?.v
-    const entryEnd = f.endAt?.v
+    const f = flatten('time_entry', r.fields as Record<string, unknown>)
+    const entryStart = f.startAt
+    const entryEnd = f.endAt
     const overlaps =
       typeof start === 'number' && typeof entryStart === 'number' && typeof entryEnd === 'number' && start < entryEnd && (typeof end !== 'number' || end > entryStart)
     if (r.rowId === resume || overlaps) return { status: 'rejected', reason: 'locked' }
@@ -125,21 +129,58 @@ async function checkPause(db: Db, actor: Actor, orgId: string, owner: string, me
   return null
 }
 
-/** Rows an entry points at must exist in the workspace, and a members-only project must be one the author may see. */
-async function checkReferences(db: Db, actor: Actor, orgId: string, change: Change, merged: Record<string, unknown>): Promise<Outcome | null> {
-  if (change.op === 'delete' || !change.fields || !('projectId' in change.fields)) return null
-  const projectId = plain(merged.projectId)
-  if (projectId == null) return null
+/** Fields that point at a row of another table: table → field → the table it points into (`[]`: a list of ids). */
+const REFERENCES: Record<string, Record<string, { to: string; list?: boolean }>> = {
+  time_entry: { projectId: { to: 'project' }, activityId: { to: 'activity' }, costCenterId: { to: 'cost_center' }, tagIds: { to: 'tag', list: true } },
+  pause: { resumeEntryId: { to: 'time_entry' }, followupEntryId: { to: 'time_entry' } },
+  meeting: { projectId: { to: 'project' }, activityId: { to: 'activity' }, costCenterId: { to: 'cost_center' }, tagIds: { to: 'tag', list: true }, roomId: { to: 'room' } },
+  absence: { typeId: { to: 'absence_type' } },
+  cost_center_assignment: { costCenterId: { to: 'cost_center' }, projectId: { to: 'project' } },
+}
+
+/**
+ * Everything a change points at must be a live row of the right table in this workspace, and a members-only project
+ * (or a tag of one) must be one the author may see: nobody books time on, or attaches things to, what they cannot use.
+ */
+async function checkReferences(db: Db, actor: Actor, orgId: string, change: Change): Promise<Outcome | null> {
+  const spec = REFERENCES[change.table]
+  if (change.op === 'delete' || !change.fields || !spec) return null
+  const wanted: { id: string; to: string }[] = []
+  for (const [field, { to, list }] of Object.entries(spec)) {
+    if (!(field in change.fields)) continue
+    const value = change.fields[field]
+    if (value === null || value === undefined) continue
+    const ids = list ? (Array.isArray(value) ? value : [null]) : [value]
+    for (const id of ids) {
+      if (typeof id !== 'string') return { status: 'rejected', reason: 'forbidden_field' }
+      wanted.push({ id, to })
+    }
+  }
+  if (wanted.length === 0) return null
   const workspace = await orgWorkspaceId(db, orgId)
-  if (!workspace || typeof projectId !== 'string') return { status: 'rejected', reason: 'forbidden_field' }
-  const [row] = await db
-    .select({ fields: schema.syncRow.fields })
+  if (!workspace) return { status: 'rejected', reason: 'forbidden_field' }
+  const rows = await db
+    .select({ rowId: schema.syncRow.rowId, table: schema.syncRow.tableName, fields: schema.syncRow.fields, deleted: schema.syncRow.deleted })
     .from(schema.syncRow)
-    .where(and(eq(schema.syncRow.workspaceId, workspace), eq(schema.syncRow.tableName, 'project'), eq(schema.syncRow.rowId, projectId)))
-  if (!row) return { status: 'rejected', reason: 'forbidden_field' }
-  const fields = row.fields as Record<string, unknown>
-  if (plain(fields.visibility) === 'members' && !canSeeProject(actor.user, orgId, fields) && scopeOf(actor, 'entry.write_locked') !== 'org') {
-    return { status: 'rejected', reason: 'forbidden_field' }
+    .where(and(eq(schema.syncRow.workspaceId, workspace), inArray(schema.syncRow.rowId, [...new Set(wanted.map((w) => w.id))])))
+  const byId = new Map(rows.map((r) => [r.rowId, r]))
+  const maySeeAll = scopeOf(actor, 'entry.write_locked') === 'org'
+  const hidden = (fields: Record<string, unknown>) => plain(fields.visibility) === 'members' && !canSeeProject(actor.user, orgId, fields) && !maySeeAll
+  for (const { id, to } of wanted) {
+    const row = byId.get(id)
+    if (!row || row.table !== to) return { status: 'rejected', reason: 'forbidden_field' }
+    const live = row.deleted === null || Object.values(row.fields as Record<string, { h: string }>).some((f) => f.h > row.deleted!)
+    if (!live) return { status: 'rejected', reason: 'forbidden_field' }
+    const fields = row.fields as Record<string, unknown>
+    if (to === 'project' && hidden(fields)) return { status: 'rejected', reason: 'forbidden_field' }
+    if (to === 'tag') {
+      const project = plain(fields.projectId)
+      const owner = typeof project === 'string' ? byId.get(project) : undefined
+      if (typeof project === 'string') {
+        const [p] = owner ? [owner] : await db.select({ fields: schema.syncRow.fields }).from(schema.syncRow).where(and(eq(schema.syncRow.workspaceId, workspace), eq(schema.syncRow.rowId, project)))
+        if (p && hidden(p.fields as Record<string, unknown>)) return { status: 'rejected', reason: 'forbidden_field' }
+      }
+    }
   }
   return null
 }
@@ -217,9 +258,11 @@ export async function checkOrgWrite(
   change: Change,
   current: RowState | null,
 ): Promise<Outcome | null> {
-  const merged = { ...(current?.fields ?? {}), ...(change.fields ?? {}) }
+  const merged = flatten(change.table, { ...(current?.fields ?? {}), ...(change.fields ?? {}) })
   const kind = kindOf(change.table, merged)
   if (kind === 'never') return { status: 'rejected', reason: 'forbidden_table' }
+  const dangling = await checkReferences(db, actor, orgId, change)
+  if (dangling) return dangling
   if (kind === 'shared') {
     const action = sharedAction(change.table, change.op)
     if (can(actor, action, { orgId })) return null
@@ -242,19 +285,16 @@ export async function checkOrgWrite(
   }
   const moved = change.fields?.userId
   if (current && typeof moved === 'string' && moved !== owner) return { status: 'rejected', reason: 'forbidden_field' }
-  // Records of the employer, not of the employee: overtime corrections and the vacation entitlement.
-  if (change.table === 'balance_adjustment') return scopeOf(actor, 'member.manage') === 'org' ? null : { status: 'rejected', reason: 'forbidden' }
-  if (change.table === 'work_settings' && scopeOf(actor, 'member.manage') !== 'org' && Object.keys(change.fields ?? {}).some((f) => /^vacation/i.test(f))) {
-    return { status: 'rejected', reason: 'forbidden_field' }
-  }
+  // The employer's records about a person, not the person's own: their schedule, vacation entitlement and break rules,
+  // and overtime corrections. An organization sets them (`member.manage`); in a personal workspace the person does.
+  if (MANAGED.has(change.table)) return scopeOf(actor, 'member.manage') === 'org' ? null : { status: 'rejected', reason: 'forbidden' }
   if (owner === actor.user.id) {
     if (change.table === 'pause') return checkPause(db, actor, orgId, owner, merged)
     if (change.table !== 'time_entry') return null
     // A locked entry is frozen for the person it belongs to as well. Only someone who may edit everybody's locked
     // entries (organization-wide) can change their own: a manager of one department does not lift an admin's lock on themselves.
     if (current && plain(current.fields.locked) === true && scopeOf(actor, 'entry.write_locked') !== 'org') return { status: 'rejected', reason: 'locked' }
-    const refused = await checkReferences(db, actor, orgId, change, merged)
-    return refused ?? (await checkEntryPolicy(db, actor, orgId, change, merged))
+    return checkEntryPolicy(db, actor, orgId, change, merged)
   }
   // Someone else's row: only managers editing time entries (locking, corrections).
   if (change.table !== 'time_entry') return { status: 'rejected', reason: 'forbidden' }

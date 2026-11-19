@@ -88,6 +88,8 @@ export class Licensing {
       if (row.token) {
         const verified = verifyEntitlement(row.token, this.trusted, nowSeconds)
         if (verified.status === 'invalid') continue
+        // A licence that names an organization is served only for that organization, and only to its members.
+        if (verified.orgId && (verified.orgId !== row.orgId || !user.orgs[verified.orgId])) continue
         return {
           plan: verified.plan,
           features: verified.features,
@@ -143,6 +145,7 @@ export class Licensing {
       if (row.token) {
         const verified = verifyEntitlement(row.token, this.trusted, nowSeconds)
         if (verified.status === 'invalid') continue
+        if (verified.orgId && verified.orgId !== orgId) continue
         return { features: verified.features, seats: verified.seats ?? null }
       }
       const features = Array.isArray(row.features) && row.features.length ? (row.features as string[]) : [...(PLAN_FEATURES[row.plan] ?? [])]

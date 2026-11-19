@@ -366,6 +366,8 @@ const de: typeof en = {
     none: '–',
     schedules: 'Arbeitszeitmodell',
     schedulesHint: 'Sollstunden pro Wochentag. Ein neues Modell gilt ab seinem Startdatum; frühere Tage behalten das alte.',
+    managedBy: 'Wird von deiner Organisation festgelegt. Ein Administrator legt dein Arbeitszeitmodell, deinen Urlaubsanspruch und Überstunden-Korrekturen fest.',
+    managedPerson: 'Person',
     validFrom: 'Gültig ab',
     model: 'Modell',
     models: { fixed: 'Feste Arbeitszeit', flextime: 'Gleitzeit', trust: 'Vertrauensarbeitszeit (kein Saldo)' },

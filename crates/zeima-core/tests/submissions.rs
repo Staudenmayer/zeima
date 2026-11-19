@@ -49,14 +49,28 @@ async fn a_persons_own_rows_carry_their_account_in_a_shared_workspace() {
         })
         .await
         .unwrap();
-    ada.create_adjustment(BalanceAdjustmentInput {
-        date: date("2026-10-05"),
-        minutes: 60,
-        reason: "shared".into(),
-    })
-    .await
-    .unwrap();
+    // In an organization an overtime correction is the organization's record: only a handle acting for the person
+    // (an administrator's) writes it; the person's own handle refuses.
+    assert!(ada
+        .create_adjustment(BalanceAdjustmentInput {
+            date: date("2026-10-05"),
+            minutes: 60,
+            reason: "self".into(),
+        })
+        .await
+        .is_err());
+    ada.managing(ADA)
+        .create_adjustment(BalanceAdjustmentInput {
+            date: date("2026-10-05"),
+            minutes: 60,
+            reason: "shared".into(),
+        })
+        .await
+        .unwrap();
     let in_org = ada.sync_outbox(SYNC_BATCH).await.unwrap();
+    // Their own settings and schedule are refused as well; the personal workspace is the person's to set.
+    assert!(ada.set_work_settings(Default::default()).await.is_err());
+    assert!(personal.set_work_settings(Default::default()).await.is_ok());
     let adjustment = in_org
         .changes
         .iter()

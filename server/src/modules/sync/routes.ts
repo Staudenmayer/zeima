@@ -17,6 +17,7 @@ import type { AuthUser } from '../../plugins/auth.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
 import { Quota } from '../../plugins/quota.ts'
+import { typesAcceptable } from '../../sync/schema.ts'
 import { ensureOrgWorkspace } from '../orgs/service.ts'
 import { checkOrgWrite, visibleToCaller } from './orgrules.ts'
 import { type Change, hlcWallMs, type Json, MAX_CLOCK_AHEAD_MS, merge, type Outcome, type RowState } from '../../sync/merge.ts'
@@ -87,39 +88,16 @@ const MAX_CHANGE_BYTES = 256 * 1024
 /** Field names of every synced table are plain camel-case words. */
 const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/
 
-/** Fields whose type is fixed in every synced table: anything else in them is refused, whatever the table. */
-const NUMBER_FIELDS = ['startAt', 'endAt', 'minutes', 'occurrenceAt', 'createdAt', 'updatedAt']
-const BOOLEAN_FIELDS = ['locked', 'billable']
-const STRING_LIST_FIELDS = ['tagIds', 'memberIds', 'attendeeIds']
-/** Plain text is short; only these hold a JSON document. */
-const MAX_TEXT = 10_000
-const DOCUMENT_FIELDS = ['days', 'settingsJson', 'autoPause']
 /** What one account may write in a day: far more than a person produces, far less than a disk. */
 const PUSH_BYTES_PER_DAY = 100 * 1024 * 1024
 
-function depth(value: unknown, level = 0): number {
-  if (value === null || typeof value !== 'object') return level
-  return Math.max(level + 1, ...Object.values(value).map((v) => depth(v, level + 1)))
-}
-
-/** Whether one value has the type its field name stands for. */
-export function valueAcceptable(name: string, value: unknown): boolean {
-  if (value === null) return true
-  if (NUMBER_FIELDS.includes(name)) return typeof value === 'number' && Number.isFinite(value)
-  if (BOOLEAN_FIELDS.includes(name)) return typeof value === 'boolean'
-  if (STRING_LIST_FIELDS.includes(name)) return Array.isArray(value) && value.length <= 500 && value.every((x) => typeof x === 'string' && x.length <= 64)
-  if (typeof value === 'string') return value.length <= (DOCUMENT_FIELDS.includes(name) ? MAX_FIELD_BYTES : MAX_TEXT)
-  if (typeof value === 'number') return Number.isFinite(value)
-  if (typeof value === 'boolean') return true
-  return depth(value) <= 4
-}
-
 /** Whether a change carries only plausible fields: sane names, and values and totals within bounds. */
-export function fieldsAcceptable(fields: Record<string, unknown> | undefined): boolean {
+export function fieldsAcceptable(fields: Record<string, unknown> | undefined, table = ''): boolean {
   if (!fields) return true
+  if (!typesAcceptable(table, fields)) return false
   let total = 0
   for (const [name, value] of Object.entries(fields)) {
-    if (!FIELD_NAME.test(name) || !valueAcceptable(name, value)) return false
+    if (!FIELD_NAME.test(name)) return false
     const size = JSON.stringify(value ?? null).length
     total += size
     if (size > MAX_FIELD_BYTES || total > MAX_CHANGE_BYTES) return false
@@ -136,6 +114,26 @@ function isManager(user: AuthUser, ws: { kind: string; orgId: string | null }): 
 }
 
 type Tx = Db
+
+/** What one workspace may hold: rows and bytes. A person produces a few thousand rows a year; these are generous. */
+export const WORKSPACE_LIMITS = { personal: { rows: 200_000, bytes: 256 * 1024 * 1024 }, org: { rows: 2_000_000, bytes: 1024 * 1024 * 1024 } }
+const USAGE_TTL_MS = 30_000
+const usageCache = new Map<string, { at: number; rows: number; bytes: number }>()
+
+/** The rows and bytes a workspace holds (looked up at most every 30 seconds, and counted up in between). */
+async function usageOf(tx: Tx, workspaceId: string, now = Date.now()) {
+  let usage = usageCache.get(workspaceId)
+  if (!usage || now - usage.at > USAGE_TTL_MS) {
+    const [row] = await tx
+      .select({ rows: sql<number>`count(*)::int`, bytes: sql<number>`coalesce(sum(pg_column_size(${schema.syncRow.fields})), 0)::bigint` })
+      .from(schema.syncRow)
+      .where(eq(schema.syncRow.workspaceId, workspaceId))
+    usage = { at: now, rows: row?.rows ?? 0, bytes: Number(row?.bytes ?? 0) }
+    usageCache.set(workspaceId, usage)
+    if (usageCache.size > 5_000) usageCache.clear()
+  }
+  return usage
+}
 
 async function loadRow(tx: Tx, workspaceId: string, table: string, rowId: string): Promise<RowState | null> {
   const [row] = await tx
@@ -277,6 +275,8 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
         const orgActor = ws.kind === 'org' && ws.orgId ? { user, orgId: ws.orgId } : null
 
         const results: Outcome[] = []
+        const limits = ws.kind === 'org' ? WORKSPACE_LIMITS.org : WORKSPACE_LIMITS.personal
+        const usage = await usageOf(tx, workspaceId)
         const horizon = Date.now() + MAX_CLOCK_AHEAD_MS
         // Order matters inside a batch (a later change may depend on an earlier one).
         for (const change of changes) {
@@ -285,11 +285,16 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
             results.push({ status: 'rejected', reason: 'clock_ahead' })
             continue
           }
-          if (!fieldsAcceptable(change.fields)) {
+          if (!fieldsAcceptable(change.fields, change.table)) {
             results.push({ status: 'rejected', reason: 'forbidden_field' })
             continue
           }
           const current = await loadRow(tx, workspaceId, change.table, change.rowId)
+          // A full workspace takes no new rows (changes to rows it has still go through).
+          if (current === null && change.op === 'upsert' && (usage.rows >= limits.rows || usage.bytes >= limits.bytes)) {
+            results.push({ status: 'rejected', reason: 'workspace_full' })
+            continue
+          }
           const mergeable: Change = { ...change, fields: change.fields as Record<string, Json> | undefined }
           // Someone who may not change the lock writes `locked` as it already is (a new entry says `false`): that
           // changes nothing, and must not carry a stamp that would outrank the manager's later decision.
@@ -309,6 +314,8 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
           }
           const { state, outcome } = merge(current, mergeable, actor)
           if (outcome.status === 'applied') {
+            if (current === null) usage.rows += 1
+            usage.bytes += JSON.stringify(change.fields ?? {}).length
             await saveRow(tx, workspaceId, change.table, change.rowId, state, current !== null)
           }
           results.push(outcome)

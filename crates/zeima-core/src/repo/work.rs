@@ -292,7 +292,8 @@ impl Core {
         .bind(&user)
         .fetch_one(tx.conn())
         .await?;
-        if !has_schedule {
+        // In an organization the schedule is set by an administrator, not made up here.
+        if !has_schedule && !tx.ctx().shared {
             let today = worktime::local_date(tx.now(), parse_tz(&tx.default_tz())?);
             let input = default_schedule(&profile, today);
             write_schedule(&mut tx, None, input).await?;
@@ -319,6 +320,7 @@ impl Core {
     }
 
     pub async fn set_work_settings(&self, settings: WorkSettings) -> Result<WorkSettings> {
+        self.require_own_settings()?;
         settings.validate()?;
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
@@ -369,6 +371,7 @@ impl Core {
 
     /// Creates (`id = None`) or updates a schedule.
     pub async fn save_schedule(&self, id: Option<&str>, input: WorkScheduleInput) -> Result<WorkSchedule> {
+        self.require_own_settings()?;
         let mut tx = self.begin().await?;
         let schedule = write_schedule(&mut tx, id, input).await?;
         tx.commit().await?;
@@ -376,6 +379,7 @@ impl Core {
     }
 
     pub async fn delete_schedule(&self, id: &str) -> Result<()> {
+        self.require_own_settings()?;
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let valid_from: Option<NaiveDate> = sqlx::query_scalar(
@@ -851,6 +855,7 @@ impl Core {
     }
 
     pub async fn create_adjustment(&self, input: BalanceAdjustmentInput) -> Result<BalanceAdjustment> {
+        self.require_own_settings()?;
         let reason = input.reason.trim();
         if reason.is_empty() {
             return Err(Error::validation("reason", "please give a reason"));
@@ -891,6 +896,7 @@ impl Core {
     }
 
     pub async fn delete_adjustment(&self, id: &str) -> Result<()> {
+        self.require_own_settings()?;
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let date: Option<NaiveDate> = sqlx::query_scalar(

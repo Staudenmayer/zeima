@@ -32,6 +32,9 @@ pub struct Context {
     /// and is part of the synced rows (the server checks who owns what).
     /// In the personal workspace it is a local id that never leaves the device.
     pub shared: bool,
+    /// Acting for another person of the organization (see `Core::managing`): the one case in which a shared handle
+    /// may set a person's schedule, vacation entitlement and overtime corrections.
+    pub managing: bool,
 }
 
 /// A workspace on this device.
@@ -112,6 +115,7 @@ impl Core {
                 workspace_id: String::new(),
                 user_id: String::new(),
                 shared: false,
+                managing: false,
             },
             hlc: Arc::new(Mutex::new(HlcClock::new(device_id))),
             clock,
@@ -206,6 +210,7 @@ impl Core {
                 workspace_id: workspace_id.to_string(),
                 user_id: user_id.to_string(),
                 shared: true,
+                managing: false,
             },
             hlc: self.hlc.clone(),
             clock: self.clock.clone(),
@@ -213,6 +218,28 @@ impl Core {
             week_start: self.week_start.clone(),
             events: self.events.clone(),
         }
+    }
+
+    /// A handle that sets the schedule, vacation entitlement and overtime corrections of `user_id` in this
+    /// organization workspace. Those are the organization's records about a person: on a plain shared handle they
+    /// cannot be changed (the server refuses them from anyone without the right to manage members). Only meaningful
+    /// in a shared workspace; elsewhere it is the handle itself.
+    pub fn managing(&self, user_id: &str) -> Core {
+        let mut core = self.scoped(&self.ctx.workspace_id, user_id);
+        core.ctx.shared = self.ctx.shared;
+        core.ctx.managing = self.ctx.shared;
+        core
+    }
+
+    /// Refuses a change to what the organization sets for a person, unless this is a `managing` handle.
+    pub(crate) fn require_own_settings(&self) -> Result<()> {
+        if self.ctx.shared && !self.ctx.managing {
+            return Err(crate::Error::validation(
+                "workspace",
+                "this is set by an administrator of the organization",
+            ));
+        }
+        Ok(())
     }
 
     /// Records an organization's shared workspace and the user's account in
@@ -540,9 +567,13 @@ mod tests {
     #[tokio::test]
     async fn the_database_and_its_folder_are_owner_only() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("zeima-core-perm-{}", new_id())).join("data");
+        let dir = std::env::temp_dir()
+            .join(format!("zeima-core-perm-{}", new_id()))
+            .join("data");
         let path = dir.join("zeima.db");
-        let core = Core::open(&path, Arc::new(ManualClock::new(1_000))).await.unwrap();
+        let core = Core::open(&path, Arc::new(ManualClock::new(1_000)))
+            .await
+            .unwrap();
         let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&dir), 0o700);
         assert_eq!(mode(&path), 0o600);
