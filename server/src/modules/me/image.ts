@@ -79,3 +79,27 @@ export function checkAvatar(dataUrl: string): string | null {
   }
   return null
 }
+
+/** What is stored and handed to every coworker: at most this many pixels each way, as WebP. */
+export const STORED_AVATAR_PIXELS = 256
+
+/**
+ * Decodes a picture that passed `checkAvatar` and encodes it again, so that only bytes this server produced reach the
+ * coworkers' web views (nothing hostile after a valid header, no metadata) and a list of everybody's pictures stays small.
+ * Returns the new data URL, or `null` when the bytes do not decode.
+ */
+export async function reencodeAvatar(dataUrl: string): Promise<string | null> {
+  const m = /^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl)
+  if (!m) return null
+  try {
+    const { default: sharp } = await import('sharp')
+    const out = await sharp(Buffer.from(m[1]!, 'base64'), { limitInputPixels: MAX_AVATAR_PIXELS * MAX_AVATAR_PIXELS, failOn: 'error' })
+      .rotate() // applies the orientation, which the next step would otherwise drop with the metadata
+      .resize(STORED_AVATAR_PIXELS, STORED_AVATAR_PIXELS, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer()
+    return `data:image/webp;base64,${out.toString('base64')}`
+  } catch {
+    return null
+  }
+}

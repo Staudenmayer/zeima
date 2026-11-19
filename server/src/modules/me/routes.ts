@@ -1,6 +1,6 @@
 // The signed-in user as the API sees them: identity and org memberships.
 
-import { checkAvatar } from './image.ts'
+import { checkAvatar, reencodeAvatar } from './image.ts'
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { eq } from 'drizzle-orm'
 import { Type } from 'typebox'
@@ -68,7 +68,7 @@ export const meRoutes: FastifyPluginAsyncTypebox = async (app) => {
       schema: {
         tags: ['me'],
         summary: 'Sets the signed-in user\'s profile picture',
-        description: `A PNG, JPEG or WebP as a data URL, at most ${AVATAR_MAX} characters (the app shrinks pictures to a small square first). Everyone in the user's organizations sees it.`,
+        description: `A PNG, JPEG or WebP as a data URL, at most ${AVATAR_MAX} characters. The server decodes it and stores its own WebP of at most 256 by 256 pixels. Everyone in the user's organizations sees it.`,
         security: SECURITY,
         body: Type.Object({ image: Type.String({ maxLength: AVATAR_MAX }) }),
         response: { 204: Type.Null(), ...problems(400, 401, 403, 503) },
@@ -78,7 +78,9 @@ export const meRoutes: FastifyPluginAsyncTypebox = async (app) => {
       if (!app.db) throw new HttpProblem(503, 'unavailable', 'the database is not configured')
       const problem = checkAvatar(request.body.image)
       if (problem) throw new HttpProblem(400, 'bad_request', problem)
-      await app.db.update(schema.kcUser).set({ avatar: request.body.image }).where(eq(schema.kcUser.id, request.user!.id))
+      const stored = await reencodeAvatar(request.body.image)
+      if (!stored) throw new HttpProblem(400, 'bad_request', 'the picture could not be read as an image')
+      await app.db.update(schema.kcUser).set({ avatar: stored }).where(eq(schema.kcUser.id, request.user!.id))
       return reply.code(204).send(null)
     },
   )

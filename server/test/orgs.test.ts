@@ -669,20 +669,32 @@ describe.skipIf(!(await reachable()))('organizations', () => {
   })
 
   describe('profile pictures', () => {
-    // A 16 by 16 JPEG header: what the server reads of a picture.
-    const PIC = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x10, 0x00, 0x10, 0x01, 0x01, 0x11, 0x00, 0xff, 0xd9]).toString('base64')}`
+    // A real 400 by 300 JPEG, and a header that is valid (16 by 16) with nothing decodable behind it.
+    let PIC = ''
+    const HEADER_ONLY = `data:image/jpeg;base64,${Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x10, 0x00, 0x10, 0x01, 0x01, 0x11, 0x00, 0xff, 0xd9]).toString('base64')}`
+    let stored = ''
+    beforeAll(async () => {
+      const { default: sharp } = await import('sharp')
+      const jpeg = await sharp({ create: { width: 400, height: 300, channels: 3, background: '#3366cc' } }).jpeg().toBuffer()
+      PIC = `data:image/jpeg;base64,${jpeg.toString('base64')}`
+    })
 
     it('are set by the person, seen by everyone in the organization, and can be removed', async () => {
       await reset()
       expect((await call('PUT', '/v1/me/avatar', MEMBER, 'member', { image: 'https://example.com/a.png' })).statusCode).toBe(400)
       expect((await call('PUT', '/v1/me/avatar', MEMBER, 'member', { image: 'data:text/html;base64,PHNjcmlwdD4=' })).statusCode).toBe(400)
+      // A header alone is not a picture: it is decoded, not trusted.
+      expect((await call('PUT', '/v1/me/avatar', MEMBER, 'member', { image: HEADER_ONLY })).statusCode).toBe(400)
       expect((await call('PUT', '/v1/me/avatar', MEMBER, 'member', { image: PIC })).statusCode).toBe(204)
-      expect((await call('GET', '/v1/me', MEMBER, 'member')).json().avatar).toBe(PIC)
+      // The server stores its own small WebP, not the bytes it was sent.
+      stored = (await call('GET', '/v1/me', MEMBER, 'member')).json().avatar
+      expect(stored).toMatch(/^data:image\/webp;base64,/)
+      expect(stored).not.toBe(PIC)
       const people = (await call('GET', `/v1/orgs/${ORG}/people`, OTHER, 'member')).json() as { id: string; avatar: string | null }[]
-      expect(people.find((p) => p.id === MEMBER)!.avatar).toBe(PIC)
+      expect(people.find((p) => p.id === MEMBER)!.avatar).toBe(stored)
       expect(people.find((p) => p.id === OWNER)!.avatar).toBeNull()
       const directory = (await call('GET', `/v1/orgs/${ORG}/directory`, OTHER, 'member')).json() as { id: string; avatar: string | null }[]
-      expect(directory.find((p) => p.id === MEMBER)!.avatar).toBe(PIC)
+      expect(directory.find((p) => p.id === MEMBER)!.avatar).toBe(stored)
       expect((await call('DELETE', '/v1/me/avatar', MEMBER, 'member')).statusCode).toBe(204)
       expect((await call('GET', '/v1/me', MEMBER, 'member')).json().avatar).toBeNull()
     })

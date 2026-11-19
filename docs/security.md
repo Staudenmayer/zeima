@@ -106,7 +106,7 @@ A third review (static, white-box; the report is kept outside the repository) fo
 | PT2-02 | SCIM keys ignored the role hierarchy | Fixed | Provisioning changes only members and managers; SCIM audit entries carry the key id. |
 | PT2-03 | `/readyz` exempt from the rate limit; jurisdictions read per request | Fixed | Readiness is limited like other routes and cached 5 s; the profile folder is cached 60 s. |
 | PT2-04 | Push byte budget skipped without `Content-Length` | Fixed | The parsed body's size is charged. The per-workspace total (PT-04) stays open. |
-| PT2-05 | Profile pictures not re-encoded; all returned in list responses | Open | Needs an image library to re-encode on upload. |
+| PT2-05 | Profile pictures not re-encoded; all returned in list responses | Fixed | The server decodes each upload (`sharp`) and stores its own WebP of at most 256 by 256 pixels, so no foreign bytes reach the coworkers and the lists stay small. |
 | PT2-06 | `group.manage` lets someone join departments themselves | Fixed | Only an owner changes their own department membership. |
 | PT2-07 | Admins could create admins | Fixed | Only an owner gives the admin role. |
 | PT2-08 | Checkout token outlives ownership | Fixed (partly) | A new subscription attaches to an organization only if the buyer still owns it; renewals continue. |
