@@ -53,14 +53,70 @@ const SsoBody = Type.Object({
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 export const CHALLENGE_NAME = '_zeima-challenge'
 
-function privateAddress(ip: string): boolean {
-  if (isIP(ip) === 4) {
-    const [a = 0, b = 0] = ip.split('.').map(Number)
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224
+/** Whether an IPv4 address is anything but an ordinary public one (private, loopback, link-local, documentation, benchmarking, multicast, reserved). */
+function privateV4(a: number, b: number, c: number): boolean {
+  return (
+    a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+    (a === 192 && b === 88 && c === 99) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113)
+  )
+}
+
+/** The 16 bytes of an IPv6 address in any notation (compressed, long, with a dotted tail), or null. */
+function v6Bytes(ip: string): number[] | null {
+  let text = ip.toLowerCase().split('%')[0]!
+  const tail = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text)
+  if (tail) {
+    const q = tail.slice(1).map(Number)
+    if (q.some((n) => n > 255)) return null
+    text = `${text.slice(0, tail.index)}${((q[0]! << 8) | q[1]!).toString(16)}:${((q[2]! << 8) | q[3]!).toString(16)}`
   }
-  const v6 = ip.toLowerCase()
-  if (v6.startsWith('::ffff:')) return privateAddress(v6.slice(7))
-  return v6 === '::1' || v6 === '::' || v6.startsWith('fc') || v6.startsWith('fd') || v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb')
+  const halves = text.split('::')
+  if (halves.length > 2) return null
+  const groups = (part: string) => (part === '' ? [] : part.split(':'))
+  const head = groups(halves[0]!)
+  const rest = halves.length === 2 ? groups(halves[1]!) : []
+  const missing = 8 - head.length - rest.length
+  if (halves.length === 1 ? head.length !== 8 : missing < 1) return null
+  const all = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill('0'), ...rest]
+  const out: number[] = []
+  for (const g of all) {
+    if (!/^[0-9a-f]{1,4}$/.test(g)) return null
+    const n = parseInt(g, 16)
+    out.push(n >> 8, n & 255)
+  }
+  return out
+}
+
+/**
+ * Whether an address is not an ordinary public one. IPv4 is checked against every special-use range; IPv6 is an
+ * allow-list (global unicast, 2000::/3 only), and the forms that carry an IPv4 address (mapped, compatible, NAT64)
+ * are judged by the address inside them. Anything that cannot be read is refused.
+ */
+export function privateAddress(ip: string): boolean {
+  if (isIP(ip) === 4) {
+    const [a = 0, b = 0, c = 0] = ip.split('.').map(Number)
+    return privateV4(a, b, c)
+  }
+  const bytes = v6Bytes(ip)
+  if (!bytes) return true
+  const zeros = (n: number) => bytes.slice(0, n).every((x) => x === 0)
+  const embedded = () => privateV4(bytes[12]!, bytes[13]!, bytes[14]!)
+  if (zeros(10) && bytes[10] === 0xff && bytes[11] === 0xff) return embedded() // ::ffff:a.b.c.d
+  if (zeros(12)) return true // ::, ::1 and IPv4-compatible addresses: never a public host
+  if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && bytes.slice(4, 12).every((x) => x === 0)) return embedded() // NAT64
+  if ((bytes[0]! & 0xe0) !== 0x20) return true // outside 2000::/3
+  if (bytes[0] === 0x20 && bytes[1] === 0x02) return true // 6to4
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && (bytes[2] === 0 && bytes[3] === 0)) return true // Teredo
+  if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) return true // documentation
+  return false
 }
 
 /**

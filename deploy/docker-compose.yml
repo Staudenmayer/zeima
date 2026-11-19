@@ -69,6 +69,8 @@ services:
       ZEIMA_API_URL: ${PUBLIC_URL:?set PUBLIC_URL in deploy/.env}
       ZEIMA_WEB_URL: ${PUBLIC_URL}
       ZEIMA_SWAGGER_ENABLED: "false"
+      # The web client is not in use yet; switching it on also means adding it to ALLOWED_CLIENTS of the API.
+      ZEIMA_WEB_ENABLED: "false"
       ZEIMA_SMTP_HOST: ${SMTP_HOST:-localhost}
       ZEIMA_SMTP_PORT: ${SMTP_PORT:-25}
       ZEIMA_SMTP_FROM: ${SMTP_FROM:-no-reply@zeima.local}

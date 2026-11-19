@@ -273,6 +273,45 @@ pub fn host_of_address(address: &str) -> Option<String> {
     ok.then_some(host)
 }
 
+/// Suffixes under which strangers have their own names; a wildcard over one of them is refused.
+const PUBLIC_SUFFIXES: &[&str] = &[
+    "co.uk",
+    "org.uk",
+    "ac.uk",
+    "gov.uk",
+    "me.uk",
+    "com.au",
+    "net.au",
+    "org.au",
+    "co.nz",
+    "co.jp",
+    "co.kr",
+    "co.in",
+    "co.za",
+    "com.br",
+    "com.cn",
+    "com.mx",
+    "com.tr",
+    "com.sg",
+    "com.hk",
+    "co.il",
+    "com.ar",
+    "github.io",
+    "gitlab.io",
+    "vercel.app",
+    "netlify.app",
+    "pages.dev",
+    "workers.dev",
+    "herokuapp.com",
+    "azurewebsites.net",
+    "cloudfront.net",
+    "amazonaws.com",
+    "appspot.com",
+    "web.app",
+    "firebaseapp.com",
+    "onrender.com",
+];
+
 impl AddonManifest {
     /// Allowed hosts: the manifest's list plus the hosts of the user's
     /// `host_settings` values (`values` maps setting keys to their value).
@@ -364,6 +403,30 @@ impl AddonManifest {
                 return Err(Error::validation(
                     "allowed_hosts",
                     format!("'{host}' is not a host name (no scheme, path or port)"),
+                ));
+            }
+            // An add-on connects to the internet, not to this machine or the network around it.
+            let lower = bare.to_ascii_lowercase();
+            let internal = lower.parse::<std::net::IpAddr>().is_ok()
+                || lower.split('.').all(|p| p.chars().all(|c| c.is_ascii_digit()))
+                || lower == "localhost"
+                || lower.ends_with(".localhost")
+                || lower.ends_with(".local")
+                || lower.ends_with(".internal")
+                || lower.ends_with(".lan");
+            if internal {
+                return Err(Error::validation(
+                    "allowed_hosts",
+                    format!(
+                        "'{host}' is a local or numeric address; add-ons may only name public host names"
+                    ),
+                ));
+            }
+            // A wildcard over a whole public suffix (`*.co.uk`, `*.github.io`) would be every site below it.
+            if host.starts_with("*.") && PUBLIC_SUFFIXES.contains(&lower.as_str()) {
+                return Err(Error::validation(
+                    "allowed_hosts",
+                    format!("'{host}' covers every site under a public suffix; name the host"),
                 ));
             }
         }
@@ -575,6 +638,12 @@ auth_params = { access_type = "offline", prompt = "consent" }
         bad("version = \"1.2.0\"", "version = \"1.2\"");
         bad("\"entries:read\", \"network\"", "\"entries:read\"");
         bad("\"api.example.com\"", "\"https://api.example.com\"");
+        // Local and numeric hosts, and wildcards over a whole public suffix.
+        bad("\"api.example.com\"", "\"127.0.0.1\"");
+        bad("\"api.example.com\"", "\"printer.local\"");
+        bad("\"api.example.com\"", "\"169.254.169.254\"");
+        bad("\"*.example.org\"", "\"*.co.uk\"");
+        bad("\"*.example.org\"", "\"*.github.io\"");
         bad("schedule_minutes = 15", "");
         bad("\"report.export\", ", "");
         bad("type = \"select\"", "type = \"text\"");

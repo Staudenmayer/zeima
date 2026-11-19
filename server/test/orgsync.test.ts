@@ -403,4 +403,19 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       expect(await results(ANNA, [upsert('time_entry', E, Date.now() + 100_000, { note: 'after the lock' })])).toEqual([{ status: 'rejected', reason: 'locked' }])
     })
   })
+
+  it('freezes a locked entry for its own author unless they may edit locked entries organization-wide', async () => {
+    const E = id(70)
+    expect(await results(MANAGER, [upsert('time_entry', E, 10, { userId: MANAGER, startAt: 1, endAt: 2, projectId: id(10), tagIds: [id(11)], locked: false })])).toEqual([{ status: 'applied' }])
+    expect(await results(ADMIN, [upsert('time_entry', E, 20, { locked: true })])).toEqual([{ status: 'applied' }])
+    expect(await results(MANAGER, [upsert('time_entry', E, 30, { locked: false, note: 'after the lock' })])).toEqual([{ status: 'rejected', reason: 'locked' }])
+    expect(await results(ADMIN, [upsert('time_entry', E, 40, { locked: false })])).toEqual([{ status: 'applied' }])
+  })
+
+  it('refuses invented field names and oversized values', async () => {
+    const E = id(71)
+    expect(await results(ANNA, [upsert('time_entry', E, 10, { userId: ANNA, startAt: 1, endAt: 2, projectId: id(10), tagIds: [id(11)], [`k${'x'.repeat(100)}`]: 1 })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+    expect(await results(ANNA, [upsert('time_entry', E, 11, { userId: ANNA, startAt: 1, endAt: 2, projectId: id(10), tagIds: [id(11)], note: 'A'.repeat(70_000) })])).toEqual([{ status: 'rejected', reason: 'forbidden_field' }])
+    expect(await results(ANNA, [upsert('time_entry', E, 12, { userId: ANNA, startAt: 1, endAt: 2, projectId: id(10), tagIds: [id(11)], note: 'fine' })])).toEqual([{ status: 'applied' }])
+  })
 })

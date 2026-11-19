@@ -506,7 +506,7 @@ server/
 | `zeima-api` | confidential, bearer-only (audience) | Audience mapper adds `aud: zeima-api` to desktop tokens |
 | `zeima-api-admin` | confidential, service account | API → Keycloak Admin REST API (manage users, groups, orgs, invitations). Only scoped `realm-management` roles: `manage-users`, `view-users`, `query-groups`, `manage-organizations`, `manage-identity-providers`. The company directory (LDAP/AD) additionally needs `manage-realm`, which is **not** given by default (docs/security.md, ZE-09). |
 | `zeima-swagger` | public, PKCE | Swagger UI "Authorize" (dev/staging; optional in prod) |
-| `zeima-web` | public, PKCE | Future web app / admin console |
+| `zeima-web` | public, PKCE | Future web app / admin console (disabled until `ZEIMA_WEB_ENABLED=true`; add it to `ALLOWED_CLIENTS` too) |
 
 **Tenancy model**
 - One realm. Each customer org is a **Keycloak Organization**, which provides email-domain routing to the org's own IdP (SSO) and invitations.

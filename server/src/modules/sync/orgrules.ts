@@ -191,7 +191,13 @@ export async function checkOrgWrite(
   }
   const moved = change.fields?.userId
   if (current && typeof moved === 'string' && moved !== owner) return { status: 'rejected', reason: 'forbidden_field' }
-  if (owner === actor.user.id) return change.table === 'time_entry' ? checkEntryPolicy(db, actor, orgId, change, merged) : null
+  if (owner === actor.user.id) {
+    if (change.table !== 'time_entry') return null
+    // A locked entry is frozen for the person it belongs to as well. Only someone who may edit everybody's locked
+    // entries (organization-wide) can change their own: a manager of one department does not lift an admin's lock on themselves.
+    if (current && plain(current.fields.locked) === true && scopeOf(actor, 'entry.write_locked') !== 'org') return { status: 'rejected', reason: 'locked' }
+    return checkEntryPolicy(db, actor, orgId, change, merged)
+  }
   // Someone else's row: only managers editing time entries (locking, corrections).
   if (change.table !== 'time_entry') return { status: 'rejected', reason: 'forbidden' }
   const scope = scopeOf(actor, 'entry.write_locked')
@@ -227,6 +233,8 @@ const isAsked = (fields: Record<string, { v: unknown }>, userId: string) => {
   return plain(fields.userId) === userId || (Array.isArray(attendees) && attendees.includes(userId))
 }
 
+const departmentCache = new WeakMap<Map<string, PolicyRow[]>, Map<string, string[]>>()
+
 /** The entry fields a manager does not get, by what the owner's policy shows. */
 const HIDDEN_BY_TOTALS = ['note', 'projectId', 'tagIds', 'activityId', 'costCenterId']
 
@@ -248,7 +256,12 @@ async function limited<T extends { workspaceId: string; table: string; fields: R
     cache.set(row.workspaceId, rows)
   }
   if (rows.length === 0) return row
-  const { managerVisibility } = effective(rows, await departmentsOf(db, orgId, owner))
+  // One lookup per person for the whole page of rows, not one per row.
+  let known = departmentCache.get(cache)
+  if (!known) departmentCache.set(cache, (known = new Map()))
+  let departments = known.get(owner)
+  if (!departments) known.set(owner, (departments = await departmentsOf(db, orgId, owner)))
+  const { managerVisibility } = effective(rows, departments)
   if (managerVisibility === 'full') return row
   const hide = managerVisibility === 'hide_notes' ? ['note'] : HIDDEN_BY_TOTALS
   const fields = { ...row.fields }

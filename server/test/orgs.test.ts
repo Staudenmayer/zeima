@@ -424,6 +424,17 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       const left = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, ORG))
       expect(left.map((m) => m.userId).sort()).toEqual([OWNER, ADMIN])
     })
+
+    it('does not let peers act on each other: an admin leaves other admins alone, an owner may', async () => {
+      await reset()
+      const PEER = id(77)
+      await db.db.insert(schema.kcUser).values({ id: PEER, email: 'peer@example.com', displayName: 'Peer' })
+      await db.db.insert(schema.kcOrgMember).values({ orgId: ORG, userId: PEER, role: 'admin' })
+      expect((await call('PATCH', `/v1/orgs/${ORG}/members/${PEER}`, ADMIN, 'admin', { active: false })).statusCode).toBe(403)
+      expect((await call('PATCH', `/v1/orgs/${ORG}/members/${PEER}`, ADMIN, 'admin', { role: 'member' })).statusCode).toBe(403)
+      expect((await call('DELETE', `/v1/orgs/${ORG}/members/${PEER}`, ADMIN, 'admin')).statusCode).toBe(403)
+      expect((await call('DELETE', `/v1/orgs/${ORG}/members/${PEER}`, OWNER, 'owner')).statusCode).toBe(204)
+    })
   })
 
   describe('departments', () => {
@@ -548,7 +559,9 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect(rows.length).toBeGreaterThanOrEqual(4)
       expect(rows.find((r) => r.id === MEMBER)).toMatchObject({ name: 'Max', departments: ['dev'], jobTitle: 'Engineer', jobDescription: 'Builds things' })
       expect(rows.find((r) => r.id === MANAGER)).toMatchObject({ departments: [], jobTitle: 'Team lead', jobDescription: null })
-      expect(rows.every((r) => typeof r.email === 'string')).toBe(true)
+      // Email addresses follow the member list: a plain member sees their own only, others see everybody's.
+      expect(rows.filter((r) => r.email !== null).map((r) => r.id)).toEqual([MEMBER])
+      expect((await dir(ADMIN, 'admin')).every((r) => typeof r.email === 'string')).toBe(true)
 
       // Taking a description away leaves its people without one.
       expect((await call('DELETE', `/v1/orgs/${ORG}/jobs/${dev.json().id}`, MEMBER, 'member')).statusCode).toBe(403)

@@ -42,6 +42,15 @@ pub fn export_report(Json(req): Json<ExportRequest>) -> FnResult<Json<ExportResu
     Ok(Json(ExportResult { content: out }))
 }
 
+/// Text that a spreadsheet would run as a formula gets a leading apostrophe.
+fn safe(text: String) -> String {
+    if text.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{text}")
+    } else {
+        text
+    }
+}
+
 fn row(cells: impl Iterator<Item = String>, delimiter: &str) -> String {
     let quoted: Vec<String> = cells
         .map(|c| {
@@ -82,23 +91,25 @@ fn cell(
         "end" => e.local_end.as_deref().map(|s| s[11..].to_string()).unwrap_or_default(),
         "hours" => decimal(minutes as f64 / 60.0),
         "minutes" => minutes.to_string(),
-        "project" => project.map(|p| p.name.clone()).unwrap_or_default(),
-        "alias" => project.and_then(|p| p.alias.clone()).unwrap_or_default(),
-        "client" => project.and_then(|p| p.client.clone()).unwrap_or_default(),
-        "tags" => e
-            .tag_ids
-            .iter()
-            .filter_map(|id| tags.get(id.as_str()).copied())
-            .collect::<Vec<_>>()
-            .join(", "),
-        "cost_center" => e
-            .cost_center_id
-            .as_deref()
-            .and_then(|id| cost_centers.get(id).copied())
-            .unwrap_or_default()
-            .to_string(),
+        "project" => safe(project.map(|p| p.name.clone()).unwrap_or_default()),
+        "alias" => safe(project.and_then(|p| p.alias.clone()).unwrap_or_default()),
+        "client" => safe(project.and_then(|p| p.client.clone()).unwrap_or_default()),
+        "tags" => safe(
+            e.tag_ids
+                .iter()
+                .filter_map(|id| tags.get(id.as_str()).copied())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        "cost_center" => safe(
+            e.cost_center_id
+                .as_deref()
+                .and_then(|id| cost_centers.get(id).copied())
+                .unwrap_or_default()
+                .to_string(),
+        ),
         "billable" => if e.billable { "1" } else { "0" }.into(),
-        "note" => e.note.clone(),
+        "note" => safe(e.note.clone()),
         _ => String::new(),
     }
 }

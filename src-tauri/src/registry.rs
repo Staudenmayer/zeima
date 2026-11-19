@@ -164,6 +164,13 @@ fn save_state(app: &AppHandle) {
     }
 }
 
+/// Forgets what a server told this app to trust (its publishers and its organizations' rules): after signing out or
+/// connecting to another server, the old one no longer vouches for anything.
+pub fn forget_server_trust(app: &AppHandle) {
+    app.state::<Addons>().set_trust(Vec::new(), Vec::new());
+    save_state(app);
+}
+
 // --------------------------------------------------------------------------
 // The server
 // --------------------------------------------------------------------------

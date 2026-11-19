@@ -71,3 +71,27 @@ addon question and packages (`src-tauri/src/commands_addons.rs`), the registry k
 ## Reporting a problem
 
 Send security reports privately to the project owner; do not open a public issue.
+
+## Penetration test of 19 November 2026 (PT-01 to PT-17)
+
+A further white-box review with proofs of concept found no critical or high issue, 5 medium, 9 low and 3 informational ones
+(the report is kept outside the repository). What was done:
+
+| ID | Finding | Status | Where, and what to know |
+|---|---|---|---|
+| PT-01 | Address filter of the single sign-on fetch missed IPv6 transition ranges and IPv4 special ranges | Fixed | `privateAddress` (`server/src/modules/orgs/sso.ts`) reads any IPv6 notation, judges mapped, compatible and NAT64 forms by the address inside, allows only global unicast, and refuses 198.18/15, 192.0.0/24, documentation ranges and more. `server/test/address.test.ts`. A Compose egress policy for Keycloak is still the operator's to set (`docs/admin-guide.md`). |
+| PT-02 | Peers could deactivate, remove and demote each other | Fixed | Removing, deactivating or changing the role of someone needs an owner, or a role that ranks above theirs (owner > admin > manager > member; custom roles by strictly covering rights). Leaving yourself is unchanged. |
+| PT-03 | A department manager could unlock their own locked entry | Fixed | A locked entry is frozen for its author unless they may edit locked entries organization-wide (`orgrules.ts`). |
+| PT-04 | Sync stored any field name and any size | Fixed (partly) | Field names must be plain words of at most 64 characters, a field at most 64 KB, a change 256 KB; a push 2 MB and 8 MB per account per minute; pulls are budgeted. *Open: a per-table field schema and a total per workspace.* |
+| PT-05 | Formula injection in CSV | Fixed | Text starting with `= + - @`, tab or carriage return gets a leading apostrophe (`export.rs`, `addons/csv-export`). Rebuild the add-on to ship it. |
+| PT-06 | Amplification by pull and presence | Fixed | Department lookups are cached per page; pull and presence reports have budgets. |
+| PT-07 | Directory showed every email to every member | Fixed | Members who may see only themselves get their own address only. |
+| PT-08 | Publisher keys and rules of a server survived sign-out | Fixed | Cleared on sign-out and on a change of server (`registry::forget_server_trust`). |
+| PT-09 | Unused `zeima-web` client enabled; no MFA; plain SMTP default | Fixed (partly) | `zeima-web` is off (`ZEIMA_WEB_ENABLED`) and not in the default `ALLOWED_CLIENTS`. *Open: an MFA option, TLS for SMTP by default.* |
+| PT-10 | Owner-only permissions not applied on Windows | Fixed (untested here) | `icacls` keeps only the signed-in user (best effort). Check on a Windows machine. |
+| PT-11 | Add-on host allow-list | Fixed (partly) | Manifests may not name numeric or local hosts, nor wildcards over a public suffix. *Open: confirm redirects that leave the list fail in the runtime.* |
+| PT-12 | "Same site" suffix list too short | Fixed (partly) | Hosting suffixes (`github.io`, `vercel.app`, …) added; a full Public Suffix List is a later step. |
+| PT-13 | Release pipeline | Fixed (partly) | Read-only token by default, write only where needed; a final macOS release must be signed (or `ZEIMA_ALLOW_UNSIGNED_MACOS=true`). *Open: Windows signing, a protected environment and tag protection (repository settings).* |
+| PT-14 | LDAP without encryption | Fixed | `ldap://` needs StartTLS; `ldaps://` otherwise. |
+| PT-15 | Seat limit not atomic | Fixed (invitations) | Counting and inserting run under the organization lock; SCIM creation is *open*. |
+| PT-16, PT-17 | Maintenance advisories; accepted risks | Unchanged | See the report. |

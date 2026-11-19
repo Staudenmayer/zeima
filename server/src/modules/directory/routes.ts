@@ -39,7 +39,7 @@ const LdapBody = Type.Object({
   enabled: Type.Optional(Type.Boolean({ default: true })),
 })
 
-export function checkLdapUrl(raw: string): void {
+export function checkLdapUrl(raw: string, startTls = false): void {
   let url: URL
   try {
     url = new URL(raw)
@@ -49,6 +49,8 @@ export function checkLdapUrl(raw: string): void {
   if ((url.protocol !== 'ldap:' && url.protocol !== 'ldaps:') || !url.hostname || url.username || url.password || (url.pathname !== '' && url.pathname !== '/') || url.search) {
     throw new HttpProblem(400, 'bad_request', 'the address must look like ldaps://host:636')
   }
+  // The bind password and every person's password cross this connection: no clear text.
+  if (url.protocol === 'ldap:' && !startTls) throw new HttpProblem(400, 'bad_request', 'the connection must be encrypted: use ldaps://host:636, or ldap:// with StartTLS switched on')
 }
 
 export function checkFilter(filter: string | undefined): void {
@@ -87,7 +89,7 @@ export const directoryRoutes: FastifyPluginAsyncTypebox = async (app) => {
     if (!roles.includes(ADMIN_ROLE)) throw new HttpProblem(403, 'forbidden', `this needs the ${ADMIN_ROLE} role`)
   }
   const input = (body: Static<typeof LdapBody>): LdapInput => {
-    checkLdapUrl(body.url)
+    checkLdapUrl(body.url, body.startTls ?? false)
     checkFilter(body.userFilter)
     return {
       vendor: body.vendor,

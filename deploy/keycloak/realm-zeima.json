@@ -192,7 +192,7 @@
       "clientId": "zeima-web",
       "name": "Zeima web",
       "description": "Future web app and admin console.",
-      "enabled": true,
+      "enabled": "${ZEIMA_WEB_ENABLED:false}",
       "publicClient": true,
       "defaultClientScopes": ["basic", "profile", "email", "roles", "web-origins"],
       "standardFlowEnabled": true,

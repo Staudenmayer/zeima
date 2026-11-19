@@ -317,6 +317,7 @@ pub async fn account_set_server(
     if new != server_url(&state).await? {
         sign_out_inner(&addons).await?;
         crate::license::clear(&app).await;
+        crate::registry::forget_server_trust(&app);
         crate::sync::reset_join(&app).await;
         crate::workspaces::go_personal(&app).await;
     }
@@ -357,9 +358,7 @@ pub async fn account_sign_in(
         services.post_form.clone(),
         &services.tokens,
         state.core.now_ms(),
-        move |url| {
-            crate::trust::open_link(&opener, url)
-        },
+        move |url| crate::trust::open_link(&opener, url),
         cancel,
         &pages,
     )
@@ -403,6 +402,7 @@ pub async fn account_sign_out(
 ) -> CmdResult<AccountStatus> {
     sign_out_inner(&addons).await?;
     crate::license::clear(&app).await;
+    crate::registry::forget_server_trust(&app);
     crate::sync::reset_join(&app).await;
     crate::workspaces::go_personal(&app).await;
     account_status(app, state).await

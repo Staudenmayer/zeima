@@ -244,6 +244,16 @@ pub fn entries_table(report: &Report, lookup: &Lookup, tz: Tz, now: i64, f: &For
     }
 }
 
+/// Text that a spreadsheet would run as a formula (it starts with `=`, `+`, `-`, `@`, a tab or a carriage return) gets a
+/// leading apostrophe, so that a note or a name written by somebody else is shown, not executed.
+pub fn spreadsheet_safe(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        std::borrow::Cow::Owned(format!("'{text}"))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
 /// CSV as spreadsheet apps expect it for the number format: with a decimal
 /// comma the separator is `;`, otherwise `,`. Dates use the date format.
 /// Starts with a UTF-8 BOM so Excel detects the encoding.
@@ -257,7 +267,7 @@ pub fn to_csv(table: &Table, f: &Formats) -> String {
         }
     };
     let cell = |c: &Cell| match c {
-        Cell::Text(s) => quote(s),
+        Cell::Text(s) => quote(&spreadsheet_safe(s)),
         Cell::Hours(h) => f.decimal(*h, 2),
         Cell::Int(i) => i.to_string(),
         Cell::Date(d) => quote(&f.date(*d)),
@@ -323,6 +333,38 @@ mod tests {
         };
         assert_eq!(to_csv(&dated, &mixed), "\u{feff}Date\r\n2026-10-05,2.00\r\n");
         assert_eq!(to_csv(&dated, &de), "\u{feff}Date\r\n05.10.2026;2,00\r\n");
+    }
+
+    #[test]
+    fn text_that_would_run_as_a_formula_is_defused() {
+        let table = Table {
+            name: "t".into(),
+            headers: vec!["Note".into()],
+            rows: vec![
+                vec![Cell::Text("=HYPERLINK(\"http://x\",\"y\")".into())],
+                vec![Cell::Text("@SUM(1+1)".into())],
+                vec![Cell::Text("+1".into())],
+                vec![Cell::Text("-2".into())],
+                vec![Cell::Text("fine = fine".into())],
+            ],
+        };
+        let en = Formats::new(
+            "en",
+            system_formats("en-US"),
+            DateFormat::Auto,
+            TimeFormat::Auto,
+            NumberFormat::Auto,
+            WeekStart::Monday,
+        );
+        let csv = to_csv(&table, &en);
+        assert!(
+            csv.contains("\"'=HYPERLINK(\"\"http://x\"\",\"\"y\"\")\""),
+            "{csv}"
+        );
+        assert!(
+            csv.contains("\r\n'@SUM(1+1)\r\n") && csv.contains("\r\n'+1\r\n") && csv.contains("\r\n'-2\r\n")
+        );
+        assert!(csv.contains("\r\nfine = fine\r\n"));
     }
 
     #[test]

@@ -8,7 +8,7 @@ describe('loadConfig', () => {
     expect(c.deploymentMode).toBe('self_hosted')
     expect(c.keycloak.issuer).toBe('http://localhost:8080/realms/zeima')
     expect(c.keycloak.jwksUrl).toBe('http://localhost:8080/realms/zeima/protocol/openid-connect/certs')
-    expect(c.allowedClients).toEqual(['zeima-desktop', 'zeima-swagger', 'zeima-web'])
+    expect(c.allowedClients).toEqual(['zeima-desktop', 'zeima-swagger'])
     expect(c.corsOrigins).toEqual([])
   })
 

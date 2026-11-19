@@ -9,9 +9,10 @@ import { Type } from 'typebox'
 import { type Db, schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { SECURITY } from '../../plugins/auth.ts'
-import { CATALOG, cleanPermissions, covers, isBuiltinRole, type Permissions, SCOPES } from '../../plugins/permissions.ts'
+import { CATALOG, cleanPermissions, covers, isBuiltinRole, ORG_ROLES, type Permissions, SCOPES } from '../../plugins/permissions.ts'
 import { type Actor, authorize, can, scopeOf } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
+import { Quota } from '../../plugins/quota.ts'
 import { PRESENCE_STATES, type PresenceState } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { reconcileOrganization } from './reconcile.ts'
@@ -39,6 +40,20 @@ async function mayGiveRole(db: Db, actor: Actor, orgId: string, role: string) {
   if (!covers(mine.permissions, target.permissions)) {
     throw new HttpProblem(403, 'forbidden', 'this role has permissions you do not have yourself')
   }
+}
+
+/**
+ * Whether the actor outranks a member who has `targetRole`: an owner always does; anyone else only holds more than the
+ * target does (equal rights are peers, and peers cannot act on each other: an admin cannot remove or demote an admin).
+ */
+async function outranks(db: Db, actor: Actor, orgId: string, targetRole: string): Promise<boolean> {
+  const mine = actor.user.orgs[orgId]!
+  if (mine.role === 'owner') return true
+  // The built-in roles are a ladder: owner, admin, manager, member.
+  if (isBuiltinRole(mine.role) && isBuiltinRole(targetRole)) return ORG_ROLES.indexOf(mine.role) < ORG_ROLES.indexOf(targetRole)
+  const target = await roleOf(db, orgId, targetRole)
+  if (!target) return true
+  return covers(mine.permissions, target.permissions) && !covers(target.permissions, mine.permissions)
 }
 
 /** The departments and the job description must belong to the organization. */
@@ -83,6 +98,8 @@ const Seats = Type.Object({
 const OrgInfo = Type.Object({ id: Type.String(), name: Type.String(), role: Role, seats: Seats })
 
 export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
+  /** A device reports about once a minute and on each change; far more than that is somebody making the others' sockets busy. */
+  const presenceReports = new Quota(90)
   const keycloak = (): KeycloakAdmin => {
     if (!app.keycloakAdmin) {
       throw new HttpProblem(503, 'org_admin_unavailable', 'organization management is not set up: the API has no Keycloak admin credentials')
@@ -229,6 +246,9 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         authorize(actor, 'role.assign', { orgId })
         await mayGiveRole(db, actor, orgId, role)
         // Nor may someone take a role from a person who holds more than they do.
+        if (userId !== actor.user.id && !(await outranks(db, actor, orgId, target.role))) {
+          throw new HttpProblem(403, 'forbidden', 'this person has the same or more permissions than you; only an owner changes their role')
+        }
         const current = await roleOf(db, orgId, target.role)
         if (current && !covers(actor.user.orgs[orgId]!.permissions, current.permissions)) {
           throw new HttpProblem(403, 'forbidden', 'this person has permissions you do not have')
@@ -251,6 +271,9 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
           throw new HttpProblem(403, 'forbidden', 'only an owner can change an owner')
         }
         if (userId === actor.user.id) throw new HttpProblem(409, 'self', 'you cannot deactivate yourself')
+        if (!(await outranks(db, actor, orgId, target.role))) {
+          throw new HttpProblem(403, 'forbidden', 'this person has the same or more permissions than you; only an owner deactivates them')
+        }
         const [others] = await db
           .select({ n: sql<number>`count(*)::int` })
           .from(schema.kcOrgMember)
@@ -289,6 +312,9 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         if (userId !== actor.user.id && actor.user.orgs[orgId]!.role !== 'owner') {
           throw new HttpProblem(403, 'forbidden', 'only an owner can remove an owner')
         }
+      }
+      if (userId !== actor.user.id && !(await outranks(db, actor, orgId, target.role))) {
+        throw new HttpProblem(403, 'forbidden', 'this person has the same or more permissions than you; only an owner removes them')
       }
       await withOwnerLock(db, orgId, async (tx) => {
         const now = await memberOf(tx, orgId, userId)
@@ -360,16 +386,20 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         .innerJoin(schema.kcOrgMember, eq(schema.kcOrgMember.userId, schema.kcUser.id))
         .where(and(eq(schema.kcOrgMember.orgId, orgId), sql`lower(${schema.kcUser.email}) = ${email}`))
       if (existing) throw new HttpProblem(409, 'already_member', 'this person is already a member')
-      requireSeat(await seatLimit(actor.user, orgId), await seatUsage(db, orgId))
+      const limit = await seatLimit(actor.user, orgId)
 
       const groupIds = [...new Set(request.body.groupIds ?? [])]
       const jobId = request.body.jobId ?? null
       await checkDepartmentsAndJob(db, orgId, groupIds, jobId)
-      const [row] = await db
-        .insert(schema.orgInvitation)
-        .values({ orgId, email, role, groupIds, jobId, invitedBy: actor.user.id, createdAt: Date.now() })
-        .onConflictDoNothing()
-        .returning()
+      // Counting the seats and taking one is a single step: two invitations at once must not both see a free seat.
+      const [row] = await withOwnerLock(db, orgId, async (tx) => {
+        requireSeat(limit, await seatUsage(tx, orgId))
+        return tx
+          .insert(schema.orgInvitation)
+          .values({ orgId, email, role, groupIds, jobId, invitedBy: actor.user.id, createdAt: Date.now() })
+          .onConflictDoNothing()
+          .returning()
+      })
       if (!row) throw new HttpProblem(409, 'already_invited', 'this address has a pending invitation')
       try {
         await kc.invite(orgId, email)
@@ -829,6 +859,9 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       actorIn({ user: request.user! }, orgId)
       const db = database()
       const members = (await listMembers(db, orgId)).filter((m) => m.active)
+      // Email addresses follow the member list's rule: someone who may see only themselves does not get everybody's.
+      const readScope = scopeOf(actorIn({ user: request.user! }, orgId), 'member.read')
+      const seeEmails = readScope === 'org' || readScope === 'group'
       const jobs = new Map((await jobsOf(db, orgId)).map((j) => [j.id, j]))
       const held = await db
         .select({ userId: schema.kcOrgMember.userId, jobId: schema.kcOrgMember.jobId })
@@ -849,7 +882,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const pictures = await avatarsOf(db, members.map((m) => m.id))
       return members.map((m) => {
         const job = jobs.get(jobOf.get(m.id) ?? '')
-        return { id: m.id, name: m.name, email: m.email, avatar: pictures.get(m.id) ?? null, departments: departments.get(m.id) ?? [], jobId: job?.id ?? null, jobTitle: job?.name ?? null, jobDescription: job?.description || null }
+        return { id: m.id, name: m.name, email: seeEmails || m.id === request.user!.id ? m.email : null, avatar: pictures.get(m.id) ?? null, departments: departments.get(m.id) ?? [], jobId: job?.id ?? null, jobTitle: job?.name ?? null, jobDescription: job?.description || null }
       })
     },
   )
@@ -1104,6 +1137,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request, reply) => {
       const { orgId } = request.params
       const actor = actorIn({ user: request.user! }, orgId)
+      presenceReports.spend(actor.user.id, 1, 'presence reports')
       const { projectId } = request.body
       const reported: string = request.body.state
       const state = (reported === 'tracking' ? 'online' : reported) as PresenceState | 'offline'

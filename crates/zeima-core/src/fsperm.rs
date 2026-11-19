@@ -26,7 +26,36 @@ fn restrict(path: &Path, mode: u32) -> io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
 }
 
-#[cfg(not(unix))]
+/// Windows: the folder or file keeps only the signed-in user (full control) and drops what it inherited. Best effort:
+/// where `icacls` is not available the profile folder's own protection stays, and the app still starts.
+#[cfg(windows)]
+fn restrict(path: &Path, mode: u32) -> io::Result<()> {
+    let Some(user) = std::env::var_os("USERNAME") else {
+        return Ok(());
+    };
+    let grant = if mode == 0o700 {
+        format!("{}:(OI)(CI)F", user.to_string_lossy())
+    } else {
+        format!("{}:F", user.to_string_lossy())
+    };
+    match std::process::Command::new("icacls")
+        .arg(path)
+        .args(["/inheritance:r", "/grant:r", &grant])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) if !status.success() => eprintln!(
+            "could not restrict {}: icacls exited with {status}",
+            path.display()
+        ),
+        Err(e) => eprintln!("could not restrict {}: {e}", path.display()),
+        Ok(_) => {}
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
 fn restrict(_path: &Path, _mode: u32) -> io::Result<()> {
     Ok(())
 }

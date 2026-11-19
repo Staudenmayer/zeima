@@ -9,8 +9,9 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
 
+# Read-only by default; only the jobs that publish get write access.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -59,6 +60,8 @@ jobs:
           fi
 
   release:
+    permissions:
+      contents: write
     # Creates the release once, so the three platform builds (which run in
     # parallel) only upload to it instead of racing to create it.
     needs: verify
@@ -77,6 +80,8 @@ jobs:
             --notes "See the assets below to download and install." "${flags[@]}"
 
   build:
+    permissions:
+      contents: write
     needs: [verify, release]
     strategy:
       fail-fast: false
@@ -108,6 +113,17 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: bun install --frozen-lockfile
+      # A final release for macOS must be signed; set ZEIMA_ALLOW_UNSIGNED_MACOS=true (repository variable) to ship one anyway.
+      - name: A final macOS release is signed
+        if: runner.os == 'macOS' && needs.verify.outputs.prerelease != 'true'
+        env:
+          HAS_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+          ALLOW_UNSIGNED: ${{ vars.ZEIMA_ALLOW_UNSIGNED_MACOS }}
+        run: |
+          if [ "$HAS_CERT" != "true" ] && [ "$ALLOW_UNSIGNED" != "true" ]; then
+            echo "::error::No Apple signing certificate is set, so this macOS build would be unsigned. Set the APPLE_* secrets, or set ZEIMA_ALLOW_UNSIGNED_MACOS=true to release it anyway."
+            exit 1
+          fi
       - name: macOS signing (only when the Apple secrets are set)
         if: runner.os == 'macOS'
         env:
@@ -147,6 +163,8 @@ jobs:
           args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
 
   addons:
+    permissions:
+      contents: write
     # Runs after the app builds: they create the release, which the addon
     # zips are attached to. Waiting inside this job timed out, because the
     # builds take longer than the wait. Still runs if one platform failed.

@@ -68,6 +68,7 @@ spec:
             - { name: ZEIMA_API_URL, value: {{ $public | quote }} }
             - { name: ZEIMA_WEB_URL, value: {{ $public | quote }} }
             - { name: ZEIMA_SWAGGER_ENABLED, value: "false" }
+            - { name: ZEIMA_WEB_ENABLED, value: "false" }
             - { name: ZEIMA_SMTP_HOST, value: {{ .Values.smtp.host | default "localhost" | quote }} }
             - { name: ZEIMA_SMTP_PORT, value: {{ .Values.smtp.port | quote }} }
             - { name: ZEIMA_SMTP_FROM, value: {{ .Values.smtp.from | quote }} }

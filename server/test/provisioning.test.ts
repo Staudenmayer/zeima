@@ -32,6 +32,8 @@ describe('SCIM and directory input', () => {
 
   it('checks the directory address and filter', () => {
     expect(() => checkLdapUrl('ldaps://ad.acme.example:636')).not.toThrow()
+    expect(() => checkLdapUrl('ldap://ad.acme.example:389')).toThrow()
+    expect(() => checkLdapUrl('ldap://ad.acme.example:389', true)).not.toThrow()
     for (const bad of ['http://x', 'ldap://u:p@x', 'nonsense', 'ldap://x/dc=a']) expect(() => checkLdapUrl(bad), bad).toThrow()
     expect(() => checkFilter(undefined)).not.toThrow()
     expect(() => checkFilter('(memberOf=cn=zeima,dc=a)')).not.toThrow()

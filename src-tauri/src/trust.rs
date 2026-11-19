@@ -23,6 +23,11 @@ pub fn is_loopback(host: &str) -> bool {
 const MULTI_LABEL_SUFFIXES: &[&str] = &[
     "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "com.au", "net.au", "org.au", "co.nz", "co.jp", "co.kr", "co.in",
     "co.za", "com.br", "com.cn", "com.mx", "com.tr", "com.sg", "com.hk", "co.il", "com.ar",
+    // Hosting platforms where every customer has a name of their own below the suffix: two hosts under one of these
+    // are two strangers, not one site.
+    "github.io", "gitlab.io", "vercel.app", "netlify.app", "pages.dev", "workers.dev", "herokuapp.com", "azurewebsites.net",
+    "cloudfront.net", "amazonaws.com", "appspot.com", "web.app", "firebaseapp.com", "onrender.com", "fly.dev", "ngrok.io",
+    "ngrok-free.app", "trycloudflare.com", "repl.co", "glitch.me", "surge.sh", "dyndns.org", "duckdns.org", "myfritz.net",
 ];
 
 /// The registrable domain (`id.zeima.example.co.uk` → `example.co.uk`); an address given as numbers is its own.
@@ -144,6 +149,9 @@ mod tests {
         assert!(same_site("example.com", "id.example.com"));
         assert!(!same_site("example.com", "evil.com"));
         assert!(!same_site("a.co.uk", "b.co.uk"));
+        assert!(!same_site("a.vercel.app", "b.vercel.app"));
+        assert!(!same_site("x.github.io", "y.github.io"));
+        assert!(same_site("id.x.github.io", "time.x.github.io"));
         assert!(!same_site("example.com", "example.com.evil.com"));
     }
 

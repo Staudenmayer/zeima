@@ -46,7 +46,7 @@ export const EnvSchema = Type.Object({
   /** `aud` access tokens must carry. */
   API_AUDIENCE: Type.String({ minLength: 1, default: 'zeima-api' }),
   /** Clients (`azp`) whose tokens are accepted, comma-separated. */
-  ALLOWED_CLIENTS: Type.String({ default: 'zeima-desktop,zeima-swagger,zeima-web' }),
+  ALLOWED_CLIENTS: Type.String({ default: 'zeima-desktop,zeima-swagger' }),
   /** Public client of the Swagger UI "Authorize" button. */
   DOCS_CLIENT_ID: Type.String({ default: 'zeima-swagger' }),
 

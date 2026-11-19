@@ -77,7 +77,28 @@ const MAX_CHANGES = 500
 /** What one account may push in a minute: far more than a person produces, far less than it takes to fill a disk. */
 const PUSH_REQUESTS_PER_MINUTE = 120
 const PUSH_CHANGES_PER_MINUTE = 5_000
+const PULL_REQUESTS_PER_MINUTE = 600
 const MAX_PULL = 500
+/** Bytes one account may push in a minute, and the most one request, one field and one change may carry. */
+const PUSH_BYTES_PER_MINUTE = 8 * 1024 * 1024
+const MAX_PUSH_BODY = 2 * 1024 * 1024
+const MAX_FIELD_BYTES = 64 * 1024
+const MAX_CHANGE_BYTES = 256 * 1024
+/** Field names of every synced table are plain camel-case words. */
+const FIELD_NAME = /^[A-Za-z][A-Za-z0-9]{0,63}$/
+
+/** Whether a change carries only plausible fields: sane names, and values and totals within bounds. */
+export function fieldsAcceptable(fields: Record<string, unknown> | undefined): boolean {
+  if (!fields) return true
+  let total = 0
+  for (const [name, value] of Object.entries(fields)) {
+    if (!FIELD_NAME.test(name)) return false
+    const size = JSON.stringify(value ?? null).length
+    total += size
+    if (size > MAX_FIELD_BYTES || total > MAX_CHANGE_BYTES) return false
+  }
+  return true
+}
 
 /** May the caller change rows of this workspace as a manager would (lock, edit locked)? */
 function isManager(user: AuthUser, ws: { kind: string; orgId: string | null }): boolean {
@@ -112,6 +133,8 @@ async function saveRow(tx: Tx, workspaceId: string, table: string, rowId: string
 export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
   const pushRequests = new Quota(PUSH_REQUESTS_PER_MINUTE)
   const pushChanges = new Quota(PUSH_CHANGES_PER_MINUTE)
+  const pushBytes = new Quota(PUSH_BYTES_PER_MINUTE)
+  const pullRequests = new Quota(PULL_REQUESTS_PER_MINUTE)
   const db = () => {
     if (!app.db) throw new HttpProblem(503, 'unavailable', 'the database is not configured')
     return app.db
@@ -193,6 +216,7 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
   app.post(
     '/sync/push',
     {
+      bodyLimit: MAX_PUSH_BODY,
       schema: {
         tags: ['sync'],
         summary: 'Send changes to a workspace',
@@ -213,6 +237,7 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const { workspaceId, changes } = request.body
       pushRequests.spend(user.id, 1, 'pushes')
       pushChanges.spend(user.id, changes.length, 'changes')
+      pushBytes.spend(user.id, Number(request.headers['content-length']) || 1, 'bytes')
       await app.licensing.require(db(), user, 'sync')
       return withUser(db(), callerOf(user), async (tx) => {
         const [ws] = await tx.select().from(schema.workspace).where(eq(schema.workspace.id, workspaceId))
@@ -227,6 +252,10 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
           // A stamp from the far future would win every later write to its fields.
           if (hlcWallMs(change.hlc) > horizon) {
             results.push({ status: 'rejected', reason: 'clock_ahead' })
+            continue
+          }
+          if (!fieldsAcceptable(change.fields)) {
+            results.push({ status: 'rejected', reason: 'forbidden_field' })
             continue
           }
           const current = await loadRow(tx, workspaceId, change.table, change.rowId)
@@ -304,6 +333,7 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
     async (request) => {
       const { cursor, limit } = request.query
+      pullRequests.spend(request.user!.id, 1, 'pulls')
       await app.licensing.require(db(), request.user!, 'sync')
       return withUser(db(), callerOf(request.user!), async (tx) => {
         const rows = await tx
