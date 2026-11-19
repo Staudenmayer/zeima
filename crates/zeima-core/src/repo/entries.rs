@@ -274,6 +274,46 @@ impl Core {
         tx.commit().await
     }
 
+    /// Combines finished entries into the earliest one, which takes all its
+    /// values (times, activity, project, cost center, billable, tags, note)
+    /// from `input`. The other entries are deleted. Locked or running entries
+    /// make it fail.
+    pub async fn merge_entries(&self, ids: &[String], input: EntryInput) -> Result<TimeEntry> {
+        let mut ids: Vec<String> = ids.to_vec();
+        ids.sort();
+        ids.dedup();
+        if ids.len() < 2 {
+            return Err(Error::validation("ids", "select at least two entries"));
+        }
+        self.check_entry_policy(input.project_id.as_deref(), input.tag_ids.len())
+            .await?;
+        let mut tx = self.begin().await?;
+        let user = tx.ctx().user_id.clone();
+        let mut entries = Vec::new();
+        for id in &ids {
+            let e = fetch_entry(tx.conn(), &user, id).await?;
+            ensure_unlocked(&e)?;
+            if e.end_at.is_none() {
+                return Err(Error::validation("ids", "a running entry cannot be combined"));
+            }
+            entries.push(e);
+        }
+        entries.sort_by_key(|e| (e.start_at, e.id.clone()));
+        let mut rest = entries.into_iter();
+        let first = rest.next().expect("at least two entries");
+        for e in rest {
+            soft_delete(&mut tx, "time_entry", &e.id).await?;
+            invalidate_entry_days(&mut tx, e.start_at, e.end_at).await?;
+        }
+        if input.end_at.is_none() {
+            return Err(Error::validation("endAt", "a combined entry needs an end"));
+        }
+        let input = input.normalized()?;
+        let merged = update_in(&mut tx, first, input, true).await?;
+        tx.commit().await?;
+        Ok(merged)
+    }
+
     /// Splits an entry at `at` into two entries. A running entry keeps
     /// running in the second part.
     pub async fn split_entry(&self, id: &str, at: i64) -> Result<(TimeEntry, TimeEntry)> {

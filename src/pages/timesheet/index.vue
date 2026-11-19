@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { toast } from 'vue-sonner'
 import { useStorage } from '@vueuse/core'
-import { Check, CircleAlert, CircleCheck, CircleHelp, CircleX, CalendarDays, ChevronDown, UserPlus, ChevronLeft, ChevronRight, Clock, Copy, List, Pencil, Play, Plus, Scissors, Trash2, X } from '@lucide/vue'
+import { Check, CircleAlert, CircleCheck, CircleHelp, CircleX, CalendarDays, ChevronDown, UserPlus, ChevronLeft, ChevronRight, Clock, Copy, List, Merge, Pencil, Play, Plus, Scissors, Trash2, X } from '@lucide/vue'
 import { commands, events, type Absence, type AddonTimelineItem, type EntryPatch, type Meeting, type MeetingOccurrence, type RsvpStatus, type TimeEntry } from '@/bindings'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -428,8 +428,14 @@ const entryDialogOpen = ref(false)
 const editing = ref<TimeEntry | null>(null)
 const newEntryDay = ref<number>(Date.now())
 const draft = ref<EntryDraft | null>(null)
+/** Entries being combined in the entry dialog (see openMerge). */
+const merging = ref<TimeEntry[] | null>(null)
+watch(entryDialogOpen, (open) => {
+  if (!open) merging.value = null
+})
 
 function openNew(day?: number) {
+  merging.value = null
   editing.value = null
   draft.value = null
   newEntryDay.value = day ?? (mode.value === 'day' ? anchor.value : Date.now())
@@ -616,6 +622,30 @@ async function bulkUpdate(patch: EntryPatch) {
   } catch (err) {
     toast.error(errorMessage(err))
   }
+}
+
+/** Combining needs two or more finished entries; locked ones are refused by the core. */
+const canMerge = computed(() => selectedEntries.value.length >= 2 && selectedEntries.value.every((e) => e.endAt != null))
+/** The entry dialog, prefilled from the earliest entry (tags and notes of all, as long as all together). */
+function openMerge() {
+  const list = [...selectedEntries.value].sort((a, b) => a.startAt - b.startAt)
+  const first = list[0]
+  if (!first) return
+  const total = list.reduce((n, e) => n + ((e.endAt ?? e.startAt) - e.startAt), 0)
+  const usable = new Set(tags.usableFor(first.projectId).map((x) => x.id))
+  editing.value = null
+  merging.value = list
+  draft.value = {
+    startAt: first.startAt,
+    endAt: first.startAt + total,
+    activityId: first.activityId,
+    projectId: first.projectId,
+    tagIds: [...new Set(list.flatMap((e) => e.tagIds))].filter((id) => usable.has(id)),
+    note: [...new Set(list.map((e) => e.note.trim()).filter(Boolean))].join('\n\n'),
+    billable: first.billable,
+    costCenterId: first.costCenterId,
+  }
+  entryDialogOpen.value = true
 }
 
 const bulkDeleteOpen = ref(false)
@@ -1021,6 +1051,7 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
             <DropdownMenuItem @select="bulkUpdate({ billable: false })">{{ $t('reports.notBillable') }}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button size="sm" variant="outline" :disabled="!canMerge" :title="canMerge ? undefined : $t('timesheet.bulk.mergeFinished')" @click="openMerge"><Merge /> {{ $t('timesheet.bulk.merge') }}</Button>
         <Button size="sm" variant="outline" class="text-destructive" @click="bulkDeleteOpen = true"><Trash2 /> {{ $t('common.delete') }}</Button>
         <Button size="icon" variant="ghost" class="size-7" :title="$t('timesheet.bulk.clear')" :aria-label="$t('timesheet.bulk.clear')" @click="selected = new Set()">
           <X />
@@ -1048,10 +1079,12 @@ const orderedGroups = computed(() => (sort.key === 'time' && sort.dir === 'asc' 
     :entry="editing"
     :day="newEntryDay"
     :draft="draft"
+    :merge="merging"
     :meeting="mtgEditing"
     :meeting-draft="mtgDraft"
     :track-item="mtgItem"
     @saved="loadOccurrences"
+    @entry-saved="selected = new Set()"
     @track="track"
     @to-meeting="openMeetingForm(null, $event)"
     @to-entry="meetingToEntry"

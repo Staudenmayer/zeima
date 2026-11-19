@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { TimeEntry } from '@/bindings'
 import { Button } from '@/components/ui/button'
 import { DialogFooter } from '@/components/ui/dialog'
 import TimeInput from '@/components/time/TimeInput.vue'
 import DateInput from '@/components/time/DateInput.vue'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { type EntryDraft, useEntryForm } from '@/composables/useEntryForm'
 import { useActivitiesStore } from '@/stores/activities'
 import { useCostCentersStore } from '@/stores/costCenters'
-import { fromInputs } from '@/lib/time'
+import { fromInputs, toDateInput, toTimeInput } from '@/lib/time'
 import ActivitySelect from './ActivitySelect.vue'
 import CostCenterSelect from './CostCenterSelect.vue'
 import ProjectSelect from './ProjectSelect.vue'
@@ -26,20 +27,43 @@ const props = defineProps<{
   day?: number
   /** Values for a new entry, e.g. from a calendar event. */
   draft?: EntryDraft | null
+  /** Combine: the entries this one replaces; the form starts with their values (`draft`). */
+  merge?: TimeEntry[] | null
 }>()
-const emit = defineEmits<{ /** "Meeting" was chosen: the times so far, for the meeting dialog. */ meeting: [times: { startAt: number; endAt: number }] }>()
+const emit = defineEmits<{ saved: []; /** "Meeting" was chosen: the times so far, for the meeting dialog. */ meeting: [times: { startAt: number; endAt: number }] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const activities = useActivitiesStore()
 const costCenters = useCostCentersStore()
 
 const { activityId, activityMissing, projectId, tagIds, date, endDate, start, end, note, billable, costCenterId, saving, running, reset, setCostCenter, save: saveForm } =
-  useEntryForm(() => props.entry, () => props.day, () => props.draft ?? null)
+  useEntryForm(() => props.entry, () => props.day, () => props.draft ?? null, () => props.merge?.map((e) => e.id) ?? null)
+
+/** Combine: which of the entries' notes go into the new one; the editor below is the preview and can be edited. */
+const noteChoices = computed(() => {
+  const seen = new Set<string>()
+  return [...(props.merge ?? [])]
+    .sort((a, b) => a.startAt - b.startAt)
+    .filter((e) => {
+      const text = e.note.trim()
+      if (!text || seen.has(text)) return false
+      seen.add(text)
+      return true
+    })
+    .map((e) => ({ id: e.id, text: e.note.trim(), when: `${toDateInput(e.startAt)} ${toTimeInput(e.startAt)}` }))
+})
+const chosenNotes = ref<string[]>([])
+function toggleNote(id: string, on: boolean) {
+  chosenNotes.value = on ? [...chosenNotes.value, id] : chosenNotes.value.filter((x) => x !== id)
+  note.value = noteChoices.value.filter((c) => chosenNotes.value.includes(c.id)).map((c) => c.text).join('\n\n')
+}
 
 watch(
   open,
   (isOpen) => {
-    if (isOpen) reset()
+    if (!isOpen) return
+    reset()
+    chosenNotes.value = noteChoices.value.map((c) => c.id)
   },
   { immediate: true },
 )
@@ -56,7 +80,10 @@ function toMeeting() {
 defineExpose({ toMeeting })
 
 async function save() {
-  if (await saveForm()) open.value = false
+  if (await saveForm()) {
+    open.value = false
+    emit('saved')
+  }
 }
 </script>
 
@@ -112,6 +139,17 @@ async function save() {
             <Switch v-model="billable" />
             {{ $t('entry.billable') }}
           </label>
+        </div>
+        <div v-if="noteChoices.length > 1" class="grid gap-2">
+          <Label>{{ $t('timesheet.bulk.noteChoose') }}</Label>
+          <div class="grid max-h-32 gap-1 overflow-y-auto rounded-md border p-2">
+            <label v-for="c in noteChoices" :key="c.id" class="flex items-start gap-2 text-sm">
+              <Checkbox class="mt-0.5" :model-value="chosenNotes.includes(c.id)" @update:model-value="toggleNote(c.id, $event === true)" />
+              <span class="shrink-0 text-xs text-muted-foreground tabular-nums">{{ c.when }}</span>
+              <span class="line-clamp-2 min-w-0 whitespace-pre-line">{{ c.text }}</span>
+            </label>
+          </div>
+          <p class="text-xs text-muted-foreground">{{ $t('timesheet.bulk.notePreview') }}</p>
         </div>
         <div class="flex min-h-32 flex-1 flex-col gap-2">
           <Label for="entry-note">{{ $t('entry.note') }}</Label>

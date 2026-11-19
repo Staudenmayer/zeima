@@ -71,6 +71,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::entry_bulk_update,
             commands::entry_bulk_delete,
             commands::entry_split,
+            commands::entry_merge,
             commands::entry_duplicate,
             commands::summaries,
             commands::timer_state,

@@ -32,6 +32,8 @@ export function useEntryForm(
   entry: () => TimeEntry | null,
   day: () => number | undefined = () => undefined,
   draft: () => EntryDraft | null = () => null,
+  /** Ids of the entries this one replaces (combine); `null` creates or edits. */
+  mergeIds: () => string[] | null = () => null,
 ) {
   const { t } = useI18n()
   const projects = useProjectsStore()
@@ -256,7 +258,9 @@ export function useEntryForm(
     }
     saving.value = true
     try {
-      if (e) await call(commands.entryUpdate(e.id, b.input))
+      const merging = mergeIds()
+      if (merging) await call(commands.entryMerge(merging, b.input))
+      else if (e) await call(commands.entryUpdate(e.id, b.input))
       else await call(commands.entryCreate(b.input))
       return true
     } catch (err) {

@@ -33,6 +33,8 @@ export const commands = {
 	entryBulkDelete: (ids: string[]) => typedError<BulkResult, CmdError>(__TAURI_INVOKE("entry_bulk_delete", { ids })),
 	/**  `at` is unix ms. Passed as `f64` because IPC numbers are JS numbers. */
 	entrySplit: (id: string, at: number | null) => typedError<[TimeEntry, TimeEntry], CmdError>(__TAURI_INVOKE("entry_split", { id, at })),
+	/**  Combines entries into the earliest one (see `merge_entries`). */
+	entryMerge: (ids: string[], input: EntryInput) => typedError<TimeEntry, CmdError>(__TAURI_INVOKE("entry_merge", { ids, input })),
 	entryDuplicate: (id: string) => typedError<TimeEntry, CmdError>(__TAURI_INVOKE("entry_duplicate", { id })),
 	summaries: (ranges: Range[]) => typedError<Summary[], CmdError>(__TAURI_INVOKE("summaries", { ranges })),
 	timerState: () => typedError<TimerState, CmdError>(__TAURI_INVOKE("timer_state")),

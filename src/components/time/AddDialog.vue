@@ -16,6 +16,8 @@ const props = defineProps<{
   entry: TimeEntry | null
   day?: number
   draft?: EntryDraft | null
+  /** Combine these entries into one: the entry form, prefilled by `draft`. */
+  merge?: TimeEntry[] | null
   meeting: Meeting | null
   meetingDraft?: { startAt: number; endAt: number } | null
   /** The meeting as a timeline item: the dialog then offers to track it. */
@@ -23,6 +25,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   saved: []
+  entrySaved: []
   track: [item: AddonTimelineItem]
   /** "Meeting" was chosen on a new item: the times so far. */
   toMeeting: [times: { startAt: number; endAt: number }]
@@ -36,7 +39,7 @@ const workspaces = useWorkspaceStore()
 const isMeeting = computed(() => meetingOpen.value)
 const open = computed(() => entryOpen.value || meetingOpen.value)
 /** A new item can be either; an existing one stays what it is. */
-const canSwitch = (entry: TimeEntry | null, meeting: Meeting | null) => !entry && !meeting && workspaces.inOrg
+const canSwitch = (entry: TimeEntry | null, meeting: Meeting | null) => !entry && !meeting && !props.merge && workspaces.inOrg
 
 /** A new item can be either, so the switch is shown; an existing one stays what it is. */
 const lead = computed(() => canSwitch(props.entry, props.meeting))
@@ -66,6 +69,7 @@ function close(value: boolean) {
       <DialogHeader class="flex-row items-center gap-1">
         <DialogTitle class="min-w-0 flex-1 truncate">
           <template v-if="isMeeting">{{ meeting ? $t('meetings.edit') : $t('meetings.new') }}</template>
+          <template v-else-if="merge">{{ $t('timesheet.bulk.mergeTitle', merge.length) }}</template>
           <template v-else>{{ entry ? $t('timesheet.editEntry') : $t('timesheet.addEntry') }}</template>
         </DialogTitle>
         <Button v-if="isMeeting && meeting && trackItem" type="button" size="icon" variant="ghost" class="size-7" :title="$t('timesheet.trackEvent')" :aria-label="$t('timesheet.trackEvent')" @click="(close(false), emit('track', trackItem))"><Play /></Button>
@@ -85,7 +89,7 @@ function close(value: boolean) {
         <div class="h-full overflow-hidden">
           <div class="flex h-full w-[200%]" :style="{ transform: isMeeting ? 'translateX(-50%)' : 'translateX(0)', transition: `transform 0.3s ease-in-out ${isMeeting ? 0 : BACK_DELAY}s` }">
             <div class="h-full w-1/2 shrink-0" :aria-hidden="isMeeting" :style="paneStyle(isMeeting, false)">
-              <EntryForm ref="entryForm" v-model:open="entryOpen" :entry="entry" :day="day" :draft="draft" :lead="lead" @meeting="emit('toMeeting', $event)" />
+              <EntryForm ref="entryForm" v-model:open="entryOpen" :entry="entry" :day="day" :draft="draft" :merge="merge" :lead="lead" @saved="emit('entrySaved')" @meeting="emit('toMeeting', $event)" />
             </div>
             <div class="h-full w-1/2 shrink-0" :aria-hidden="!isMeeting" :style="paneStyle(!isMeeting, true)">
               <MeetingForm ref="meetingForm" v-model:open="meetingOpen" :meeting="meeting" :draft="meetingDraft" :lead="lead" @saved="emit('saved')" @entry="emit('toEntry', $event)" />

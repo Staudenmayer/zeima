@@ -72,6 +72,7 @@
     "allow-entry-delete",
     "allow-entry-duplicate",
     "allow-entry-list",
+    "allow-entry-merge",
     "allow-entry-split",
     "allow-entry-update",
     "allow-holiday-create",

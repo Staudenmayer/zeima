@@ -360,6 +360,20 @@ pub async fn entry_bulk_delete(
     Ok(result)
 }
 
+/// Combines entries into the earliest one (see `merge_entries`).
+#[tauri::command]
+#[specta::specta]
+pub async fn entry_merge(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    input: EntryInput,
+) -> CmdResult<TimeEntry> {
+    let entry = state.data().merge_entries(&ids, input).await?;
+    changed(&app, &[DataKind::Entry]).await;
+    Ok(entry)
+}
+
 /// `at` is unix ms. Passed as `f64` because IPC numbers are JS numbers.
 #[tauri::command]
 #[specta::specta]
