@@ -25,7 +25,7 @@ services:
       POSTGRES_PASSWORD: zeima
       POSTGRES_DB: zeima
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres:/var/lib/postgresql/data
       - ./dev/postgres-init.sql:/docker-entrypoint-initdb.d/10-keycloak.sql:ro,z
@@ -64,7 +64,7 @@ services:
       ZEIMA_WEBHOOK_URL: ${ZEIMA_WEBHOOK_URL:-http://host.docker.internal:3000/v1/internal/keycloak-events}
       ZEIMA_WEBHOOK_SECRET: dev-webhook-secret-12345
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./keycloak/realm-zeima.json:/opt/keycloak/data/import/realm-zeima.json:ro,z
       - ./keycloak/themes/zeima:/opt/keycloak/themes/zeima:ro,z
@@ -90,15 +90,15 @@ services:
       KEYCLOAK_ADMIN_CLIENT_SECRET: dev-admin-secret
       KEYCLOAK_WEBHOOK_SECRET: dev-webhook-secret-12345
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - keycloak
 
   mailpit:
     image: docker.io/axllent/mailpit:v1.31.5
     ports:
-      - "8025:8025"
-      - "1025:1025"
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
 
 volumes:
   postgres:
