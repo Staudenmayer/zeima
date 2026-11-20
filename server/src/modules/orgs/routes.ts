@@ -896,7 +896,8 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       // Email addresses follow the member list's rule: someone who may see only themselves does not get everybody's.
       const readScope = scopeOf(actorIn({ user: request.user! }, orgId), 'member.read')
       const mine = actorIn({ user: request.user! }, orgId).user.orgs[orgId]!
-      const visible = readScope === 'org' ? null : new Set(await sharingGroups(db, orgId, mine.groups))
+      // 'org' sees all, 'group' the people sharing a department, anyone else (own scope, or none) only themselves.
+      const visible = readScope === 'org' ? null : new Set(readScope === 'group' ? await sharingGroups(db, orgId, mine.groups) : [])
       const jobs = new Map((await jobsOf(db, orgId)).map((j) => [j.id, j]))
       const held = await db
         .select({ userId: schema.kcOrgMember.userId, jobId: schema.kcOrgMember.jobId })

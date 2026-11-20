@@ -662,6 +662,22 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect(rows.length).toBeGreaterThanOrEqual(4)
       expect(rows.filter((r) => r.email !== null).map((r) => r.id).sort()).toEqual([MANAGER, MEMBER].sort())
     })
+
+    it('are shown to own-scoped and scopeless readers for themselves only, even with group-mates', async () => {
+      await reset()
+      const g = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'dev' })).json()
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MEMBER}`, ADMIN, 'admin')
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MANAGER}`, ADMIN, 'admin')
+      for (const [name, permissions] of [['Self reader', { 'member.read': 'own' }], ['Nothing', {}]] as const) {
+        const key = (await call('POST', `/v1/orgs/${ORG}/roles`, OWNER, 'owner', { name, permissions })).json().key as string
+        expect((await call('PATCH', `/v1/orgs/${ORG}/members/${MEMBER}`, OWNER, 'owner', { role: key })).statusCode).toBe(200)
+        const res = await app.inject({ method: 'GET', url: `/v1/orgs/${ORG}/directory`, headers: await as(MEMBER, key, { groups: [`/orgs/${ORG}/groups/dev`] }) })
+        expect(res.statusCode).toBe(200)
+        const rows = res.json() as { id: string; email: string | null }[]
+        expect(rows.length).toBeGreaterThanOrEqual(4)
+        expect(rows.filter((r) => r.email !== null).map((r) => r.id)).toEqual([MEMBER])
+      }
+    })
   })
 
   describe('roles made of permissions', () => {
