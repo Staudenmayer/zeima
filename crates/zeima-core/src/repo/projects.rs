@@ -185,15 +185,20 @@ pub(crate) async fn soft_delete(tx: &mut WriteTx<'_>, table: &'static str, id: &
     );
     let s = tx.stamp();
     let sql =
-        format!("UPDATE {table} SET deleted_at = ?, updated_at = ?, hlc = ?, origin_device = ? WHERE id = ?");
-    sqlx::query(sqlx::AssertSqlSafe(sql))
+        format!("UPDATE {table} SET deleted_at = ?, updated_at = ?, hlc = ?, origin_device = ? WHERE id = ? AND workspace_id = ?");
+    let ws = tx.ctx().workspace_id.clone();
+    let done = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(s.now)
         .bind(s.now)
         .bind(&s.hlc)
         .bind(&s.device)
         .bind(id)
+        .bind(&ws)
         .execute(tx.conn())
         .await?;
+    if done.rows_affected() == 0 {
+        return Err(not_found(table, id));
+    }
     if table == "time_entry" {
         tx.emit(crate::events::DomainEvent::EntryDeleted {
             entry_id: id.to_string(),

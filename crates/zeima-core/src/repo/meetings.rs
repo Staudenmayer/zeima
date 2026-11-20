@@ -398,12 +398,13 @@ impl Core {
         let s = tx.stamp();
         meeting.cancelled = true;
         sqlx::query(
-            "UPDATE meeting SET cancelled = 1, updated_at = ?, hlc = ?, origin_device = ? WHERE id = ?",
+            "UPDATE meeting SET cancelled = 1, updated_at = ?, hlc = ?, origin_device = ? WHERE id = ? AND workspace_id = ?",
         )
         .bind(s.now)
         .bind(&s.hlc)
         .bind(&s.device)
         .bind(id)
+        .bind(tx.ctx().workspace_id.clone())
         .execute(tx.conn())
         .await?;
         tx.log_upsert("meeting", id, &s, &meeting).await?;

@@ -383,10 +383,11 @@ impl Core {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let valid_from: Option<NaiveDate> = sqlx::query_scalar(
-            "SELECT valid_from FROM work_schedule WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT valid_from FROM work_schedule WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
         )
         .bind(id)
         .bind(&user)
+        .bind(tx.ctx().workspace_id.clone())
         .fetch_optional(tx.conn())
         .await?;
         let valid_from = valid_from.ok_or_else(|| not_found("schedule", id))?;
@@ -483,11 +484,15 @@ impl Core {
 
     pub async fn delete_absence_type(&self, id: &str) -> Result<()> {
         let mut tx = self.begin().await?;
-        let row = sqlx::query("SELECT key FROM absence_type WHERE id = ? AND deleted_at IS NULL")
-            .bind(id)
-            .fetch_optional(tx.conn())
-            .await?
-            .ok_or_else(|| not_found("absence type", id))?;
+        let ws = tx.ctx().workspace_id.clone();
+        let row = sqlx::query(
+            "SELECT key FROM absence_type WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .bind(&ws)
+        .fetch_optional(tx.conn())
+        .await?
+        .ok_or_else(|| not_found("absence type", id))?;
         if row.try_get::<Option<String>, _>("key")?.is_some() {
             return Err(Error::Conflict(
                 "Built-in absence types cannot be deleted.".into(),
@@ -577,10 +582,11 @@ impl Core {
             Some(id) => {
                 let row = sqlx::query(
                     "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note, decided_by, decision_note FROM absence
-                     WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+                     WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
                 )
                 .bind(id)
                 .bind(&user)
+                .bind(tx.ctx().workspace_id.clone())
                 .fetch_optional(tx.conn())
                 .await?
                 .ok_or_else(|| not_found("absence", id))?;
@@ -674,7 +680,7 @@ impl Core {
              WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
         )
         .bind(id)
-        .bind(&tx.ctx().workspace_id)
+        .bind(tx.ctx().workspace_id.clone())
         .fetch_optional(tx.conn())
         .await?
         .ok_or_else(|| not_found("absence", id))?;
@@ -695,7 +701,7 @@ impl Core {
         absence.decision_note = note.trim().to_string();
         sqlx::query(
             "UPDATE absence SET status = ?, decided_by = ?, decision_note = ?, updated_at = ?, hlc = ?, origin_device = ?
-             WHERE id = ?",
+             WHERE id = ? AND workspace_id = ?",
         )
         .bind(absence.status.as_str())
         .bind(&absence.decided_by)
@@ -704,6 +710,7 @@ impl Core {
         .bind(&s.hlc)
         .bind(&s.device)
         .bind(id)
+        .bind(tx.ctx().workspace_id.clone())
         .execute(tx.conn())
         .await?;
         tx.log_upsert("absence", id, &s, &absence).await?;
@@ -722,10 +729,11 @@ impl Core {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let row = sqlx::query(
-            "SELECT start_date, end_date FROM absence WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT start_date, end_date FROM absence WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
         )
         .bind(id)
         .bind(&user)
+        .bind(tx.ctx().workspace_id.clone())
         .fetch_optional(tx.conn())
         .await?
         .ok_or_else(|| not_found("absence", id))?;
@@ -792,11 +800,14 @@ impl Core {
 
     pub async fn delete_custom_holiday(&self, id: &str) -> Result<()> {
         let mut tx = self.begin().await?;
-        let date: Option<NaiveDate> =
-            sqlx::query_scalar("SELECT date FROM custom_holiday WHERE id = ? AND deleted_at IS NULL")
-                .bind(id)
-                .fetch_optional(tx.conn())
-                .await?;
+        let ws = tx.ctx().workspace_id.clone();
+        let date: Option<NaiveDate> = sqlx::query_scalar(
+            "SELECT date FROM custom_holiday WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .bind(&ws)
+        .fetch_optional(tx.conn())
+        .await?;
         let date = date.ok_or_else(|| not_found("holiday", id))?;
         soft_delete(&mut tx, "custom_holiday", id).await?;
         let user = tx.ctx().user_id.clone();
@@ -900,10 +911,11 @@ impl Core {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let date: Option<NaiveDate> = sqlx::query_scalar(
-            "SELECT date FROM balance_adjustment WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT date FROM balance_adjustment WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
         )
         .bind(id)
         .bind(&user)
+        .bind(tx.ctx().workspace_id.clone())
         .fetch_optional(tx.conn())
         .await?;
         let date = date.ok_or_else(|| not_found("adjustment", id))?;
@@ -1164,10 +1176,11 @@ async fn write_schedule(
     let previous_from: Option<NaiveDate> = match id {
         Some(id) => Some(
             sqlx::query_scalar(
-                "SELECT valid_from FROM work_schedule WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+                "SELECT valid_from FROM work_schedule WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
             )
             .bind(id)
             .bind(&user)
+            .bind(tx.ctx().workspace_id.clone())
             .fetch_optional(tx.conn())
             .await?
             .ok_or_else(|| not_found("schedule", id))?,

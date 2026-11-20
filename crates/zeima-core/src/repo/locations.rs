@@ -130,9 +130,10 @@ impl Core {
             }
             None => {
                 let exists: bool = sqlx::query_scalar(
-                    "SELECT EXISTS (SELECT 1 FROM work_location WHERE id = ? AND deleted_at IS NULL)",
+                    "SELECT EXISTS (SELECT 1 FROM work_location WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)",
                 )
                 .bind(&id)
+                .bind(tx.ctx().workspace_id.clone())
                 .fetch_one(tx.conn())
                 .await?;
                 if exists {

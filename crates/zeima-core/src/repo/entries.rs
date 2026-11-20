@@ -180,9 +180,10 @@ impl Core {
     pub async fn bulk_update_entries(&self, ids: &[String], patch: EntryPatch) -> Result<BulkResult> {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
+        let ws = tx.ctx().workspace_id.clone();
         let mut tags: HashMap<String, Tag> = HashMap::new();
         for id in patch.add_tag_ids.iter() {
-            let tag = fetch_tag(tx.conn(), id)
+            let tag = fetch_tag(tx.conn(), &ws, id)
                 .await
                 .map_err(|_| Error::validation("addTagIds", format!("unknown tag {id}")))?;
             tags.insert(id.clone(), tag);
@@ -196,7 +197,7 @@ impl Core {
             }
             for tag_id in &e.tag_ids {
                 if !tags.contains_key(tag_id) {
-                    if let Ok(tag) = fetch_tag(tx.conn(), tag_id).await {
+                    if let Ok(tag) = fetch_tag(tx.conn(), &ws, tag_id).await {
                         tags.insert(tag_id.clone(), tag);
                     }
                 }
@@ -518,12 +519,15 @@ pub(crate) async fn insert_entry(tx: &mut WriteTx<'_>, e: &TimeEntry) -> Result<
 /// Writes all mutable fields of an existing entry and returns it with the
 /// new `updated_at`.
 pub(crate) async fn update_entry_row(tx: &mut WriteTx<'_>, mut e: TimeEntry) -> Result<TimeEntry> {
-    let old: Option<(i64, Option<i64>)> =
-        sqlx::query_as("SELECT start_at, end_at FROM time_entry WHERE id = ? AND user_id = ?")
-            .bind(&e.id)
-            .bind(&e.user_id)
-            .fetch_optional(tx.conn())
-            .await?;
+    let ws = tx.ctx().workspace_id.clone();
+    let old: Option<(i64, Option<i64>)> = sqlx::query_as(
+        "SELECT start_at, end_at FROM time_entry WHERE id = ? AND user_id = ? AND workspace_id = ?",
+    )
+    .bind(&e.id)
+    .bind(&e.user_id)
+    .bind(&ws)
+    .fetch_optional(tx.conn())
+    .await?;
     if let Some((start, end)) = old {
         invalidate_entry_days(tx, start, end).await?;
     }
@@ -533,7 +537,7 @@ pub(crate) async fn update_entry_row(tx: &mut WriteTx<'_>, mut e: TimeEntry) -> 
     sqlx::query(
         "UPDATE time_entry SET activity_id = ?, project_id = ?, start_at = ?, end_at = ?, tz = ?, note = ?,
             billable = ?, locked = ?, cost_center_id = ?, updated_at = ?, hlc = ?, origin_device = ?
-         WHERE id = ? AND user_id = ?",
+         WHERE id = ? AND user_id = ? AND workspace_id = ?",
     )
     .bind(&e.activity_id)
     .bind(&e.project_id)
@@ -549,6 +553,7 @@ pub(crate) async fn update_entry_row(tx: &mut WriteTx<'_>, mut e: TimeEntry) -> 
     .bind(&s.device)
     .bind(&e.id)
     .bind(&e.user_id)
+    .bind(&ws)
     .execute(tx.conn())
     .await
     .map_err(running_conflict)?;

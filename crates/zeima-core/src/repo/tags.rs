@@ -64,7 +64,8 @@ impl Core {
     pub async fn update_tag(&self, id: &str, input: TagInput) -> Result<Tag> {
         let input = input.normalized()?;
         let mut tx = self.begin().await?;
-        let existing = fetch_tag(tx.conn(), id).await?;
+        let ws = tx.ctx().workspace_id.clone();
+        let existing = fetch_tag(tx.conn(), &ws, id).await?;
         if existing.project_id != input.project_id {
             return Err(Error::validation(
                 "projectId",
@@ -87,19 +88,21 @@ impl Core {
     /// Soft-deletes a tag. Entries keep the link but no longer report it.
     pub async fn delete_tag(&self, id: &str) -> Result<()> {
         let mut tx = self.begin().await?;
-        fetch_tag(tx.conn(), id).await?;
+        let ws = tx.ctx().workspace_id.clone();
+        fetch_tag(tx.conn(), &ws, id).await?;
         soft_delete(&mut tx, "tag", id).await?;
         tx.commit().await
     }
 }
 
-pub(crate) async fn fetch_tag(conn: &mut SqliteConnection, id: &str) -> Result<Tag> {
+pub(crate) async fn fetch_tag(conn: &mut SqliteConnection, workspace_id: &str, id: &str) -> Result<Tag> {
     let row = sqlx::query(concat!(
         "SELECT ",
         columns!(),
-        " FROM tag WHERE id = ? AND deleted_at IS NULL"
+        " FROM tag WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL"
     ))
     .bind(id)
+    .bind(workspace_id)
     .fetch_optional(conn)
     .await?
     .ok_or_else(|| not_found("tag", id))?;
@@ -151,7 +154,7 @@ pub(crate) async fn validate_entry_tags(
     tag_ids: &[String],
 ) -> Result<()> {
     for id in tag_ids {
-        let tag = fetch_tag(&mut *conn, id)
+        let tag = fetch_tag(&mut *conn, workspace_id, id)
             .await
             .map_err(|_| Error::validation("tagIds", format!("unknown tag {id}")))?;
         if tag.workspace_id != workspace_id {
