@@ -238,6 +238,15 @@ impl MeetingInput {
     }
 }
 
+/// Whether an id may be written into a `UID:` line as is.
+fn is_plain_uid(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 100
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
+}
+
 impl Core {
     fn require_shared_meetings(&self) -> Result<()> {
         if self.ctx().shared {
@@ -637,12 +646,15 @@ impl Core {
             "VERSION:2.0".into(),
             "PRODID:-//Zeima//Meeting//EN".into(),
             "BEGIN:VEVENT".into(),
-            format!("UID:{}@zeima", m.id),
             format!("DTSTAMP:{}", stamp(self.now_ms())),
             format!("DTSTART:{}", stamp(m.start_at)),
             format!("DTEND:{}", stamp(m.end_at)),
             format!("SUMMARY:{}", esc(&m.title)),
         ];
+        // The id may come from sync: only a plain one is written (a line break would add properties).
+        if is_plain_uid(&m.id) {
+            lines.insert(4, format!("UID:{}@zeima", m.id));
+        }
         if let Some(rule) = m.rrule.as_deref().filter(|r| is_plain_rule(r)) {
             lines.push(format!("RRULE:{rule}"));
         }

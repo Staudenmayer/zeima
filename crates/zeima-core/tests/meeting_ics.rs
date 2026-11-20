@@ -161,3 +161,34 @@ async fn pulled_meeting_values_cannot_add_properties() {
     assert!(!ics.contains("ATTENDEE"), "{ics}");
     assert!(!ics.contains("RRULE"), "{ics}");
 }
+
+#[tokio::test]
+async fn a_pulled_meeting_id_cannot_add_properties_through_the_uid() {
+    let ada = org().await;
+    let h = format!("{:015}-000000-server", T0);
+    let fields: BTreeMap<String, Versioned> = [
+        ("userId", json!(ADA)),
+        ("title", json!("Pulled")),
+        ("startAt", json!(T0 + HOUR)),
+        ("endAt", json!(T0 + 2 * HOUR)),
+        ("tz", json!("UTC")),
+        ("note", json!("")),
+        ("attendeeIds", json!([])),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), Versioned { v, h: h.clone() }))
+    .collect();
+    let id = "0192f000-0000-7000-8000-0000000000d2\r\nATTENDEE:mailto:x@example.com";
+    ada.sync_apply(&[RemoteRow {
+        workspace_id: WS.into(),
+        table: "meeting".into(),
+        row_id: id.into(),
+        fields,
+        deleted: None,
+    }])
+    .await
+    .unwrap();
+    let ics = ada.meeting_ics(id).await.unwrap();
+    assert_only_known(&ics);
+    assert!(!ics.contains("ATTENDEE"), "{ics}");
+}
