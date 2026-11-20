@@ -61,6 +61,16 @@ fn io_err(e: impl ToString) -> CmdError {
     CmdError::other("io", e)
 }
 
+/// The first thing every command that takes an add-on id does: the id becomes a folder name and a keychain entry,
+/// so only what the manifest rule allows gets any further.
+fn ensure_addon_id(id: &str) -> CmdResult<()> {
+    if zeima_core::addon::is_addon_id(id) {
+        Ok(())
+    } else {
+        Err(invalid("not an add-on id"))
+    }
+}
+
 fn invalid(message: impl ToString) -> CmdError {
     CmdError {
         code: "validation".into(),
@@ -541,6 +551,7 @@ pub async fn addon_set_enabled(
     id: String,
     enabled: bool,
 ) -> CmdResult<AddonInfo> {
+    ensure_addon_id(&id)?;
     let record = state.core.set_addon_enabled(&id, enabled).await?;
     addons.reload(&app, &record);
     Ok(info(&app, &addons, record).await)
@@ -556,9 +567,7 @@ pub async fn addon_save_settings(
     id: String,
     settings: BTreeMap<String, String>,
 ) -> CmdResult<AddonInfo> {
-    if id.is_empty() || id.contains(['/', '\\', ':']) || id.contains("..") {
-        return Err(invalid("not an add-on id"));
-    }
+    ensure_addon_id(&id)?;
     let dir = addons_dir(&app).map_err(io_err)?.join(&id);
     let manifest = read_manifest(&dir).map_err(invalid)?;
     let mut clean = BTreeMap::new();
@@ -606,6 +615,7 @@ pub async fn addon_uninstall(
     addons: State<'_, Addons>,
     id: String,
 ) -> CmdResult<()> {
+    ensure_addon_id(&id)?;
     addons.unload(&id);
     addons.cancel_sign_in(&id);
     addons.tokens.forget(&id, None);
@@ -626,10 +636,7 @@ pub async fn addon_uninstall(
     .await
     .map_err(io_err)?;
     state.core.delete_addon(&id).await?;
-    // The id is validated at install, but never let it escape the folder.
-    if !id.is_empty() && !id.contains(['/', '\\']) && id != "." && id != ".." {
-        let _ = std::fs::remove_dir_all(addons_dir(&app).map_err(io_err)?.join(&id));
-    }
+    let _ = std::fs::remove_dir_all(addons_dir(&app).map_err(io_err)?.join(&id));
     Ok(())
 }
 
@@ -691,6 +698,7 @@ pub async fn addon_oauth_connect(
     id: String,
     provider_id: String,
 ) -> CmdResult<AddonInfo> {
+    ensure_addon_id(&id)?;
     let provider = find_provider(&addons, &id, &provider_id)?;
     let services = HostServices::for_app(&app);
     let cancel = addons.begin_sign_in(&id);
@@ -728,6 +736,7 @@ pub async fn addon_oauth_connect(
 #[tauri::command]
 #[specta::specta]
 pub async fn addon_oauth_cancel(addons: State<'_, Addons>, id: String) -> CmdResult<()> {
+    ensure_addon_id(&id)?;
     addons.cancel_sign_in(&id);
     Ok(())
 }
@@ -743,6 +752,7 @@ pub async fn addon_oauth_disconnect(
     id: String,
     provider_id: String,
 ) -> CmdResult<AddonInfo> {
+    ensure_addon_id(&id)?;
     let name = oauth::secret_name(&provider_id);
     let entry = entry_name(&id, &name);
     tauri::async_runtime::spawn_blocking(move || Keychain.delete(&entry))
@@ -1133,6 +1143,19 @@ mod tests {
         for f in [path, path2, path3] {
             let _ = std::fs::remove_file(f);
         }
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::ensure_addon_id;
+
+    #[test]
+    fn ids_that_could_leave_the_add_on_folder_are_refused() {
+        for bad in ["C:", ".", "a/b", "..", "x:y", "", "a\\b", "a.b/../c"] {
+            assert!(ensure_addon_id(bad).is_err(), "{bad}");
+        }
+        assert!(ensure_addon_id("com.example.demo").is_ok());
     }
 }
 
