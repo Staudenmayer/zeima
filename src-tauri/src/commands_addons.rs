@@ -294,9 +294,10 @@ fn consent_text(
     }
     if !manifest.host_settings.is_empty() {
         hosts.push(if de {
-            "(Adresse aus den Einstellungen)".into()
+            "(Adresse aus den Einstellungen; eine eingetragene Adresse kann im lokalen Netzwerk liegen)"
+                .into()
         } else {
-            "(the address in its settings)".into()
+            "(the address in its settings; an address you type there may be on your local network)".into()
         });
     }
     let perms: Vec<String> = manifest

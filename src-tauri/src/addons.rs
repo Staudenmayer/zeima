@@ -536,6 +536,23 @@ fn config(manifest: &AddonManifest, saved: &BTreeMap<String, String>) -> BTreeMa
         .collect()
 }
 
+/// Hosts from `host_settings` that the person saved with a value of their own. A manifest default is the
+/// add-on's choice, not theirs, so it never makes a host private.
+fn private_hosts(manifest: &AddonManifest, saved: &BTreeMap<String, String>) -> Vec<String> {
+    manifest
+        .host_settings
+        .iter()
+        .filter_map(|key| {
+            let value = saved.get(key)?;
+            let field = manifest.settings.iter().find(|f| &f.key == key)?;
+            if field.default.as_deref().is_some_and(|d| d.trim() == value.trim()) {
+                return None;
+            }
+            zeima_core::addon::host_of_address(value)
+        })
+        .collect()
+}
+
 fn build_plugin(
     services: &HostServices,
     dir: &Path,
@@ -545,15 +562,7 @@ fn build_plugin(
     // Hosts the person typed into a setting may be on their own network (a self-hosted server); the names in the
     // manifest may not (vendor/README-ZEIMA.md).
     let settings = config(manifest, &record.settings);
-    let typed: Vec<String> = manifest
-        .host_settings
-        .iter()
-        .filter_map(|key| {
-            settings
-                .get(key)
-                .and_then(|v| zeima_core::addon::host_of_address(v))
-        })
-        .collect();
+    let typed = private_hosts(manifest, &record.settings);
     let mut wasm_manifest = Manifest::new([Wasm::file(dir.join(&manifest.wasm))])
         .with_timeout(CALL_TIMEOUT)
         .with_memory_max(MEMORY_PAGES)
@@ -1084,6 +1093,23 @@ pub fn start(app: &AppHandle) {
 /// `addons/build.sh csv-export` and `addons/build.sh recent-notes`).
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn manifest_defaults_do_not_make_hosts_private() {
+        let src = "id = \"com.example.feed\"\nname = \"Feed\"\nversion = \"1.0.0\"\nauthor = \"A\"\nwasm = \"a.wasm\"\n\
+            permissions = [\"network\"]\nhost_settings = [\"feed\"]\n\n[[settings]]\nkey = \"feed\"\nlabel = \"Feed\"\n\
+            type = \"text\"\ndefault = \"http://127.0.0.1/x\"\n";
+        let manifest = AddonManifest::parse(src).unwrap();
+        let mut saved = BTreeMap::new();
+        assert!(super::private_hosts(&manifest, &saved).is_empty());
+        saved.insert("feed".to_string(), "http://127.0.0.1/x".to_string());
+        assert!(super::private_hosts(&manifest, &saved).is_empty());
+        saved.insert("feed".to_string(), "http://192.168.1.5/y".to_string());
+        assert_eq!(
+            super::private_hosts(&manifest, &saved),
+            vec!["192.168.1.5".to_string()]
+        );
+    }
+
     use zeima_core::clock::ManualClock;
     use zeima_core::model::ProjectInput;
 
