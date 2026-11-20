@@ -890,7 +890,8 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const members = (await listMembers(db, orgId)).filter((m) => m.active)
       // Email addresses follow the member list's rule: someone who may see only themselves does not get everybody's.
       const readScope = scopeOf(actorIn({ user: request.user! }, orgId), 'member.read')
-      const seeEmails = readScope === 'org' || readScope === 'group'
+      const mine = actorIn({ user: request.user! }, orgId).user.orgs[orgId]!
+      const visible = readScope === 'org' ? null : new Set(await sharingGroups(db, orgId, mine.groups))
       const jobs = new Map((await jobsOf(db, orgId)).map((j) => [j.id, j]))
       const held = await db
         .select({ userId: schema.kcOrgMember.userId, jobId: schema.kcOrgMember.jobId })
@@ -911,7 +912,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const pictures = await avatarsOf(db, members.map((m) => m.id))
       return members.map((m) => {
         const job = jobs.get(jobOf.get(m.id) ?? '')
-        return { id: m.id, name: m.name, email: seeEmails || m.id === request.user!.id ? m.email : null, avatar: pictures.get(m.id) ?? null, departments: departments.get(m.id) ?? [], jobId: job?.id ?? null, jobTitle: job?.name ?? null, jobDescription: job?.description || null }
+        return { id: m.id, name: m.name, email: visible === null || visible.has(m.id) || m.id === request.user!.id ? m.email : null, avatar: pictures.get(m.id) ?? null, departments: departments.get(m.id) ?? [], jobId: job?.id ?? null, jobTitle: job?.name ?? null, jobDescription: job?.description || null }
       })
     },
   )

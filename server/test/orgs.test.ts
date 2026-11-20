@@ -642,6 +642,23 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     })
   })
 
+  describe('directory email addresses', () => {
+    it('are shown to group-scoped readers only for people sharing a group', async () => {
+      await reset()
+      const g = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'dev' })).json()
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MEMBER}`, ADMIN, 'admin')
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MANAGER}`, ADMIN, 'admin')
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/orgs/${ORG}/directory`,
+        headers: await as(MANAGER, 'manager', { groups: [`/orgs/${ORG}/groups/dev`] }),
+      })
+      const rows = res.json() as { id: string; email: string | null }[]
+      expect(rows.length).toBeGreaterThanOrEqual(4)
+      expect(rows.filter((r) => r.email !== null).map((r) => r.id).sort()).toEqual([MANAGER, MEMBER].sort())
+    })
+  })
+
   describe('roles made of permissions', () => {
     const roles = (uid: string, role: string | null, method: 'GET' | 'POST', payload?: object) => call(method, `/v1/orgs/${ORG}/roles`, uid, role, payload)
     const editor = { 'role.view': 'org', 'role.edit': 'org', 'role.assign': 'org', 'role.delete': 'org', 'member.read': 'org', 'project.write': 'org' }
