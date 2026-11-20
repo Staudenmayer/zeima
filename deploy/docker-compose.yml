@@ -83,7 +83,7 @@ services:
       # Every new account must set up an authenticator app (TOTP) at its first sign-in; from then on sign-in asks for the code.
       ZEIMA_REQUIRE_MFA: ${REQUIRE_MFA:-false}
       # A decision, not a default: may people create their own accounts on the sign-in page? (docs/admin-guide.md)
-      ZEIMA_REGISTRATION_ALLOWED: ${REGISTRATION_ALLOWED:?decide whether people may register themselves: set REGISTRATION_ALLOWED=true or false in deploy/.env}
+      ZEIMA_REGISTRATION_ALLOWED: "${REGISTRATION_ALLOWED:?decide whether people may register themselves: set REGISTRATION_ALLOWED=true or false in deploy/.env}"
       # The event listener calls the API when KEYCLOAK_WEBHOOK_SECRET is set (the API's side of it);
       # without a secret it does nothing and the API's nightly check keeps its copy right.
       ZEIMA_WEBHOOK_URL: ${KEYCLOAK_WEBHOOK_SECRET:+http://api:3001/v1/internal/keycloak-events}
