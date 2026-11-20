@@ -389,6 +389,9 @@ struct Rule {
     wkst: Weekday,
 }
 
+/// Largest INTERVAL a rule may name; larger ones are not a rule (keeps date arithmetic in range).
+const MAX_INTERVAL: i64 = 1000;
+
 fn weekday_of(code: &str) -> Option<Weekday> {
     Some(match code {
         "MO" => Weekday::Mon,
@@ -427,7 +430,12 @@ fn parse_rule(text: &str) -> Option<Rule> {
                 };
                 have_freq = true;
             }
-            "INTERVAL" => rule.interval = v.parse::<i64>().ok()?.max(1),
+            "INTERVAL" => {
+                rule.interval = v.parse::<i64>().ok()?.max(1);
+                if rule.interval > MAX_INTERVAL {
+                    return None;
+                }
+            }
             "COUNT" => rule.count = v.parse().ok(),
             "UNTIL" => {
                 let (stamp, all_day) = parse_stamp(v, None)?;
@@ -473,9 +481,14 @@ fn days_in_month(year: i32, month: u32) -> u32 {
     next.and_then(|n| n.pred_opt()).map(|d| d.day()).unwrap_or(28)
 }
 
-fn add_months(year: i32, month: u32, add: i64) -> (i32, u32) {
-    let index = year as i64 * 12 + (month as i64 - 1) + add;
-    (index.div_euclid(12) as i32, index.rem_euclid(12) as u32 + 1)
+fn add_months(year: i32, month: u32, add: i64) -> Option<(i32, u32)> {
+    let index = (year as i64 * 12)
+        .checked_add(month as i64 - 1)?
+        .checked_add(add)?;
+    Some((
+        i32::try_from(index.div_euclid(12)).ok()?,
+        index.rem_euclid(12) as u32 + 1,
+    ))
 }
 
 /// Dates in one month for BYMONTHDAY / BYDAY (with ordinals). `fallback`
@@ -521,12 +534,13 @@ fn month_dates(rule: &Rule, year: i32, month: u32, fallback: u32) -> Vec<NaiveDa
     dates
 }
 
-/// Candidate dates of period `p` (not yet cut off at the start).
-fn period_dates(rule: &Rule, start: NaiveDate, p: i64) -> Vec<NaiveDate> {
-    let step = p * rule.interval;
+/// Candidate dates of period `p` (not yet cut off at the start); `None` once the period is outside the range of
+/// dates, which no later period can be inside either.
+fn period_dates(rule: &Rule, start: NaiveDate, p: i64) -> Option<Vec<NaiveDate>> {
+    let step = p.checked_mul(rule.interval)?;
     let mut dates = match rule.freq {
         Freq::Daily => {
-            let d = start + Duration::days(step);
+            let d = start.checked_add_signed(Duration::try_days(step)?)?;
             let wd_ok = rule.by_day.is_empty() || rule.by_day.iter().any(|(_, w)| *w == d.weekday());
             let md_ok =
                 rule.by_monthday.is_empty() || month_dates(rule, d.year(), d.month(), d.day()).contains(&d);
@@ -538,27 +552,28 @@ fn period_dates(rule: &Rule, start: NaiveDate, p: i64) -> Vec<NaiveDate> {
         }
         Freq::Weekly => {
             let back = (start.weekday().num_days_from_monday() + 7 - rule.wkst.num_days_from_monday()) % 7;
-            let week_start = start - Duration::days(back as i64) + Duration::weeks(step);
+            let week_start = start
+                .checked_sub_signed(Duration::days(back as i64))?
+                .checked_add_signed(Duration::try_weeks(step)?)?;
             let wds: Vec<Weekday> = if rule.by_day.is_empty() {
                 vec![start.weekday()]
             } else {
                 rule.by_day.iter().map(|(_, w)| *w).collect()
             };
             wds.into_iter()
-                .map(|w| {
-                    week_start
-                        + Duration::days(
-                            ((w.num_days_from_monday() + 7 - rule.wkst.num_days_from_monday()) % 7) as i64,
-                        )
+                .filter_map(|w| {
+                    week_start.checked_add_signed(Duration::days(
+                        ((w.num_days_from_monday() + 7 - rule.wkst.num_days_from_monday()) % 7) as i64,
+                    ))
                 })
                 .collect()
         }
         Freq::Monthly => {
-            let (y, m) = add_months(start.year(), start.month(), step);
+            let (y, m) = add_months(start.year(), start.month(), step)?;
             month_dates(rule, y, m, start.day())
         }
         Freq::Yearly => {
-            let y = start.year() + step as i32;
+            let y = start.year().checked_add(i32::try_from(step).ok()?)?;
             let months = if rule.by_month.is_empty() {
                 vec![start.month()]
             } else {
@@ -575,7 +590,7 @@ fn period_dates(rule: &Rule, start: NaiveDate, p: i64) -> Vec<NaiveDate> {
     }
     dates.sort();
     dates.dedup();
-    dates
+    Some(dates)
 }
 
 /// An instance of an event: start and end in the zone of the event.
@@ -619,7 +634,11 @@ pub fn occurrences(ev: &Ev, from_ms: i64, until_ms: i64, user: &str, overridden:
     let mut produced = 0u32;
     let time = ev.start.time();
     'periods: for p in 0..MAX_PERIODS {
-        for date in period_dates(&rule, ev.start.date(), p) {
+        // Past the range of dates: no later period is in range either.
+        let Some(period) = period_dates(&rule, ev.start.date(), p) else {
+            break;
+        };
+        for date in period {
             let at = date.and_time(time);
             if at < ev.start {
                 continue;
@@ -792,6 +811,33 @@ mod tests {
             occ.iter().map(|o| o.start.day()).collect::<Vec<_>>(),
             vec![2, 5, 8, 11]
         );
+    }
+
+    #[test]
+    fn an_oversized_interval_is_not_a_rule_and_never_panics() {
+        for freq in ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"] {
+            for interval in ["1001", "4000000000", "9223372036854775807"] {
+                let rule = format!("FREQ={freq};INTERVAL={interval}");
+                assert!(parse_rule(&rule).is_none(), "{rule}");
+                let src = cal(&format!("BEGIN:VEVENT\r\nUID:o\r\nSUMMARY:o\r\nDTSTART:20261102T080000Z\r\nDTEND:20261102T090000Z\r\nRRULE:{rule}\r\nEND:VEVENT\r\n"));
+                let e = parse(&src).remove(0);
+                // Without a rule the event is a single instance.
+                let occ = occurrences(&e, day_ms(2026, 1, 1), day_ms(2300, 1, 1), "UTC", &[]);
+                assert_eq!(occ.len(), 1, "{rule}");
+            }
+            assert!(parse_rule(&format!("FREQ={freq};INTERVAL=1000")).is_some());
+        }
+    }
+
+    /// Within the bound, the far periods are still outside the range of dates and must end the search quietly.
+    #[test]
+    fn the_largest_interval_runs_out_of_dates_without_panicking() {
+        for freq in ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"] {
+            let src = cal(&format!("BEGIN:VEVENT\r\nUID:m\r\nSUMMARY:m\r\nDTSTART:20261102T080000Z\r\nDTEND:20261102T090000Z\r\nRRULE:FREQ={freq};INTERVAL=1000\r\nEND:VEVENT\r\n"));
+            let e = parse(&src).remove(0);
+            let occ = occurrences(&e, day_ms(2026, 1, 1), day_ms(2100, 1, 1), "UTC", &[]);
+            assert!(!occ.is_empty(), "{freq}");
+        }
     }
 
     #[test]
