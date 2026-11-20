@@ -112,7 +112,10 @@ async function checkEntryPolicy(db: Db, actor: Actor, orgId: string, change: Cha
 const lockedCache = new WeakMap<object, Map<string, { rowId: string; fields: unknown }[]>>()
 async function lockedEntriesOf(db: Db, workspace: string, owner: string) {
   let perTx = lockedCache.get(db)
-  if (!perTx) lockedCache.set(db, (perTx = new Map()))
+  if (!perTx) {
+    perTx = new Map()
+    lockedCache.set(db, perTx)
+  }
   const key = `${workspace}|${owner}`
   const hit = perTx.get(key)
   if (hit) return hit
@@ -392,9 +395,15 @@ async function limited<T extends { workspaceId: string; table: string; fields: R
   if (rows.length === 0) return row
   // One lookup per person for the whole page of rows, not one per row.
   let known = departmentCache.get(cache)
-  if (!known) departmentCache.set(cache, (known = new Map()))
+  if (!known) {
+    known = new Map()
+    departmentCache.set(cache, known)
+  }
   let departments = known.get(owner)
-  if (!departments) known.set(owner, (departments = await departmentsOf(db, orgId, owner)))
+  if (!departments) {
+    departments = await departmentsOf(db, orgId, owner)
+    known.set(owner, departments)
+  }
   const { managerVisibility } = effective(rows, departments)
   if (managerVisibility === 'full') return row
   const hide = managerVisibility === 'hide_notes' ? ['note'] : HIDDEN_BY_TOTALS

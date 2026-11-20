@@ -37,7 +37,8 @@ export const jurisdictionRoutes: FastifyPluginAsyncTypebox<{ config: Config }> =
       const profiles: { file: string; source: string }[] = []
       for (const file of names) {
         const path = join(dir, file)
-        if ((await stat(path).catch(() => null))?.size! > MAX_BYTES) continue
+        const size = (await stat(path).catch(() => null))?.size
+        if (size !== undefined && size > MAX_BYTES) continue
         const source = await readFile(path, 'utf8').catch(() => null)
         if (source !== null) profiles.push({ file, source })
       }
