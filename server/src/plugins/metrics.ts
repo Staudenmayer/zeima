@@ -24,7 +24,7 @@ export const metricsPlugin = fp(
       duration.observe({ method: request.method, route, status: String(reply.statusCode) }, reply.elapsedTime / 1000)
     })
 
-    app.get('/metrics', { config: { public: 'monitoring; only reachable on the internal port' }, schema: { hide: true } }, async (_request, reply) =>
+    app.get('/metrics', { config: { public: 'monitoring; only reachable on the internal port', internal: true }, schema: { hide: true } }, async (_request, reply) =>
       reply.type(registry.contentType).send(await registry.metrics()),
     )
   },

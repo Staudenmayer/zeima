@@ -3,6 +3,10 @@ resolver = "2"
 members = ["src-tauri", "crates/zeima-core", "crates/zeima-addon-sdk", "crates/zeima-core-wasm"]
 exclude = ["addons"]
 
+[patch.crates-io]
+# Add-on HTTP without redirects or private addresses (vendor/README-ZEIMA.md).
+extism = { path = "vendor/extism" }
+
 [workspace.package]
 edition = "2021"
 version = "1.0.0-alpha.5"

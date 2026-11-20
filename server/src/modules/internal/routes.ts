@@ -41,7 +41,7 @@ export const internalRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asy
   app.post(
     '/internal/keycloak-events',
     {
-      config: { public: 'signed by Keycloak (HMAC)' },
+      config: { public: 'signed by Keycloak (HMAC)', internal: true },
       schema: {
         tags: ['internal'],
         summary: 'Keycloak says something changed (signed)',

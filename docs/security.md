@@ -152,3 +152,20 @@ A white-box review with proofs of concept (the report is kept outside the reposi
 | PT4-11 | No MFA | Fixed (partly) | `REQUIRE_MFA` (Compose) / `keycloak.requireMfa` (Helm) makes the *Configure OTP* step a default required action for new accounts. *Open: existing accounts need the action added by an administrator (docs/admin-guide.md), and a per-role requirement is not possible because organization roles are groups, not Keycloak roles.* |
 | PT4-12 | Dependency notes | Accepted | Upstream advisories without a fix. |
 | PT4-13 | Sample `NODE_ENV=development` | Fixed | `server/.env.example` carries a warning. |
+
+## Fifth penetration test of 19 November 2026 (PT5-01 to PT5-10)
+
+A full-scope white-box review with proofs of concept (the report is kept outside the repository) found no critical or high issue, 2 medium, 5 low and 3 informational ones.
+
+| ID | Finding | Status | Where, and what to know |
+|---|---|---|---|
+| PT5-01 | The internal-port guard compared the raw URL: `/%6detrics` and `/%76%31/internal/keycloak-events` were served on the public port | Fixed | The guard now refuses by route (`config.internal`, set on the metrics and Keycloak-event routes) and by a normalised path (decoded, lower-case, dots and slashes resolved). Caddy (also air-gapped) refuses `/v1/internal`. `server/test/internal-listener.test.ts`. A Helm ingress that forwards `/` still relies on the API's guard. |
+| PT5-02 | Add-on network allow-list followed redirects and trusted names that resolve to private addresses | Fixed | `vendor/extism` (Extism 1.41.0, see `vendor/README-ZEIMA.md`): the add-on HTTP call follows no redirects and refuses loopback, private, link-local, CGNAT and other special addresses. A host the person typed into a setting (`host_settings`) may be private (`zeima.private_hosts`). An add-on sees a redirect as the 3xx answer. Re-check the patch when Extism is upgraded. |
+| PT5-03 | Invitations outran the inviter's rights | Fixed | Departments in an invitation need `group.manage`, a job needs `job.edit`; at acceptance the role and departments are checked against what the inviter holds then (`acceptInvitations`). |
+| PT5-04 | Unlimited personal workspaces | Fixed | At most 5 per account (`MAX_PERSONAL_WORKSPACES`); the refusal looks like "id taken". `server/test/pt5.test.ts`. |
+| PT5-05 | Add-on `wasm` path with drive letters or streams | Fixed | `AddonManifest::validate` refuses `:`, control characters and `.` segments. |
+| PT5-06 | SCIM re-enabled administrator-disabled accounts | Fixed (partly) | SCIM switches an account on only when its last deactivation in the audit log was SCIM's. *Open: key expiry.* |
+| PT5-07 | No budget for reconcile and SSO changes; deletion order | Fixed | Per-account budgets; the organization is deleted in the database first, then in Keycloak, so a retry finishes it. |
+| PT5-08 | Keycloak token and registration endpoints on the public host | Open | Needs a live check; narrow the proxy paths and use a long `API_ADMIN_SECRET`. |
+| PT5-09 | Non-strict Ed25519 | Fixed | `verify_strict` for add-ons and licences; small-order publisher keys are refused. |
+| PT5-10 | Dependencies | Accepted | No vulnerabilities; ten unmaintained or unsound warnings upstream. |

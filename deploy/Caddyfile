@@ -5,6 +5,9 @@
 	# Metrics are for the monitoring inside the network (api:3000/metrics), not for the internet.
 	@metrics path /metrics
 	respond @metrics 404
+	# Keycloak's events are for the installation's own network, too (the API also refuses them on this port).
+	@internal path /v1/internal /v1/internal/*
+	respond @internal 404
 	reverse_proxy api:3000
 }
 

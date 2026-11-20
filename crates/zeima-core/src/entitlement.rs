@@ -132,7 +132,7 @@ pub fn verify(token: &str, trusted: &[VerifyingKey], now: i64) -> Result<Entitle
     let signing = format!("{h}.{p}");
     if !trusted
         .iter()
-        .any(|k| k.verify(signing.as_bytes(), &signature).is_ok())
+        .any(|k| k.verify_strict(signing.as_bytes(), &signature).is_ok())
     {
         return Err(VerifyError::BadSignature);
     }

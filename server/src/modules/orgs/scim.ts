@@ -11,7 +11,7 @@
 
 import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyPluginAsyncTypebox, TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { Type } from 'typebox'
 import type { Config } from '../../config.ts'
@@ -336,6 +336,19 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
           await db.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
           await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim', key, reason: 'deactivated, account belongs to other organizations' } })
           return 'removed' as const
+        }
+        if (changes.active === true && !m.active) {
+          // Provisioning switches back on only what provisioning switched off: an administrator's (or the operator's)
+          // deactivation is theirs to undo.
+          const [last] = await db
+            .select({ action: schema.auditLog.action, detail: schema.auditLog.detail })
+            .from(schema.auditLog)
+            .where(and(eq(schema.auditLog.orgId, orgId), eq(schema.auditLog.target, m.id), inArray(schema.auditLog.action, ['member.deactivate', 'member.reactivate'])))
+            .orderBy(desc(schema.auditLog.id))
+            .limit(1)
+          if (last?.action !== 'member.deactivate' || (last.detail as { via?: string }).via !== 'scim') {
+            throw new ScimError(403, 'this account was switched off by an administrator; only an administrator switches it back on', 'mutability')
+          }
         }
         if (changes.active !== undefined && changes.active !== m.active) {
           await kc.setEnabled(m.id, changes.active)

@@ -364,7 +364,10 @@ impl AddonManifest {
         let wasm_ok = self.wasm.ends_with(".wasm")
             && !self.wasm.starts_with('/')
             && !self.wasm.contains('\\')
-            && !self.wasm.split('/').any(|p| p == ".." || p.is_empty());
+            // Drive letters (`C:/x.wasm`) and NTFS streams (`a.txt:x.wasm`) are paths of their own on Windows.
+            && !self.wasm.contains(':')
+            && !self.wasm.chars().any(|c| c.is_control())
+            && !self.wasm.split('/').any(|p| p == ".." || p == "." || p.is_empty());
         if !wasm_ok {
             return Err(Error::validation("wasm", "a .wasm file inside the addon folder"));
         }
@@ -651,6 +654,9 @@ auth_params = { access_type = "offline", prompt = "consent" }
             "id = \"com.example.csv-export\"",
             "id = \"com.example.csv-export\"\nwasm = \"../evil.wasm\"",
         );
+        for evil in ["C:/Users/x/y.wasm", "a.txt:x.wasm", "./x.wasm", "a/./x.wasm"] {
+            bad("id = \"com.example.csv-export\"", &format!("id = \"com.example.csv-export\"\nwasm = \"{evil}\""));
+        }
         bad("author = \"Example\"", "author = \"Example\"\nunknown = 1");
         bad(
             "https://oauth2.googleapis.com/token",

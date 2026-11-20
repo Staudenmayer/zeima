@@ -17,6 +17,7 @@ import { ssoAlias, type KeycloakAdmin, type SsoInput } from '../../keycloak/admi
 import { SECURITY } from '../../plugins/auth.ts'
 import { authorize } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
+import { Quota } from '../../plugins/quota.ts'
 import { audit } from './service.ts'
 
 const OrgParams = Type.Object({ orgId: Type.String({ format: 'uuid' }) })
@@ -259,6 +260,9 @@ export const ssoRoutes: FastifyPluginAsyncTypebox<SsoRouteOptions> = async (app,
     return { user: request.user, orgId }
   }
 
+  /** Each change reads a provider's metadata and talks to Keycloak: a few a minute is plenty. */
+  const changes = new Quota(30)
+
   // Single sign-on is an enterprise feature on the cloud.
   app.addHook('preHandler', async (request) => {
     if (request.user && app.licensing.enforced) await app.licensing.require(database(), request.user, 'sso')
@@ -329,6 +333,7 @@ export const ssoRoutes: FastifyPluginAsyncTypebox<SsoRouteOptions> = async (app,
       const { orgId } = request.params
       const actor = actorIn({ user: request.user! }, orgId)
       authorize(actor, 'org.settings', { orgId })
+      changes.spend(request.user!.id, 1, 'single sign-on changes')
       const body = request.body
       const source = await checkSourceUrl(body.sourceUrl, config.sso.allowPrivateUrls, resolver)
       const domains = normalizeDomains(body.domains)

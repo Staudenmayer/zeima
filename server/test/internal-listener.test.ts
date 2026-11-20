@@ -23,6 +23,12 @@ describe('what is internal', () => {
     expect(isInternalPath('/v1/internalish')).toBe(false)
     expect(isInternalPath('/metricsx')).toBe(false)
   })
+
+  it('also recognises encoded, upper-case and dotted spellings', () => {
+    for (const p of ['/%6detrics', '/met%72ics', '/%76%31/internal/keycloak-events', '/V1/Internal/x', '//metrics', '/v1/x/../internal/y', '/metrics;a=b', '/%256detrics']) {
+      expect(isInternalPath(p), p).toBe(true)
+    }
+  })
 })
 
 describe('the internal port', () => {
@@ -57,6 +63,11 @@ describe('the internal port', () => {
     expect((await get(publicPort, '/v1/internal/keycloak-events', 'POST')).status).toBe(404)
     // On the internal port the route exists (this call has no signature, so it is refused as unauthorized, not as missing).
     expect((await get(internalPort, '/v1/internal/keycloak-events', 'POST')).status).toBe(400)
+  })
+
+  it('refuses encoded spellings on the public port too', async () => {
+    expect((await get(publicPort, '/%6detrics')).status).toBe(404)
+    expect((await get(publicPort, '/%76%31/internal/keycloak-events', 'POST')).status).toBe(404)
   })
 
   it('leaves the rest of the API on the public port', async () => {

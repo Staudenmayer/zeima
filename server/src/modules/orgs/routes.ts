@@ -106,6 +106,8 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
   const presenceReports = new Quota(90)
   /** Free/busy and room lookups read a whole workspace's meetings: a person asks a few times a minute. */
   const planningLookups = new Quota(30)
+  /** Calls that make the API talk to Keycloak at length (a whole-organization check, a provider's metadata). */
+  const heavyAdminCalls = new Quota(6)
   const keycloak = (): KeycloakAdmin => {
     if (!app.keycloakAdmin) {
       throw new HttpProblem(503, 'org_admin_unavailable', 'organization management is not set up: the API has no Keycloak admin credentials')
@@ -191,8 +193,16 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const actor = actorIn({ user: request.user! }, orgId)
       authorize(actor, 'org.delete', { orgId })
       const db = database()
-      await keycloak().deleteOrganization(orgId)
+      const kc = keycloak()
+      // The database first (in one transaction), then Keycloak: a failure at Keycloak leaves a stray identity-provider
+      // organization that deleting again (or the operator) removes, and never members of an organization that has no data.
       await deleteOrganization(db, orgId)
+      try {
+        await kc.deleteOrganization(orgId)
+      } catch (err) {
+        request.log.error({ err, orgId }, 'the organization is deleted here but Keycloak could not delete its side')
+        throw err
+      }
       return reply.code(204).send(null)
     },
   )
@@ -395,6 +405,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const limit = await seatLimit(actor.user, orgId)
 
       const groupIds = [...new Set(request.body.groupIds ?? [])]
+      if (groupIds.length && scopeOf(actor, 'group.manage') !== 'org') throw new HttpProblem(403, 'forbidden', 'not allowed: group.manage (departments are placed by those who manage them)')
       const jobId = request.body.jobId ?? null
       await checkDepartmentsAndJob(db, orgId, groupIds, jobId)
       // Counting the seats and taking one is a single step: two invitations at once must not both see a free seat.
@@ -438,9 +449,12 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     },
     async (request) => {
       const { orgId, invitationId } = request.params
-      authorize(actorIn({ user: request.user! }, orgId), 'member.invite', { orgId })
+      const invitingActor = actorIn({ user: request.user! }, orgId)
+      authorize(invitingActor, 'member.invite', { orgId })
       const db = database()
       const groupIds = request.body.groupIds ? [...new Set(request.body.groupIds)] : undefined
+      if (groupIds?.length && scopeOf(invitingActor, 'group.manage') !== 'org') throw new HttpProblem(403, 'forbidden', 'not allowed: group.manage')
+      if (request.body.jobId && scopeOf(invitingActor, 'job.edit') !== 'org') throw new HttpProblem(403, 'forbidden', 'not allowed: job.edit')
       await checkDepartmentsAndJob(db, orgId, groupIds ?? [], request.body.jobId ?? null)
       const [row] = await db
         .update(schema.orgInvitation)
@@ -1216,6 +1230,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request) => {
       const { orgId } = request.params
       authorize(actorIn({ user: request.user! }, orgId), 'member.manage', { orgId })
+      heavyAdminCalls.spend(request.user!.id, 1, 'organization checks')
       const db = database()
       return reconcileOrganization(db, keycloak(), orgId, { seatLimit: async (id) => (await app.licensing.ofOrg(db, id))?.seats ?? null })
     },

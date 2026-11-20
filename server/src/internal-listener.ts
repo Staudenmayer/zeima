@@ -8,17 +8,44 @@ import type { FastifyInstance } from 'fastify'
 
 export const INTERNAL_PATHS = ['/v1/internal/', '/metrics']
 
-/** Whether a path belongs to the internal surface. */
+/** The path as the router will read it: percent-decoded, lower-case, dots and repeated slashes resolved. */
+function normalizedPath(url: string): string {
+  let path = url.split('?')[0]!.split(';')[0]!
+  for (let i = 0; i < 3; i++) {
+    try {
+      const next = decodeURIComponent(path)
+      if (next === path) break
+      path = next
+    } catch {
+      break
+    }
+  }
+  const parts: string[] = []
+  for (const part of path.toLowerCase().split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') parts.pop()
+    else parts.push(part)
+  }
+  return `/${parts.join('/')}`
+}
+
+/** Whether a path belongs to the internal surface (in any spelling the router would accept). */
 export function isInternalPath(url: string): boolean {
-  const path = url.split('?')[0] ?? ''
-  return INTERNAL_PATHS.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p))
+  const raw = url.split('?')[0] ?? ''
+  const path = normalizedPath(url)
+  return INTERNAL_PATHS.some((p) => {
+    const bare = p.replace(/\/$/, '')
+    return p.endsWith('/') ? path === bare || path.startsWith(p) || raw.startsWith(p) : path === p || raw === p
+  })
 }
 
 /** Refuses the internal paths on every port but the internal one. */
 export function guardInternalPaths(app: FastifyInstance, internalPort: number | null): void {
   if (internalPort === null) return
   app.addHook('onRequest', async (request, reply) => {
-    if (isInternalPath(request.url) && request.raw.socket.localPort !== internalPort) {
+    // By the route (already matched by the router, whatever the spelling) and by the normalised path.
+    const internal = request.routeOptions?.config?.internal === true || isInternalPath(request.url)
+    if (internal && request.raw.socket.localPort !== internalPort) {
       return reply.code(404).type('application/problem+json').send({ type: 'about:blank', title: 'Not Found', status: 404, code: 'not_found' })
     }
   })

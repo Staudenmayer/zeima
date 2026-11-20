@@ -98,7 +98,8 @@ pub fn message(manifest_src: &[u8], wasm: &[u8]) -> Vec<u8> {
 /// A raw 32-byte Ed25519 public key in base64url.
 pub fn parse_public_key(raw: &str) -> Option<VerifyingKey> {
     let bytes: [u8; 32] = URL_SAFE_NO_PAD.decode(raw.trim()).ok()?.try_into().ok()?;
-    VerifyingKey::from_bytes(&bytes).ok()
+    // A small-order key verifies signatures nobody made.
+    VerifyingKey::from_bytes(&bytes).ok().filter(|k| !k.is_weak())
 }
 
 /// Checks the package's signature file (if any) against the trusted keys.
@@ -116,7 +117,7 @@ pub fn check(manifest_src: &[u8], wasm: &[u8], signature_json: Option<&str>, tru
         .decode(file.signature.trim())
         .ok()
         .and_then(|b| Signature::from_slice(&b).ok())
-        .is_some_and(|sig| key.key.verify(&message(manifest_src, wasm), &sig).is_ok());
+        .is_some_and(|sig| key.key.verify_strict(&message(manifest_src, wasm), &sig).is_ok());
     let status = match (good, key.vendor) {
         (true, true) => SignatureStatus::Trusted,
         (true, false) => SignatureStatus::ServerTrusted,

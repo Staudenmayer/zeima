@@ -531,10 +531,19 @@ fn build_plugin(
     manifest: &AddonManifest,
     record: &AddonRecord,
 ) -> Result<Plugin, String> {
+    // Hosts the person typed into a setting may be on their own network (a self-hosted server); the names in the
+    // manifest may not (vendor/README-ZEIMA.md).
+    let settings = config(manifest, &record.settings);
+    let typed: Vec<String> = manifest
+        .host_settings
+        .iter()
+        .filter_map(|key| settings.get(key).and_then(|v| zeima_core::addon::host_of_address(v)))
+        .collect();
     let mut wasm_manifest = Manifest::new([Wasm::file(dir.join(&manifest.wasm))])
         .with_timeout(CALL_TIMEOUT)
         .with_memory_max(MEMORY_PAGES)
-        .with_config(config(manifest, &record.settings).into_iter());
+        .with_config(settings.clone().into_iter())
+        .with_config_key("zeima.private_hosts", typed.join(","));
     if record.granted.contains(&Permission::Network) {
         let hosts = manifest.effective_hosts(&config(manifest, &record.settings));
         wasm_manifest = wasm_manifest.with_allowed_hosts(hosts.into_iter());

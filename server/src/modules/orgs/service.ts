@@ -8,6 +8,8 @@ import type { Db } from '../../db/index.ts'
 import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { HttpProblem } from '../../plugins/errors.ts'
+import { covers } from '../../plugins/permissions.ts'
+import { permissionsOfRole, roleOf } from './roles.ts'
 
 export interface MemberRow {
   id: string
@@ -210,12 +212,25 @@ export async function acceptInvitations(db: Db, kc: KeycloakAdmin, user: { id: s
       ? await db.select({ role: schema.kcOrgMember.role }).from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, invitation.orgId), eq(schema.kcOrgMember.userId, invitation.invitedBy)))
       : []
     const known = invitation.role === 'member' || (await db.select({ id: schema.orgRole.id }).from(schema.orgRole).where(and(eq(schema.orgRole.orgId, invitation.orgId), invitation.role.length > 30 ? eq(schema.orgRole.id, invitation.role) : eq(schema.orgRole.key, invitation.role)))).length > 0 || ['admin', 'manager', 'owner'].includes(invitation.role)
-    const mayGive = inviter && (invitation.role === 'member' || (['admin', 'owner'].includes(invitation.role) ? inviter.role === 'owner' : true))
+    // Looked at again now: what the inviter holds today, not when they invited.
+    let mayGive = false
+    if (inviter) {
+      if (invitation.role === 'member') mayGive = true
+      else if (['admin', 'owner'].includes(invitation.role)) mayGive = inviter.role === 'owner'
+      else if (inviter.role === 'owner') mayGive = true
+      else {
+        const inviterPermissions = await permissionsOfRole(db, invitation.orgId, inviter.role)
+        const target = await roleOf(db, invitation.orgId, invitation.role)
+        mayGive = Boolean(target) && covers(inviterPermissions, target!.permissions) && !('role.edit' in target!.permissions || 'role.assign' in target!.permissions)
+      }
+    }
     const role = mayGive && known ? invitation.role : 'member'
     await kc.addMember(invitation.orgId, user.id)
     await kc.setRole(invitation.orgId, user.id, role)
     // The departments the inviter chose (those that still exist in the organization).
-    const groups = invitation.groupIds.length
+    // Departments are placed by those who manage departments.
+    const inviterMayPlace = inviter && (inviter.role === 'owner' || (await permissionsOfRole(db, invitation.orgId, inviter.role))['group.manage'] === 'org')
+    const groups = invitation.groupIds.length && inviterMayPlace
       ? await db
           .select({ id: schema.kcGroup.id })
           .from(schema.kcGroup)

@@ -74,6 +74,8 @@ const WorkspaceSchema = Type.Object({
 
 const FieldsSchema = Type.Record(Type.String(), Type.Object({ v: Type.Any(), h: Type.String() }))
 
+/** Personal workspaces one account may have (the app uses one). */
+export const MAX_PERSONAL_WORKSPACES = 5
 const MAX_CHANGES = 500
 /** What one account may push in a minute: far more than a person produces, far less than it takes to fill a disk. */
 const PUSH_REQUESTS_PER_MINUTE = 120
@@ -215,6 +217,9 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
           }
           return { id, kind: 'personal' as const, name: existing.name, orgId: null }
         }
+        // The app uses one personal workspace; a few more are allowed (a reinstall), not an unlimited number.
+        const [owned] = await tx.select({ n: sql<number>`count(*)::int` }).from(schema.workspace).where(and(eq(schema.workspace.ownerId, user.id), eq(schema.workspace.kind, 'personal')))
+        if ((owned?.n ?? 0) >= MAX_PERSONAL_WORKSPACES) throw new HttpProblem(409, 'conflict', 'that workspace id is taken')
         const now = Date.now()
         try {
           await tx.insert(schema.workspace).values({

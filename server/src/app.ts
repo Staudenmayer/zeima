@@ -126,6 +126,8 @@ declare module 'fastify' {
   interface FastifyContextConfig {
     /** Marks a route that is open on purpose, and says why (see the `onRoute` check in `buildApp`). */
     public?: string
+    /** Served on the internal port only (see internal-listener.ts). */
+    internal?: boolean
   }
 }
 
