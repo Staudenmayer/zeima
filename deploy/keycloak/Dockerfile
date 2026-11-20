@@ -7,7 +7,7 @@ RUN mvn -q -B dependency:go-offline
 COPY listener/src src
 RUN mvn -q -B package -DskipTests
 
-FROM quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
+FROM quay.io/keycloak/keycloak:26.8.2-3@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
 COPY --from=listener /build/target/zeima-keycloak-listener.jar /opt/keycloak/providers/
 # The theme and the realm are part of the image, so it also runs where nothing can be mounted
 # (Kubernetes, the air-gapped bundle). The compose files mount the same files over them, which
