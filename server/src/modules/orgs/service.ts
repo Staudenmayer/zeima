@@ -9,7 +9,7 @@ import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { HttpProblem } from '../../plugins/errors.ts'
 import { covers } from '../../plugins/permissions.ts'
-import { permissionsOfRole, roleOf } from './roles.ts'
+import { forgetMembership, permissionsOfRole, roleOf } from './roles.ts'
 
 export interface MemberRow {
   id: string
@@ -106,6 +106,7 @@ export async function createOrganization(
     await kc.deleteOrganization(id).catch(() => {})
     throw err
   }
+  forgetMembership(creator.id)
   await audit(db, { orgId: id, actorId: creator.id, action: 'org.create', target: id, detail: { name } })
   return { id, name }
 }
@@ -258,6 +259,7 @@ export async function acceptInvitations(db: Db, kc: KeycloakAdmin, user: { id: s
       for (const g of groups) await tx.insert(schema.kcGroupMember).values({ groupId: g.id, userId: user.id }).onConflictDoNothing()
       await tx.update(schema.orgInvitation).set({ acceptedAt: Date.now() }).where(eq(schema.orgInvitation.id, invitation.id))
     })
+    forgetMembership(user.id)
     await audit(db, { orgId: invitation.orgId, actorId: user.id, action: 'member.join', target: user.id, detail: { role } })
   }
 }

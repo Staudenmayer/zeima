@@ -48,7 +48,8 @@ impl Core {
         }
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
-        let Some(running) = fetch_running(tx.conn(), &user).await? else {
+        let ws = tx.ctx().workspace_id.clone();
+        let Some(running) = fetch_running(tx.conn(), &ws, &user).await? else {
             return Ok(None);
         };
         let from = period.from.max(running.start_at);
@@ -88,7 +89,9 @@ impl Core {
         };
         let now = self.now_ms();
         if now - heartbeat < FORGOTTEN_AFTER_MS
-            || fetch_running(self.pool(), &self.ctx().user_id).await?.is_none()
+            || fetch_running(self.pool(), &self.ctx().workspace_id, &self.ctx().user_id)
+                .await?
+                .is_none()
         {
             return Ok(None);
         }
@@ -107,9 +110,11 @@ impl Core {
     pub async fn pending_away(&self) -> Result<Vec<AwayItem>> {
         let user = &self.ctx().user_id;
         let mut items = Vec::new();
-        for pause in list_pending_pauses(self.pool(), user).await? {
+        for pause in list_pending_pauses(self.pool(), &self.ctx().workspace_id, user).await? {
             let entry = match &pause.resume_entry_id {
-                Some(id) => fetch_entry(self.pool(), user, id).await.ok(),
+                Some(id) => fetch_entry(self.pool(), &self.ctx().workspace_id, user, id)
+                    .await
+                    .ok(),
                 None => None,
             };
             items.push(AwayItem { pause, entry });
@@ -120,13 +125,14 @@ impl Core {
     pub async fn resolve_away(&self, pause_id: &str, resolution: AwayResolution) -> Result<()> {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
-        let mut pause = fetch_pause(tx.conn(), &user, pause_id).await?;
+        let ws = tx.ctx().workspace_id.clone();
+        let mut pause = fetch_pause(tx.conn(), &ws, &user, pause_id).await?;
         if pause.accepted.is_some() || pause.kind == PauseKind::Manual {
             return Err(Error::Conflict("This pause was already handled.".into()));
         }
         let to = pause.end_at.unwrap_or(pause.start_at);
         let entry = match &pause.resume_entry_id {
-            Some(id) => fetch_entry(tx.conn(), &user, id).await.ok(),
+            Some(id) => fetch_entry(tx.conn(), &ws, &user, id).await.ok(),
             None => None,
         };
 
@@ -248,16 +254,17 @@ async fn apply_if_needed(tx: &mut WriteTx<'_>, pause: &mut Pause, entry: Option<
 /// Turns an applied pause back into work time.
 async fn undo(tx: &mut WriteTx<'_>, pause: &Pause, entry: TimeEntry) -> Result<()> {
     let user = tx.ctx().user_id.clone();
+    let ws = tx.ctx().workspace_id.clone();
     let to = pause.end_at.unwrap_or(pause.start_at);
     if pause.kind == PauseKind::AutoNight {
         // Continue the stopped timer, unless something else runs now.
-        let running = fetch_running(tx.conn(), &user).await?;
+        let running = fetch_running(tx.conn(), &ws, &user).await?;
         let end_at = if running.is_none() { None } else { Some(to) };
         update_entry_row(tx, TimeEntry { end_at, ..entry }).await?;
         return Ok(());
     }
     let followup = match &pause.followup_entry_id {
-        Some(id) => fetch_entry(tx.conn(), &user, id).await.ok(),
+        Some(id) => fetch_entry(tx.conn(), &ws, &user, id).await.ok(),
         None => None,
     };
     match followup {

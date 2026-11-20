@@ -6,22 +6,29 @@ import { defaultPermissions } from '../src/plugins/permissions.ts'
 import { testApp, token } from './helpers.ts'
 
 describe('orgsFromGroups', () => {
+  it('ignores group paths whose organization id is not a UUID', () => {
+    const orgs = orgsFromGroups(['/orgs/__proto__/roles/owner', '/orgs/constructor/roles/owner', '/orgs/o1/roles/admin'])
+    expect(Object.keys(orgs)).toEqual([])
+    expect(({} as { role?: string }).role).toBeUndefined()
+    expect(Object.getPrototypeOf(orgs)).toBeNull()
+  })
+
   it('reads roles and departments from group paths', () => {
     expect(
       orgsFromGroups([
-        '/orgs/o1/roles/member',
-        '/orgs/o1/roles/manager',
-        '/orgs/o1/groups/dev/backend',
-        '/orgs/o2/groups/sales',
-        '/orgs/o3/roles/emperor',
-        '/orgs/o4',
+        '/orgs/00000000-0000-4000-8000-0000000000a1/roles/member',
+        '/orgs/00000000-0000-4000-8000-0000000000a1/roles/manager',
+        '/orgs/00000000-0000-4000-8000-0000000000a1/groups/dev/backend',
+        '/orgs/00000000-0000-4000-8000-0000000000a2/groups/sales',
+        '/orgs/00000000-0000-4000-8000-0000000000a3/roles/emperor',
+        '/orgs/00000000-0000-4000-8000-0000000000a4',
         '/other/group',
       ]),
     ).toEqual({
-      o1: { role: 'manager', permissions: defaultPermissions('manager'), groups: ['/orgs/o1/groups/dev/backend'] },
-      o2: { role: 'member', permissions: defaultPermissions('member'), groups: ['/orgs/o2/groups/sales'] },
+      '00000000-0000-4000-8000-0000000000a1': { role: 'manager', permissions: defaultPermissions('manager'), groups: ['/orgs/00000000-0000-4000-8000-0000000000a1/groups/dev/backend'] },
+      '00000000-0000-4000-8000-0000000000a2': { role: 'member', permissions: defaultPermissions('member'), groups: ['/orgs/00000000-0000-4000-8000-0000000000a2/groups/sales'] },
       // A role the organization made: what it allows is looked up by the API, nothing until then.
-      o3: { role: 'emperor', permissions: {}, groups: [] },
+      '00000000-0000-4000-8000-0000000000a3': { role: 'emperor', permissions: {}, groups: [] },
     })
   })
 })
@@ -45,7 +52,7 @@ describe('bearer authentication', () => {
   })
 
   it('returns the user with their organizations', async () => {
-    const res = await me(await bearer({ groups: ['/orgs/o1/roles/admin', '/orgs/o1/groups/dev'] }))
+    const res = await me(await bearer({ groups: ['/orgs/00000000-0000-4000-8000-0000000000a1/roles/admin', '/orgs/00000000-0000-4000-8000-0000000000a1/groups/dev'] }))
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({
       id: '2c8f1f5e-0000-4000-8000-000000000001',
@@ -54,18 +61,27 @@ describe('bearer authentication', () => {
       locale: 'de',
       avatar: null,
       roles: ['user', 'offline_access'],
-      orgs: [{ id: 'o1', role: 'admin', permissions: defaultPermissions('admin'), groups: ['/orgs/o1/groups/dev'] }],
+      orgs: [{ id: '00000000-0000-4000-8000-0000000000a1', role: 'admin', permissions: defaultPermissions('admin'), groups: ['/orgs/00000000-0000-4000-8000-0000000000a1/groups/dev'] }],
       activeOrgId: null,
     })
   })
 
   it('accepts X-Org-Id only for the user\'s orgs', async () => {
-    const headers = await bearer({ groups: ['/orgs/o1/roles/member'] })
-    const ok = await me({ ...headers, 'x-org-id': 'o1' })
-    expect(ok.json().activeOrgId).toBe('o1')
-    const other = await me({ ...headers, 'x-org-id': 'o2' })
+    const headers = await bearer({ groups: ['/orgs/00000000-0000-4000-8000-0000000000a1/roles/member'] })
+    const ok = await me({ ...headers, 'x-org-id': '00000000-0000-4000-8000-0000000000a1' })
+    expect(ok.json().activeOrgId).toBe('00000000-0000-4000-8000-0000000000a1')
+    const other = await me({ ...headers, 'x-org-id': '00000000-0000-4000-8000-0000000000a2' })
     expect(other.statusCode).toBe(403)
     expect(other.json().code).toBe('org_forbidden')
+  })
+
+  it('rejects X-Org-Id values that are object properties', async () => {
+    const headers = await bearer({ groups: ['/orgs/00000000-0000-4000-8000-0000000000a1/roles/member'] })
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      const res = await me({ ...headers, 'x-org-id': name })
+      expect(res.statusCode).toBe(403)
+      expect(res.json().code).toBe('org_forbidden')
+    }
   })
 
   it('rejects expired, foreign and misdirected tokens', async () => {

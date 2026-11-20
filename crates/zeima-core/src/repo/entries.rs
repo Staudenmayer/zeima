@@ -55,15 +55,21 @@ fn from_row(r: &SqliteRow) -> Result<TimeEntry> {
     })
 }
 
-pub(crate) async fn fetch_entry<'e, E>(executor: E, user_id: &str, id: &str) -> Result<TimeEntry>
+pub(crate) async fn fetch_entry<'e, E>(
+    executor: E,
+    workspace_id: &str,
+    user_id: &str,
+    id: &str,
+) -> Result<TimeEntry>
 where
     E: sqlx::Executor<'e, Database = Sqlite>,
 {
     let row = sqlx::query(concat!(
         select!(),
-        " WHERE e.id = ? AND e.user_id = ? AND e.deleted_at IS NULL"
+        " WHERE e.id = ? AND e.workspace_id = ? AND e.user_id = ? AND e.deleted_at IS NULL"
     ))
     .bind(id)
+    .bind(workspace_id)
     .bind(user_id)
     .fetch_optional(executor)
     .await?
@@ -71,14 +77,19 @@ where
     from_row(&row)
 }
 
-pub(crate) async fn fetch_running<'e, E>(executor: E, user_id: &str) -> Result<Option<TimeEntry>>
+pub(crate) async fn fetch_running<'e, E>(
+    executor: E,
+    workspace_id: &str,
+    user_id: &str,
+) -> Result<Option<TimeEntry>>
 where
     E: sqlx::Executor<'e, Database = Sqlite>,
 {
     let row = sqlx::query(concat!(
         select!(),
-        " WHERE e.user_id = ? AND e.end_at IS NULL AND e.deleted_at IS NULL"
+        " WHERE e.workspace_id = ? AND e.user_id = ? AND e.end_at IS NULL AND e.deleted_at IS NULL"
     ))
+    .bind(workspace_id)
     .bind(user_id)
     .fetch_optional(executor)
     .await?;
@@ -90,10 +101,11 @@ impl Core {
     pub async fn list_entries(&self, range: Range) -> Result<Vec<TimeEntry>> {
         let rows = sqlx::query(concat!(
             select!(),
-            " WHERE e.user_id = ? AND e.deleted_at IS NULL
+            " WHERE e.workspace_id = ? AND e.user_id = ? AND e.deleted_at IS NULL
                AND e.start_at < ? AND (e.end_at IS NULL OR e.end_at > ?)
              ORDER BY e.start_at"
         ))
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .bind(range.to)
         .bind(range.from)
@@ -103,7 +115,7 @@ impl Core {
     }
 
     pub async fn get_entry(&self, id: &str) -> Result<TimeEntry> {
-        fetch_entry(self.pool(), &self.ctx().user_id, id).await
+        fetch_entry(self.pool(), &self.ctx().workspace_id, &self.ctx().user_id, id).await
     }
 
     /// Summaries for several ranges (e.g. each day of a week) in one call.
@@ -168,7 +180,8 @@ impl Core {
         }
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
-        let existing = fetch_entry(tx.conn(), &user, id).await?;
+        let ws = tx.ctx().workspace_id.clone();
+        let existing = fetch_entry(tx.conn(), &ws, &user, id).await?;
         ensure_unlocked(&existing)?;
         let entry = update_in(&mut tx, existing, input, true).await?;
         tx.commit().await?;
@@ -180,23 +193,24 @@ impl Core {
     pub async fn bulk_update_entries(&self, ids: &[String], patch: EntryPatch) -> Result<BulkResult> {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
+        let ws = tx.ctx().workspace_id.clone();
         let mut tags: HashMap<String, Tag> = HashMap::new();
         for id in patch.add_tag_ids.iter() {
-            let tag = fetch_tag(tx.conn(), id)
+            let tag = fetch_tag(tx.conn(), &ws, id)
                 .await
                 .map_err(|_| Error::validation("addTagIds", format!("unknown tag {id}")))?;
             tags.insert(id.clone(), tag);
         }
         let mut result = BulkResult::default();
         for id in ids {
-            let e = fetch_entry(tx.conn(), &user, id).await?;
+            let e = fetch_entry(tx.conn(), &ws, &user, id).await?;
             if e.locked {
                 result.skipped_locked += 1;
                 continue;
             }
             for tag_id in &e.tag_ids {
                 if !tags.contains_key(tag_id) {
-                    if let Ok(tag) = fetch_tag(tx.conn(), tag_id).await {
+                    if let Ok(tag) = fetch_tag(tx.conn(), &ws, tag_id).await {
                         tags.insert(tag_id.clone(), tag);
                     }
                 }
@@ -249,9 +263,10 @@ impl Core {
     pub async fn bulk_delete_entries(&self, ids: &[String]) -> Result<BulkResult> {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
+        let ws = tx.ctx().workspace_id.clone();
         let mut result = BulkResult::default();
         for id in ids {
-            let e = fetch_entry(tx.conn(), &user, id).await?;
+            let e = fetch_entry(tx.conn(), &ws, &user, id).await?;
             if e.locked {
                 result.skipped_locked += 1;
                 continue;
@@ -267,7 +282,8 @@ impl Core {
     pub async fn delete_entry(&self, id: &str) -> Result<()> {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
-        let existing = fetch_entry(tx.conn(), &user, id).await?;
+        let ws = tx.ctx().workspace_id.clone();
+        let existing = fetch_entry(tx.conn(), &ws, &user, id).await?;
         ensure_unlocked(&existing)?;
         soft_delete(&mut tx, "time_entry", id).await?;
         invalidate_entry_days(&mut tx, existing.start_at, existing.end_at).await?;
@@ -289,9 +305,10 @@ impl Core {
             .await?;
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
+        let ws = tx.ctx().workspace_id.clone();
         let mut entries = Vec::new();
         for id in &ids {
-            let e = fetch_entry(tx.conn(), &user, id).await?;
+            let e = fetch_entry(tx.conn(), &ws, &user, id).await?;
             ensure_unlocked(&e)?;
             if e.end_at.is_none() {
                 return Err(Error::validation("ids", "a running entry cannot be combined"));
@@ -319,7 +336,8 @@ impl Core {
     pub async fn split_entry(&self, id: &str, at: i64) -> Result<(TimeEntry, TimeEntry)> {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
-        let existing = fetch_entry(tx.conn(), &user, id).await?;
+        let ws = tx.ctx().workspace_id.clone();
+        let existing = fetch_entry(tx.conn(), &ws, &user, id).await?;
         ensure_unlocked(&existing)?;
         let end = existing.end_at.unwrap_or(tx.now());
         if at <= existing.start_at || at >= end {
@@ -351,7 +369,8 @@ impl Core {
     pub async fn duplicate_entry(&self, id: &str) -> Result<TimeEntry> {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
-        let existing = fetch_entry(tx.conn(), &user, id).await?;
+        let ws = tx.ctx().workspace_id.clone();
+        let existing = fetch_entry(tx.conn(), &ws, &user, id).await?;
         let Some(end) = existing.end_at else {
             return Err(Error::validation("id", "a running entry cannot be duplicated"));
         };
@@ -482,7 +501,7 @@ pub(crate) async fn new_entry(
 
 pub(crate) async fn insert_entry(tx: &mut WriteTx<'_>, e: &TimeEntry) -> Result<()> {
     let s = tx.stamp();
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO time_entry (id, workspace_id, user_id, activity_id, project_id, start_at, end_at, tz,
             note, billable, source, source_ref, locked, cost_center_id, created_at, updated_at, hlc,
             origin_device)
@@ -507,8 +526,10 @@ pub(crate) async fn insert_entry(tx: &mut WriteTx<'_>, e: &TimeEntry) -> Result<
     .bind(&s.hlc)
     .bind(&s.device)
     .execute(tx.conn())
-    .await
-    .map_err(running_conflict)?;
+    .await;
+    if let Err(err) = inserted {
+        return Err(running_conflict(tx, err).await);
+    }
     write_tags(tx.conn(), &e.id, &e.tag_ids).await?;
     invalidate_entry_days(tx, e.start_at, e.end_at).await?;
     tx.emit(DomainEvent::EntryCreated { entry: e.clone() });
@@ -518,22 +539,25 @@ pub(crate) async fn insert_entry(tx: &mut WriteTx<'_>, e: &TimeEntry) -> Result<
 /// Writes all mutable fields of an existing entry and returns it with the
 /// new `updated_at`.
 pub(crate) async fn update_entry_row(tx: &mut WriteTx<'_>, mut e: TimeEntry) -> Result<TimeEntry> {
-    let old: Option<(i64, Option<i64>)> =
-        sqlx::query_as("SELECT start_at, end_at FROM time_entry WHERE id = ? AND user_id = ?")
-            .bind(&e.id)
-            .bind(&e.user_id)
-            .fetch_optional(tx.conn())
-            .await?;
+    let ws = tx.ctx().workspace_id.clone();
+    let old: Option<(i64, Option<i64>)> = sqlx::query_as(
+        "SELECT start_at, end_at FROM time_entry WHERE id = ? AND user_id = ? AND workspace_id = ?",
+    )
+    .bind(&e.id)
+    .bind(&e.user_id)
+    .bind(&ws)
+    .fetch_optional(tx.conn())
+    .await?;
     if let Some((start, end)) = old {
         invalidate_entry_days(tx, start, end).await?;
     }
     invalidate_entry_days(tx, e.start_at, e.end_at).await?;
     let s = tx.stamp();
     e.updated_at = s.now;
-    sqlx::query(
+    let updated = sqlx::query(
         "UPDATE time_entry SET activity_id = ?, project_id = ?, start_at = ?, end_at = ?, tz = ?, note = ?,
             billable = ?, locked = ?, cost_center_id = ?, updated_at = ?, hlc = ?, origin_device = ?
-         WHERE id = ? AND user_id = ?",
+         WHERE id = ? AND user_id = ? AND workspace_id = ?",
     )
     .bind(&e.activity_id)
     .bind(&e.project_id)
@@ -549,9 +573,16 @@ pub(crate) async fn update_entry_row(tx: &mut WriteTx<'_>, mut e: TimeEntry) -> 
     .bind(&s.device)
     .bind(&e.id)
     .bind(&e.user_id)
+    .bind(&ws)
     .execute(tx.conn())
-    .await
-    .map_err(running_conflict)?;
+    .await;
+    let done = match updated {
+        Ok(done) => done,
+        Err(err) => return Err(running_conflict(tx, err).await),
+    };
+    if done.rows_affected() == 0 {
+        return Err(not_found("entry", &e.id));
+    }
     sqlx::query("DELETE FROM time_entry_tag WHERE entry_id = ?")
         .bind(&e.id)
         .execute(tx.conn())
@@ -573,10 +604,27 @@ async fn write_tags(conn: &mut SqliteConnection, entry_id: &str, tag_ids: &[Stri
     Ok(())
 }
 
-fn running_conflict(err: sqlx::Error) -> Error {
+/// A unique-index violation on the running entry. The index is per user, so the running entry may belong
+/// to another workspace of the same account; say so when this workspace has none.
+async fn running_conflict(tx: &mut WriteTx<'_>, err: sqlx::Error) -> Error {
     match &err {
         sqlx::Error::Database(db) if db.is_unique_violation() => {
-            Error::Conflict("Another entry is already running.".into())
+            let ws = tx.ctx().workspace_id.clone();
+            let user = tx.ctx().user_id.clone();
+            let here: std::result::Result<Option<i64>, sqlx::Error> = sqlx::query_scalar(
+                "SELECT 1 FROM time_entry
+                 WHERE workspace_id = ? AND user_id = ? AND end_at IS NULL AND deleted_at IS NULL",
+            )
+            .bind(ws)
+            .bind(user)
+            .fetch_optional(tx.conn())
+            .await;
+            match here {
+                Ok(None) => Error::Conflict(
+                    "A timer is already running in another workspace. Stop it there, then try again.".into(),
+                ),
+                _ => Error::Conflict("Another entry is already running.".into()),
+            }
         }
         _ => Error::Db(err),
     }

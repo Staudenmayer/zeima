@@ -273,8 +273,10 @@ pub fn is_internal_host(lower: &str) -> bool {
 pub fn host_of_address(address: &str) -> Option<String> {
     let rest = address.trim();
     let rest = rest.split_once("://").map_or(rest, |(_, r)| r);
-    let rest = rest.rsplit_once('@').map_or(rest, |(_, r)| r);
-    let host = rest.split(['/', '?', '#', ':']).next()?.to_ascii_lowercase();
+    // The authority ends at the first slash, backslash, '?' or '#' (a backslash counts as a slash, as in the url crate).
+    let authority = rest.split(['/', '\\', '?', '#']).next()?;
+    let rest = authority.rsplit_once('@').map_or(authority, |(_, r)| r);
+    let host = rest.split(':').next()?.to_ascii_lowercase();
     let ok = host.contains('.')
         && !host.starts_with('.')
         && !host.ends_with('.')
@@ -707,6 +709,11 @@ auth_params = { access_type = "offline", prompt = "consent" }
         );
         assert_eq!(
             host_of_address("http://user:pw@example.org:8080/x").as_deref(),
+            Some("example.org")
+        );
+        // A backslash ends the authority like a slash, so what follows it is not the host.
+        assert_eq!(
+            host_of_address("http://example.org\\@127.0.0.1/x").as_deref(),
             Some("example.org")
         );
         assert_eq!(host_of_address("localhost"), None);

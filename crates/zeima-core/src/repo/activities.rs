@@ -148,11 +148,12 @@ impl Core {
                FROM time_entry e
                JOIN activity a ON a.id = e.activity_id AND a.deleted_at IS NULL AND a.archived = 0
                LEFT JOIN project p ON p.id = e.project_id
-              WHERE e.user_id = ? AND e.deleted_at IS NULL
+              WHERE e.workspace_id = ? AND e.user_id = ? AND e.deleted_at IS NULL
                 AND (e.project_id IS NULL OR (p.deleted_at IS NULL AND p.status != 'archived'))
               ORDER BY e.start_at DESC
               LIMIT 500",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .fetch_all(self.pool())
         .await?;

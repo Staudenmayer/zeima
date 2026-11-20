@@ -8,6 +8,8 @@ import type { Db } from '../../db/index.ts'
 import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { ORG_ROLES, type RoleKey } from '../../plugins/permissions.ts'
+import { lockPushOrder } from '../../db/locks.ts'
+import { forgetMembership } from './roles.ts'
 import { purgeMemberOrgData } from './service.ts'
 
 export interface ReconcileResult {
@@ -54,7 +56,11 @@ export async function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: st
   // Members Keycloak does not know of a role for are plain members.
   const rows = users.map((u) => ({ user: u, role: roleOf(u.id, roles) ?? 'member' }))
 
+  const ids = users.map((u) => u.id)
+  const gone = [...knownBefore].filter((id) => !ids.includes(id))
   await db.transaction(async (tx) => {
+    // Pushes finish first or see the memberships gone (only taken when somebody leaves).
+    if (gone.length > 0) await lockPushOrder(tx)
     for (const { user, role } of rows) {
       await tx
         .insert(schema.kcUser)
@@ -69,8 +75,6 @@ export async function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: st
         .values({ orgId, userId: user.id, role })
         .onConflictDoUpdate({ target: [schema.kcOrgMember.orgId, schema.kcOrgMember.userId], set: { role } })
     }
-    const ids = users.map((u) => u.id)
-    const gone = [...knownBefore].filter((id) => !ids.includes(id))
     await tx
       .delete(schema.kcOrgMember)
       .where(and(eq(schema.kcOrgMember.orgId, orgId), ids.length ? notInArray(schema.kcOrgMember.userId, ids) : undefined))
@@ -89,6 +93,7 @@ export async function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: st
       if (members.length) await tx.insert(schema.kcGroupMember).values(members.map((userId) => ({ groupId: d.id, userId })))
     }
   })
+  for (const id of new Set([...ids, ...gone])) forgetMembership(id)
   // A disabled account stops working now, not when its token runs out.
   let signedOut = 0
   for (const u of users) {

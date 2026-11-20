@@ -1,9 +1,9 @@
 // Shared workspace of an organization: who may write and see which rows.
 
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { schema } from '../src/db/index.ts'
-import { testApp, token } from './helpers.ts'
+import { syncMirror, testApp, token } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -20,9 +20,11 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
   let app: Awaited<ReturnType<typeof testApp>>
   let ws: string
 
-  const headers = async (sub: string) => ({
-    authorization: `Bearer ${await token({ sub, email: `${sub.slice(-1)}@example.com`, groups: ROLES[sub] ? [`/orgs/${ORG}/roles/${ROLES[sub]}`, ...(GROUPS[sub] ?? [])] : [] })}`,
-  })
+  const headers = async (sub: string) => {
+    const groups = ROLES[sub] ? [`/orgs/${ORG}/roles/${ROLES[sub]}`, ...(GROUPS[sub] ?? [])] : []
+    await syncMirror(db.db, sub, groups)
+    return { authorization: `Bearer ${await token({ sub, email: `${sub.slice(-1)}@example.com`, groups })}` }
+  }
   const push = async (sub: string, changes: unknown[]) =>
     app.inject({ method: 'POST', url: '/v1/sync/push', headers: await headers(sub), payload: { workspaceId: ws, deviceId: DEVICE, changes } })
   const upsert = (table: string, rowId: string, h: number, fields: Record<string, unknown>) => ({ table, rowId, op: 'upsert', hlc: hlc(h), fields })
@@ -310,6 +312,36 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       // Calling the first meeting off frees the room again.
       expect(await results(MANAGER, [upsert('meeting', RM1, 830, { cancelled: true })])).toEqual(applied)
       expect(await results(ANNA, [upsert('meeting', RM2, 840, { roomId: ROOM })])).toEqual(applied)
+    })
+
+    it('check a room quickly and exactly when it is booked by many repeating meetings', async () => {
+      const ROOM = id(95)
+      const DAY = 86_400_000, HOUR = 3_600_000
+      const at = Date.UTC(2027, 5, 1, 8)
+      expect(await results(ADMIN, [upsert('room', ROOM, 900, { name: 'Red room', capacity: 4 })])).toEqual([{ status: 'applied' }])
+      const stamp = (v: unknown) => ({ v, h: hlc(901) })
+      const daily = Array.from({ length: 300 }, (_, i) => ({
+        workspaceId: ws,
+        tableName: 'meeting',
+        rowId: id(5000 + i),
+        deleted: null,
+        fields: Object.fromEntries(Object.entries({ userId: MANAGER, title: 'Daily', startAt: at - i * DAY, endAt: at - i * DAY + HOUR, tz: 'UTC', note: '', rrule: 'FREQ=DAILY', attendeeIds: [], cancelled: false, roomId: ROOM }).map(([k, v]) => [k, stamp(v)])),
+      }))
+      await db.db.insert(schema.syncRow).values(daily)
+      const single = (n: number, startAt: number) => upsert('meeting', id(6000 + n), 910 + n, { userId: ANNA, title: 'One', startAt, endAt: startAt + HOUR, tz: 'UTC', note: '', rrule: null, attendeeIds: [], cancelled: false, roomId: ROOM })
+      // Clashes far into the repeat are found; the hour after is free.
+      expect(await results(ANNA, [single(0, at + 90 * DAY + HOUR / 2)])).toEqual([{ status: 'rejected', reason: 'room_taken' }])
+      expect(await results(ANNA, [single(1, at + 90 * DAY + HOUR)])).toEqual([{ status: 'applied' }])
+      // Many changes at once finish quickly (the cost used to grow with meetings times repeats times changes).
+      const free = Array.from({ length: 50 }, (_, i) => single(10 + i, at + (i + 1) * DAY + 3 * HOUR))
+      const began = performance.now()
+      const out = await results(ANNA, free)
+      const took = performance.now() - began
+      expect(out.every((r) => r.status === 'applied')).toBe(true)
+      expect(took).toBeLessThan(1000)
+      // Leave the shared workspace as it was for the tests that follow.
+      const mine = [...daily.map((d) => d.rowId), id(6000), id(6001), ...free.map((c) => c.rowId), ROOM]
+      await db.db.delete(schema.syncRow).where(and(eq(schema.syncRow.workspaceId, ws), inArray(schema.syncRow.rowId, mine)))
     })
 
     it('tell others when someone is busy, and nothing more', async () => {

@@ -149,18 +149,33 @@ fn model_str(model: ScheduleModel) -> &'static str {
 /// too, because of the rest-time check). `to = None` invalidates all later days.
 pub(crate) async fn invalidate_days(
     conn: &mut SqliteConnection,
+    workspace_id: &str,
     user_id: &str,
     from: NaiveDate,
     to: Option<NaiveDate>,
 ) -> Result<()> {
     let to = to.map(|d| d + Duration::days(1)).unwrap_or(NaiveDate::MAX);
-    sqlx::query("DELETE FROM daily_summary WHERE user_id = ? AND date >= ? AND date <= ?")
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .execute(conn)
-        .await?;
+    sqlx::query(
+        "DELETE FROM daily_summary WHERE workspace_id = ? AND user_id = ? AND date >= ? AND date <= ?",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .bind(from)
+    .bind(to)
+    .execute(conn)
+    .await?;
     Ok(())
+}
+
+/// `invalidate_days` for the workspace of the transaction.
+async fn invalidate_days_tx(
+    tx: &mut WriteTx<'_>,
+    user_id: &str,
+    from: NaiveDate,
+    to: Option<NaiveDate>,
+) -> Result<()> {
+    let workspace = tx.ctx().workspace_id.clone();
+    invalidate_days(tx.conn(), &workspace, user_id, from, to).await
 }
 
 /// Invalidates the days touched by an entry spanning `[start, end]`.
@@ -169,7 +184,7 @@ pub(crate) async fn invalidate_entry_days(tx: &mut WriteTx<'_>, start: i64, end:
     let user = tx.ctx().user_id.clone();
     let from = worktime::local_date(start, tz);
     let to = end.map(|e| worktime::local_date(e, tz));
-    invalidate_days(tx.conn(), &user, from, to).await
+    invalidate_days_tx(tx, &user, from, to).await
 }
 
 async fn invalidate_all(tx: &mut WriteTx<'_>) -> Result<()> {
@@ -287,8 +302,9 @@ impl Core {
 
         let user = tx.ctx().user_id.clone();
         let has_schedule: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM work_schedule WHERE user_id = ? AND deleted_at IS NULL)",
+            "SELECT EXISTS (SELECT 1 FROM work_schedule WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL)",
         )
+        .bind(tx.ctx().workspace_id.clone())
         .bind(&user)
         .fetch_one(tx.conn())
         .await?;
@@ -308,8 +324,9 @@ impl Core {
 
     pub async fn work_settings(&self) -> Result<WorkSettings> {
         let json: Option<String> = sqlx::query_scalar(
-            "SELECT settings_json FROM work_settings WHERE user_id = ? AND deleted_at IS NULL",
+            "SELECT settings_json FROM work_settings WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .fetch_optional(self.pool())
         .await?;
@@ -324,11 +341,13 @@ impl Core {
         settings.validate()?;
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
-        let existing: Option<String> =
-            sqlx::query_scalar("SELECT id FROM work_settings WHERE user_id = ? AND deleted_at IS NULL")
-                .bind(&user)
-                .fetch_optional(tx.conn())
-                .await?;
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM work_settings WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL",
+        )
+        .bind(tx.ctx().workspace_id.clone())
+        .bind(&user)
+        .fetch_optional(tx.conn())
+        .await?;
         let id = existing.unwrap_or_else(crate::ids::new_id);
         let s = tx.stamp();
         sqlx::query(
@@ -361,8 +380,9 @@ impl Core {
     pub async fn list_schedules(&self) -> Result<Vec<WorkSchedule>> {
         let rows = sqlx::query(
             "SELECT id, valid_from, model, days_json FROM work_schedule
-             WHERE user_id = ? AND deleted_at IS NULL ORDER BY valid_from",
+             WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY valid_from",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .fetch_all(self.pool())
         .await?;
@@ -383,15 +403,16 @@ impl Core {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let valid_from: Option<NaiveDate> = sqlx::query_scalar(
-            "SELECT valid_from FROM work_schedule WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT valid_from FROM work_schedule WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
         )
         .bind(id)
         .bind(&user)
+        .bind(tx.ctx().workspace_id.clone())
         .fetch_optional(tx.conn())
         .await?;
         let valid_from = valid_from.ok_or_else(|| not_found("schedule", id))?;
         soft_delete(&mut tx, "work_schedule", id).await?;
-        invalidate_days(tx.conn(), &user, valid_from, None).await?;
+        invalidate_days_tx(&mut tx, &user, valid_from, None).await?;
         tx.commit().await
     }
 
@@ -483,11 +504,15 @@ impl Core {
 
     pub async fn delete_absence_type(&self, id: &str) -> Result<()> {
         let mut tx = self.begin().await?;
-        let row = sqlx::query("SELECT key FROM absence_type WHERE id = ? AND deleted_at IS NULL")
-            .bind(id)
-            .fetch_optional(tx.conn())
-            .await?
-            .ok_or_else(|| not_found("absence type", id))?;
+        let ws = tx.ctx().workspace_id.clone();
+        let row = sqlx::query(
+            "SELECT key FROM absence_type WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .bind(&ws)
+        .fetch_optional(tx.conn())
+        .await?
+        .ok_or_else(|| not_found("absence type", id))?;
         if row.try_get::<Option<String>, _>("key")?.is_some() {
             return Err(Error::Conflict(
                 "Built-in absence types cannot be deleted.".into(),
@@ -510,9 +535,10 @@ impl Core {
     pub async fn list_absences(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Absence>> {
         let rows = sqlx::query(
             "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note, decided_by, decision_note FROM absence
-             WHERE user_id = ? AND deleted_at IS NULL AND start_date <= ? AND end_date >= ?
+             WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL AND start_date <= ? AND end_date >= ?
              ORDER BY start_date",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .bind(to)
         .bind(from)
@@ -577,10 +603,11 @@ impl Core {
             Some(id) => {
                 let row = sqlx::query(
                     "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note, decided_by, decision_note FROM absence
-                     WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+                     WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
                 )
                 .bind(id)
                 .bind(&user)
+                .bind(tx.ctx().workspace_id.clone())
                 .fetch_optional(tx.conn())
                 .await?
                 .ok_or_else(|| not_found("absence", id))?;
@@ -639,7 +666,7 @@ impl Core {
         let to = previous
             .as_ref()
             .map_or(absence.end_date, |p| p.end_date.max(absence.end_date));
-        invalidate_days(tx.conn(), &user, from, Some(to)).await?;
+        invalidate_days_tx(&mut tx, &user, from, Some(to)).await?;
         tx.commit().await?;
         Ok(absence)
     }
@@ -674,7 +701,7 @@ impl Core {
              WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
         )
         .bind(id)
-        .bind(&tx.ctx().workspace_id)
+        .bind(tx.ctx().workspace_id.clone())
         .fetch_optional(tx.conn())
         .await?
         .ok_or_else(|| not_found("absence", id))?;
@@ -695,7 +722,7 @@ impl Core {
         absence.decision_note = note.trim().to_string();
         sqlx::query(
             "UPDATE absence SET status = ?, decided_by = ?, decision_note = ?, updated_at = ?, hlc = ?, origin_device = ?
-             WHERE id = ?",
+             WHERE id = ? AND workspace_id = ?",
         )
         .bind(absence.status.as_str())
         .bind(&absence.decided_by)
@@ -704,11 +731,12 @@ impl Core {
         .bind(&s.hlc)
         .bind(&s.device)
         .bind(id)
+        .bind(tx.ctx().workspace_id.clone())
         .execute(tx.conn())
         .await?;
         tx.log_upsert("absence", id, &s, &absence).await?;
-        invalidate_days(
-            tx.conn(),
+        invalidate_days_tx(
+            &mut tx,
             &absence.user_id,
             absence.start_date,
             Some(absence.end_date),
@@ -722,16 +750,17 @@ impl Core {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let row = sqlx::query(
-            "SELECT start_date, end_date FROM absence WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT start_date, end_date FROM absence WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
         )
         .bind(id)
         .bind(&user)
+        .bind(tx.ctx().workspace_id.clone())
         .fetch_optional(tx.conn())
         .await?
         .ok_or_else(|| not_found("absence", id))?;
         let (from, to): (NaiveDate, NaiveDate) = (row.try_get("start_date")?, row.try_get("end_date")?);
         soft_delete(&mut tx, "absence", id).await?;
-        invalidate_days(tx.conn(), &user, from, Some(to)).await?;
+        invalidate_days_tx(&mut tx, &user, from, Some(to)).await?;
         tx.commit().await
     }
 
@@ -785,22 +814,25 @@ impl Core {
         .await?;
         tx.log_upsert("custom_holiday", &h.id, &s, &h).await?;
         let user = tx.ctx().user_id.clone();
-        invalidate_days(tx.conn(), &user, date, Some(date)).await?;
+        invalidate_days_tx(&mut tx, &user, date, Some(date)).await?;
         tx.commit().await?;
         Ok(h)
     }
 
     pub async fn delete_custom_holiday(&self, id: &str) -> Result<()> {
         let mut tx = self.begin().await?;
-        let date: Option<NaiveDate> =
-            sqlx::query_scalar("SELECT date FROM custom_holiday WHERE id = ? AND deleted_at IS NULL")
-                .bind(id)
-                .fetch_optional(tx.conn())
-                .await?;
+        let ws = tx.ctx().workspace_id.clone();
+        let date: Option<NaiveDate> = sqlx::query_scalar(
+            "SELECT date FROM custom_holiday WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .bind(&ws)
+        .fetch_optional(tx.conn())
+        .await?;
         let date = date.ok_or_else(|| not_found("holiday", id))?;
         soft_delete(&mut tx, "custom_holiday", id).await?;
         let user = tx.ctx().user_id.clone();
-        invalidate_days(tx.conn(), &user, date, Some(date)).await?;
+        invalidate_days_tx(&mut tx, &user, date, Some(date)).await?;
         tx.commit().await
     }
 
@@ -837,8 +869,9 @@ impl Core {
     pub async fn list_adjustments(&self) -> Result<Vec<BalanceAdjustment>> {
         let rows = sqlx::query(
             "SELECT id, date, minutes, reason FROM balance_adjustment
-             WHERE user_id = ? AND deleted_at IS NULL ORDER BY date DESC",
+             WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY date DESC",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .fetch_all(self.pool())
         .await?;
@@ -890,7 +923,7 @@ impl Core {
         .execute(tx.conn())
         .await?;
         tx.log_upsert("balance_adjustment", &a.id, &s, &a).await?;
-        invalidate_days(tx.conn(), &user, a.date, Some(a.date)).await?;
+        invalidate_days_tx(&mut tx, &user, a.date, Some(a.date)).await?;
         tx.commit().await?;
         Ok(a)
     }
@@ -900,15 +933,16 @@ impl Core {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let date: Option<NaiveDate> = sqlx::query_scalar(
-            "SELECT date FROM balance_adjustment WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+            "SELECT date FROM balance_adjustment WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
         )
         .bind(id)
         .bind(&user)
+        .bind(tx.ctx().workspace_id.clone())
         .fetch_optional(tx.conn())
         .await?;
         let date = date.ok_or_else(|| not_found("adjustment", id))?;
         soft_delete(&mut tx, "balance_adjustment", id).await?;
-        invalidate_days(tx.conn(), &user, date, Some(date)).await?;
+        invalidate_days_tx(&mut tx, &user, date, Some(date)).await?;
         tx.commit().await
     }
 
@@ -927,8 +961,10 @@ impl Core {
         if from <= cache_to {
             let rows = sqlx::query(
                 "SELECT data FROM daily_summary
-                 WHERE user_id = ? AND date >= ? AND date <= ? AND profile_version = ? ORDER BY date",
+                 WHERE workspace_id = ? AND user_id = ? AND date >= ? AND date <= ? AND profile_version = ?
+                 ORDER BY date",
             )
+            .bind(&self.ctx().workspace_id)
             .bind(&self.ctx().user_id)
             .bind(from)
             .bind(cache_to)
@@ -957,11 +993,12 @@ impl Core {
         let mut tx = self.pool().begin().await?;
         for day in days.iter().filter(|d| d.date < today) {
             sqlx::query(
-                "INSERT INTO daily_summary (user_id, date, data, profile_version, computed_at)
-                 VALUES (?, ?, ?, ?, ?)
-                 ON CONFLICT (user_id, date) DO UPDATE SET data = excluded.data,
+                "INSERT INTO daily_summary (workspace_id, user_id, date, data, profile_version, computed_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (workspace_id, user_id, date) DO UPDATE SET data = excluded.data,
                     profile_version = excluded.profile_version, computed_at = excluded.computed_at",
             )
+            .bind(&self.ctx().workspace_id)
             .bind(&self.ctx().user_id)
             .bind(day.date)
             .bind(serde_json::to_string(day)?)
@@ -1164,10 +1201,11 @@ async fn write_schedule(
     let previous_from: Option<NaiveDate> = match id {
         Some(id) => Some(
             sqlx::query_scalar(
-                "SELECT valid_from FROM work_schedule WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+                "SELECT valid_from FROM work_schedule WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
             )
             .bind(id)
             .bind(&user)
+            .bind(tx.ctx().workspace_id.clone())
             .fetch_optional(tx.conn())
             .await?
             .ok_or_else(|| not_found("schedule", id))?,
@@ -1206,7 +1244,7 @@ async fn write_schedule(
     tx.log_upsert("work_schedule", &schedule.id, &s, &schedule)
         .await?;
     let from = previous_from.map_or(schedule.valid_from, |p| p.min(schedule.valid_from));
-    invalidate_days(tx.conn(), &user, from, None).await?;
+    invalidate_days_tx(tx, &user, from, None).await?;
     Ok(schedule)
 }
 

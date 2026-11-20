@@ -25,45 +25,129 @@ fn canonical_segments(rest: &str) -> bool {
     rest.split('/').all(|s| !s.is_empty() && s != ".")
 }
 
-/// Whether the app may send this request: a known method and a plain path
-/// below `/v1/orgs` (or exactly `/v1/me`), without tricks.
+/// What the app does with a request below `/v1/orgs`: `None` when no such route exists, `Some(None)` when it is sent
+/// as is, `Some(Some(text))` when the app asks the person first (own dialog text, English / German). Every route is
+/// listed with exactly the methods the server has for it, so the web view cannot reach any other combination.
+fn org_route(method: &str, segments: &[&str]) -> Option<Option<&'static str>> {
+    const DELETE_ORG: &str = "Delete this organization, its memberships and its shared data? This cannot be undone.\n\nDiese Organisation samt Mitgliedschaften und gemeinsamen Daten löschen? Das lässt sich nicht rückgängig machen.";
+    const MEMBER: &str = "Change this member's role or deactivate their account?\n\nRolle dieses Mitglieds ändern oder das Konto deaktivieren?";
+    const REMOVE_MEMBER: &str =
+        "Remove this member from the organization?\n\nDieses Mitglied aus der Organisation entfernen?";
+    const DELETE_ROLE: &str = "Delete this role? Members who hold it lose its permissions.\n\nDiese Rolle löschen? Mitglieder, die sie haben, verlieren ihre Rechte.";
+    const ADDONS: &str = "Change which add-ons this organization allows?\n\nÄndern, welche Add-ons diese Organisation erlaubt?";
+    const DELETE_SSO: &str = "Remove the single sign-on setup of this organization?\n\nDie Single-Sign-on-Einrichtung dieser Organisation entfernen?";
+    const SSO: &str = "Change the single sign-on setup of this organization?\n\nDie Single-Sign-on-Einrichtung dieser Organisation ändern?";
+    const DELETE_TOKEN: &str = "Revoke this provisioning token?\n\nDieses Provisionierungs-Token widerrufen?";
+    let open = Some(None);
+    let ask = |t| Some(Some(t));
+    match (segments, method) {
+        ([], "GET" | "POST") => open,
+        ([_], "GET") => open,
+        ([_], "DELETE") => ask(DELETE_ORG),
+        (
+            [_, "members" | "invitations" | "groups" | "people" | "jobs" | "directory" | "roles" | "audit"],
+            "GET",
+        ) => open,
+        ([_, "presence"], "GET" | "PUT") => open,
+        ([_, "scim" | "addons"], "GET") => open,
+        ([_, "addons"], "PUT") => ask(ADDONS),
+        ([_, "sso"], "GET") => open,
+        ([_, "sso"], "PUT") => ask(SSO),
+        ([_, "sso"], "DELETE") => ask(DELETE_SSO),
+        ([_, "invitations" | "groups" | "jobs" | "roles"], "POST") => open,
+        ([_, "reconcile" | "freebusy"], "POST") => open,
+        ([_, "rooms", "bookings"], "POST") => open,
+        ([_, "scim", "tokens"], "POST") => open,
+        ([_, "scim", "tokens", _], "DELETE") => ask(DELETE_TOKEN),
+        ([_, "members", _], "PATCH") => ask(MEMBER),
+        ([_, "members", _], "DELETE") => ask(REMOVE_MEMBER),
+        ([_, "members", _, "job"], "PUT") => open,
+        ([_, "invitations" | "groups" | "jobs", _], "PATCH" | "DELETE") => open,
+        ([_, "roles", _], "PATCH") => open,
+        ([_, "roles", _], "DELETE") => ask(DELETE_ROLE),
+        ([_, "groups", _, "members", _], "PUT" | "DELETE") => open,
+        _ => None,
+    }
+}
+
+fn org_segments(path: &str) -> Option<Vec<&str>> {
+    let rest = path.strip_prefix("/v1/orgs")?;
+    let rest = rest.split('?').next().unwrap_or("");
+    if rest.is_empty() {
+        return Some(Vec::new());
+    }
+    let rest = rest.strip_prefix('/')?;
+    canonical_segments(rest).then(|| rest.split('/').collect())
+}
+
+/// Whether the app may send this request: a known route with a method it has, and a plain path (`/v1/me`, the
+/// company directory, or below `/v1/orgs`), without tricks.
 pub fn allowed(method: &str, path: &str) -> bool {
     let plain = path.is_ascii()
         && !path.contains("..")
         && !path.contains("//")
         && !path.contains('\\')
+        // A path parameter (`;x=y`) is read by some servers and proxies as part of the segment.
+        && !path.contains(';')
         // Percent-encoded dots and slashes (%2e%2e, %2f) would pass the checks above and be decoded by the server.
         && !path.contains('%')
         && !path
             .chars()
             .any(|c| c.is_whitespace() || c.is_control() || c == '#');
-    let target = path == "/v1/me"
-        || path == "/v1/me/avatar"
-        || path == "/v1/admin/ldap"
-        || path == "/v1/admin/ldap/test"
-        || path == "/v1/admin/ldap/sync"
-        || path == "/v1/orgs"
-        || path.strip_prefix("/v1/orgs/").is_some_and(canonical_segments);
-    // `/v1/me` is read-only; the profile picture can be set (PUT) and removed (DELETE).
-    let method_ok = match path {
+    if !plain || !METHODS.contains(&method) {
+        return false;
+    }
+    match path {
         "/v1/me" => method == "GET",
+        // The profile picture can be set (PUT) and removed (DELETE).
         "/v1/me/avatar" => method == "PUT" || method == "DELETE",
         // The company directory of a self-hosted installation (its administrators only; the server decides).
         "/v1/admin/ldap" => method == "GET" || method == "PUT" || method == "DELETE",
         "/v1/admin/ldap/test" | "/v1/admin/ldap/sync" => method == "POST",
-        _ => true,
-    };
-    METHODS.contains(&method) && plain && target && method_ok
+        _ => org_segments(path).is_some_and(|s| org_route(method, &s).is_some()),
+    }
 }
 
-/// Whether the app itself asks the person before sending this: deleting a whole organization cannot be undone, and
-/// must not depend on the web view alone (script running in it could otherwise send it).
-pub fn needs_confirmation(method: &str, path: &str) -> bool {
-    let path = path.split('?').next().unwrap_or("");
-    method == "DELETE"
-        && path
-            .strip_prefix("/v1/orgs/")
-            .is_some_and(|rest| canonical_segments(rest) && !rest.contains('/'))
+/// The text of the native question the app asks the person before sending this, if any: destructive organization
+/// changes must not depend on the web view alone (script running in it could otherwise send them). It names the
+/// organization and the member, role or token concerned (as sent, shortened), so the person sees what is changed.
+pub fn confirmation(method: &str, path: &str) -> Option<String> {
+    const LDAP: &str = "Change or remove the company directory? People may no longer be able to sign in with it.\n\nDas Firmenverzeichnis ändern oder entfernen? Personen können sich eventuell nicht mehr damit anmelden.";
+    let bare = path.split('?').next().unwrap_or("");
+    if bare == "/v1/admin/ldap" && (method == "PUT" || method == "DELETE") {
+        return Some(LDAP.to_string());
+    }
+    let segments = org_segments(path)?;
+    let text = org_route(method, &segments).flatten()?;
+    Some(format!("{text}\n\n{}", target(&segments)))
+}
+
+/// Shortens an id taken from the path for display.
+fn short(id: &str) -> String {
+    const MAX: usize = 40;
+    if id.chars().count() > MAX {
+        format!("{}…", id.chars().take(MAX).collect::<String>())
+    } else {
+        id.to_string()
+    }
+}
+
+/// Which organization, and which member, role or token, a request names.
+fn target(segments: &[&str]) -> String {
+    let mut out = String::new();
+    if let Some(org) = segments.first() {
+        out.push_str(&format!("Organization / Organisation: {}", short(org)));
+    }
+    let label = match segments {
+        [_, "members", _, ..] => Some("Member / Mitglied"),
+        [_, "roles", _] => Some("Role / Rolle"),
+        [_, "scim", "tokens", _] => Some("Token"),
+        _ => None,
+    };
+    if let (Some(label), Some(id)) = (label, segments.last()) {
+        out.push_str(&format!("\n{label}: {}", short(id)));
+    }
+    out
 }
 
 async fn confirm(app: &AppHandle, text: &str) -> bool {
@@ -74,7 +158,7 @@ async fn confirm(app: &AppHandle, text: &str) -> bool {
         .title("Zeima")
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
-            "Delete / Löschen".into(),
+            "Confirm / Bestätigen".into(),
             "Cancel / Abbrechen".into(),
         ))
         .show(move |yes| {
@@ -136,14 +220,10 @@ pub async fn org_request(
     if !allowed(&method, &path) {
         return Err(err("forbidden", "this request is not allowed"));
     }
-    if needs_confirmation(&method, &path)
-        && !confirm(
-            &app,
-            "Delete this organization, its memberships and its shared data? This cannot be undone.\n\nDiese Organisation samt Mitgliedschaften und gemeinsamen Daten löschen? Das lässt sich nicht rückgängig machen.",
-        )
-        .await
-    {
-        return Err(err("cancelled", "not deleted"));
+    if let Some(text) = confirmation(&method, &path) {
+        if !confirm(&app, &text).await {
+            return Err(err("cancelled", "not confirmed"));
+        }
     }
     let Some((server, token)) = account::current_token(&app).await.map_err(|e| err("server", e))? else {
         return Err(err("signed_out", "sign in to manage an organization"));
@@ -186,13 +266,103 @@ pub async fn org_request(
 
 #[cfg(test)]
 mod tests {
-    use super::{allowed, needs_confirmation};
+    use super::{allowed, confirmation};
 
     #[test]
-    fn only_deleting_an_organization_is_confirmed_by_the_app() {
-        assert!(needs_confirmation("DELETE", "/v1/orgs/0b2f"));
-        assert!(!needs_confirmation("DELETE", "/v1/orgs/0b2f/members/8a1c"));
-        assert!(!needs_confirmation("GET", "/v1/orgs/0b2f"));
+    fn route_table_methods_and_confirmations() {
+        // (method, path, allowed, confirmed by the app)
+        let table = [
+            ("GET", "/v1/orgs", true, false),
+            ("POST", "/v1/orgs", true, false),
+            ("DELETE", "/v1/orgs", false, false),
+            ("PUT", "/v1/orgs", false, false),
+            ("PATCH", "/v1/orgs", false, false),
+            ("GET", "/v1/orgs/o", true, false),
+            ("DELETE", "/v1/orgs/o", true, true),
+            ("PATCH", "/v1/orgs/o", false, false),
+            ("GET", "/v1/orgs/o/members?limit=5", true, false),
+            ("POST", "/v1/orgs/o/members", false, false),
+            ("PATCH", "/v1/orgs/o/members/u", true, true),
+            ("DELETE", "/v1/orgs/o/members/u", true, true),
+            ("PUT", "/v1/orgs/o/members/u/job", true, false),
+            ("DELETE", "/v1/orgs/o/audit", false, false),
+            ("GET", "/v1/orgs/o/audit?limit=1", true, false),
+            ("PUT", "/v1/orgs/o/addons", true, true),
+            ("GET", "/v1/orgs/o/addons", true, false),
+            ("DELETE", "/v1/orgs/o/addons", false, false),
+            ("PATCH", "/v1/orgs/o/roles/r", true, false),
+            ("DELETE", "/v1/orgs/o/roles/r", true, true),
+            ("PUT", "/v1/orgs/o/sso", true, true),
+            ("DELETE", "/v1/orgs/o/sso", true, true),
+            ("DELETE", "/v1/orgs/o/scim/tokens/t", true, true),
+            ("POST", "/v1/orgs/o/scim/tokens", true, false),
+            ("PUT", "/v1/orgs/o/groups/g/members/u", true, false),
+            ("DELETE", "/v1/orgs/o/jobs/j", true, false),
+            ("GET", "/v1/orgs/o/unknown", false, false),
+            ("PUT", "/v1/admin/ldap", true, true),
+            ("DELETE", "/v1/admin/ldap", true, true),
+            ("GET", "/v1/admin/ldap", true, false),
+            ("POST", "/v1/admin/ldap/test", true, false),
+            // Invitations: list, create, change, withdraw; no confirmation. No GET of a single one, no PUT.
+            ("GET", "/v1/orgs/o/invitations", true, false),
+            ("POST", "/v1/orgs/o/invitations", true, false),
+            ("PATCH", "/v1/orgs/o/invitations/i", true, false),
+            ("DELETE", "/v1/orgs/o/invitations/i", true, false),
+            ("GET", "/v1/orgs/o/invitations/i", false, false),
+            ("PUT", "/v1/orgs/o/invitations/i", false, false),
+            ("PATCH", "/v1/orgs/o/invitations", false, false),
+            ("DELETE", "/v1/orgs/o/invitations", false, false),
+            // Groups: create, rename, delete, and members in and out; no confirmation.
+            ("GET", "/v1/orgs/o/groups", true, false),
+            ("POST", "/v1/orgs/o/groups", true, false),
+            ("PATCH", "/v1/orgs/o/groups/g", true, false),
+            ("DELETE", "/v1/orgs/o/groups/g", true, false),
+            ("PUT", "/v1/orgs/o/groups/g", false, false),
+            ("GET", "/v1/orgs/o/groups/g", false, false),
+            ("DELETE", "/v1/orgs/o/groups", false, false),
+            ("PUT", "/v1/orgs/o/groups/g/members/u", true, false),
+            ("DELETE", "/v1/orgs/o/groups/g/members/u", true, false),
+            ("POST", "/v1/orgs/o/groups/g/members/u", false, false),
+            ("PATCH", "/v1/orgs/o/groups/g/members/u", false, false),
+            ("GET", "/v1/orgs/o/groups/g/members/u", false, false),
+            ("PUT", "/v1/orgs/o/groups/g/members", false, false),
+            // Jobs: list, create, change, delete; no confirmation.
+            ("GET", "/v1/orgs/o/jobs", true, false),
+            ("POST", "/v1/orgs/o/jobs", true, false),
+            ("PATCH", "/v1/orgs/o/jobs/j", true, false),
+            ("DELETE", "/v1/orgs/o/jobs/j", true, false),
+            ("PUT", "/v1/orgs/o/jobs/j", false, false),
+            ("GET", "/v1/orgs/o/jobs/j", false, false),
+            ("DELETE", "/v1/orgs/o/jobs", false, false),
+            // SCIM keys: the list is `GET .../scim`; making one (a credential) is sent unconfirmed today, revoking asks.
+            ("GET", "/v1/orgs/o/scim", true, false),
+            ("GET", "/v1/orgs/o/scim/tokens", false, false),
+            ("POST", "/v1/orgs/o/scim/tokens", true, false),
+            ("DELETE", "/v1/orgs/o/scim/tokens", false, false),
+            ("PATCH", "/v1/orgs/o/scim/tokens", false, false),
+            ("PUT", "/v1/orgs/o/scim/tokens/t", false, false),
+            ("PATCH", "/v1/orgs/o/scim/tokens/t", false, false),
+            ("GET", "/v1/orgs/o/scim/tokens/t", false, false),
+            ("POST", "/v1/orgs/o/scim/tokens/t", false, false),
+            ("DELETE", "/v1/orgs/o/scim", false, false),
+        ];
+        for (m, p, ok, ask) in table {
+            assert_eq!(allowed(m, p), ok, "allowed {m} {p}");
+            if ok {
+                assert_eq!(confirmation(m, p).is_some(), ask, "confirmation {m} {p}");
+            }
+        }
+    }
+
+    #[test]
+    fn confirmations_name_the_target() {
+        let text = confirmation("DELETE", "/v1/orgs/org-1/members/user-9").unwrap();
+        assert!(text.contains("org-1") && text.contains("user-9"), "{text}");
+        let text = confirmation("DELETE", "/v1/orgs/org-1").unwrap();
+        assert!(text.contains("org-1"), "{text}");
+        let long = "a".repeat(200);
+        let text = confirmation("DELETE", &format!("/v1/orgs/{long}")).unwrap();
+        assert!(text.len() < 400 && !text.contains(&long), "{text}");
     }
 
     #[test]
@@ -202,7 +372,10 @@ mod tests {
         assert!(!allowed("DELETE", "/v1/orgs/x/./"));
         assert!(!allowed("DELETE", "/v1/orgs/x/."));
         assert!(!allowed("GET", "/v1/orgs/./x"));
-        assert!(!needs_confirmation("DELETE", "/v1/orgs/x/"));
+        assert!(!allowed("DELETE", "/v1/orgs/x;a=b"));
+        assert!(!allowed("DELETE", "/v1/orgs/x/members/u;a=b"));
+        assert!(!allowed("GET", "/v1/orgs/x/members;a=b"));
+        assert!(confirmation("DELETE", "/v1/orgs/x/").is_none());
         assert!(allowed("DELETE", "/v1/orgs/x"));
         assert!(allowed("GET", "/v1/orgs/x/members?limit=5"));
         assert!(allowed("GET", "/v1/orgs"));
@@ -214,7 +387,7 @@ mod tests {
         assert!(allowed("POST", "/v1/orgs"));
         assert!(allowed("GET", "/v1/orgs/0b2f/members"));
         assert!(allowed("PATCH", "/v1/orgs/0b2f/members/8a1c"));
-        assert!(allowed("DELETE", "/v1/orgs/0b2f/audit?before=5&limit=10"));
+        assert!(allowed("GET", "/v1/orgs/0b2f/audit?before=5&limit=10"));
         assert!(!allowed("POST", "/v1/me"));
         assert!(!allowed("GET", "/v1/entitlement"));
         assert!(allowed("PUT", "/v1/me/avatar"));

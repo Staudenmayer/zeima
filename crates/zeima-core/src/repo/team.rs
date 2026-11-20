@@ -148,7 +148,7 @@ impl Core {
         .await?;
         let mut out = Vec::with_capacity(ids.len());
         for id in ids {
-            out.push(super::fetch_entry(self.pool(), user_id, &id).await?);
+            out.push(super::fetch_entry(self.pool(), &self.ctx().workspace_id, user_id, &id).await?);
         }
         Ok(out)
     }

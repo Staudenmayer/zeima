@@ -6,7 +6,7 @@ import { schema } from '../src/db/index.ts'
 import { ensureOrgWorkspace } from '../src/modules/orgs/service.ts'
 import { sign } from '../src/modules/internal/routes.ts'
 import { FakeKeycloak } from './fake-keycloak.ts'
-import { keys, token } from './helpers.ts'
+import { keys, syncMirror, token } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -29,15 +29,19 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     })
 
   /** Calls the API as `userId` with `role` in the test organization. */
-  const as = async (userId: string, role: string | null, extra: { email?: string; verified?: boolean; groups?: string[] } = {}) => ({
-    authorization: `Bearer ${await token({
-      sub: userId,
-      name: NAMES[userId] ?? 'Someone',
-      email: extra.email ?? `${userId.slice(-1)}@example.com`,
-      email_verified: extra.verified ?? true,
-      groups: [...(role ? [`/orgs/${ORG}/roles/${role}`] : []), ...(extra.groups ?? [])],
-    })}`,
-  })
+  const as = async (userId: string, role: string | null, extra: { email?: string; verified?: boolean; groups?: string[] } = {}) => {
+    const groups = [...(role ? [`/orgs/${ORG}/roles/${role}`] : []), ...(extra.groups ?? [])]
+    await syncMirror(db.db, userId, groups)
+    return {
+      authorization: `Bearer ${await token({
+        sub: userId,
+        name: NAMES[userId] ?? 'Someone',
+        email: extra.email ?? `${userId.slice(-1)}@example.com`,
+        email_verified: extra.verified ?? true,
+        groups,
+      })}`,
+    }
+  }
   const call = async (method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', url: string, userId: string, role: string | null, payload?: object) =>
     app.inject({ method, url, headers: await as(userId, role), payload })
 
@@ -118,6 +122,36 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     expect((await rowsOf(extra.personalWs)).entries).toEqual([MANAGER])
   })
 
+  /** What stays in the organization's workspace when a person goes: their rows other than entries and pauses. */
+  const RETAINED = ['absence', 'work_schedule', 'work_settings', 'balance_adjustment', 'work_location', 'meeting', 'meeting_response']
+  const seedRetained = async (ws: string, userId: string, k: number) => {
+    for (const [i, table] of RETAINED.entries()) {
+      await db.db.insert(schema.syncRow).values({ workspaceId: ws, tableName: table, rowId: id(k * 100 + i + 3000000), fields: { userId: { v: userId, h: 'h' } } })
+    }
+  }
+  const retainedOf = async (ws: string) =>
+    (await db.db.select().from(schema.syncRow).where(and(eq(schema.syncRow.workspaceId, ws), inArray(schema.syncRow.tableName, RETAINED)))).map((r) => r.tableName).sort()
+  /** With the token the person still holds: pulling returns nothing of the workspace and pushing is refused. */
+  const lockedOut = async (userId: string, orgWs: string, headers: { authorization: string }) => {
+    const pulled = (await app.inject({ url: '/v1/sync/pull', headers })).json().rows as { workspaceId: string }[]
+    expect(pulled.filter((r) => r.workspaceId === orgWs)).toEqual([])
+    const pushed = await app.inject({ method: 'POST', url: '/v1/sync/push', headers, payload: { workspaceId: orgWs, deviceId: id(801), changes: [] } })
+    expect([403, 404], `push as ${userId}: ${pushed.statusCode}`).toContain(pushed.statusCode)
+  }
+
+  it('keeps the organization\'s other records of a leaver and a removed member, who lose access to the workspace', async () => {
+    await reset()
+    const { orgWs } = await seedData(MEMBER, OWNER)
+    await seedRetained(orgWs, MEMBER, 1)
+    await seedRetained(orgWs, MANAGER, 2)
+    const stale = { member: await as(MEMBER, 'member'), manager: await as(MANAGER, 'manager') }
+    expect((await call('DELETE', `/v1/orgs/${ORG}/members/${MEMBER}`, MEMBER, 'member')).statusCode).toBe(204)
+    expect((await call('DELETE', `/v1/orgs/${ORG}/members/${MANAGER}`, ADMIN, 'admin')).statusCode).toBe(204)
+    expect(await retainedOf(orgWs)).toEqual([...RETAINED, ...RETAINED].sort())
+    await lockedOut(MEMBER, orgWs, stale.member)
+    await lockedOut(MANAGER, orgWs, stale.manager)
+  })
+
   it('never leaves an organization without an owner when two owners step down at the same moment', async () => {
     await reset()
     // Admin Adam becomes the second owner; then the two owners demote each other at once, many times over.
@@ -196,7 +230,8 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       { groupId: g!.id, userId: MEMBER },
     ])
     expect(await names(MANAGER, 'manager', [group])).toEqual(['Max', 'Mia'])
-    expect(await names(MANAGER, 'manager')).toEqual(['Mia'])
+    // Departments come from the mirror, not from the token.
+    expect(await names(MANAGER, 'manager')).toEqual(['Max', 'Mia'])
   })
 
   describe('keeping the mirror in line with Keycloak', () => {
@@ -532,7 +567,7 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       // Others see only their own departments.
       const mine = await app.inject({ url: `/v1/orgs/${ORG}/groups`, headers: await as(MEMBER, 'member', { groups: [`/orgs/${ORG}/groups/dev/backend`] }) })
       expect(mine.json().map((g: { path: string }) => g.path)).toEqual(['dev/backend'])
-      expect((await call('GET', `/v1/orgs/${ORG}/groups`, MEMBER, 'member')).json()).toEqual([])
+      expect((await call('GET', `/v1/orgs/${ORG}/groups`, MEMBER, 'member')).json().map((g: { path: string }) => g.path)).toEqual(['dev/backend'])
 
       expect((await call('DELETE', `/v1/orgs/${ORG}/groups/${gid}/members/${MEMBER}`, ADMIN, 'admin')).statusCode).toBe(204)
       expect(await db.db.select().from(schema.kcGroupMember)).toEqual([])
@@ -642,6 +677,39 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     })
   })
 
+  describe('directory email addresses', () => {
+    it('are shown to group-scoped readers only for people sharing a group', async () => {
+      await reset()
+      const g = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'dev' })).json()
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MEMBER}`, ADMIN, 'admin')
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MANAGER}`, ADMIN, 'admin')
+      const res = await app.inject({
+        method: 'GET',
+        url: `/v1/orgs/${ORG}/directory`,
+        headers: await as(MANAGER, 'manager', { groups: [`/orgs/${ORG}/groups/dev`] }),
+      })
+      const rows = res.json() as { id: string; email: string | null }[]
+      expect(rows.length).toBeGreaterThanOrEqual(4)
+      expect(rows.filter((r) => r.email !== null).map((r) => r.id).sort()).toEqual([MANAGER, MEMBER].sort())
+    })
+
+    it('are shown to own-scoped and scopeless readers for themselves only, even with group-mates', async () => {
+      await reset()
+      const g = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'dev' })).json()
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MEMBER}`, ADMIN, 'admin')
+      await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${MANAGER}`, ADMIN, 'admin')
+      for (const [name, permissions] of [['Self reader', { 'member.read': 'own' }], ['Nothing', {}]] as const) {
+        const key = (await call('POST', `/v1/orgs/${ORG}/roles`, OWNER, 'owner', { name, permissions })).json().key as string
+        expect((await call('PATCH', `/v1/orgs/${ORG}/members/${MEMBER}`, OWNER, 'owner', { role: key })).statusCode).toBe(200)
+        const res = await app.inject({ method: 'GET', url: `/v1/orgs/${ORG}/directory`, headers: await as(MEMBER, key, { groups: [`/orgs/${ORG}/groups/dev`] }) })
+        expect(res.statusCode).toBe(200)
+        const rows = res.json() as { id: string; email: string | null }[]
+        expect(rows.length).toBeGreaterThanOrEqual(4)
+        expect(rows.filter((r) => r.email !== null).map((r) => r.id)).toEqual([MEMBER])
+      }
+    })
+  })
+
   describe('roles made of permissions', () => {
     const roles = (uid: string, role: string | null, method: 'GET' | 'POST', payload?: object) => call(method, `/v1/orgs/${ORG}/roles`, uid, role, payload)
     const editor = { 'role.view': 'org', 'role.edit': 'org', 'role.assign': 'org', 'role.delete': 'org', 'member.read': 'org', 'project.write': 'org' }
@@ -687,6 +755,26 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect((await call('GET', '/v1/me', MEMBER, key)).json().orgs[0].permissions).toEqual({ 'role.view': 'org' })
     })
 
+    it('are deleted only by someone who holds what they allow, and a Keycloak failure leaves them', async () => {
+      await reset()
+      const big = (await roles(OWNER, 'owner', 'POST', { name: 'Billing', permissions: { 'billing.manage': 'org' } })).json().key as string
+      await call('PATCH', `/v1/orgs/${ORG}/members/${MEMBER}`, OWNER, 'owner', { role: big })
+      const del = (uid: string, role: string, key: string) => call('DELETE', `/v1/orgs/${ORG}/roles/${key}`, uid, role)
+      expect((await del(ADMIN, 'admin', big)).statusCode).toBe(403)
+      const holder = () => db.db.select().from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, ORG), eq(schema.kcOrgMember.userId, MEMBER)))
+      expect(await holder()).toMatchObject([{ role: big }])
+      // A role that manages roles is only deleted by an owner.
+      const lead = (await roles(OWNER, 'owner', 'POST', { name: 'Role keeper', permissions: { 'role.edit': 'org' } })).json().key as string
+      expect((await del(ADMIN, 'admin', lead)).statusCode).toBe(403)
+      // A Keycloak failure leaves the role and its holders.
+      kc.failNext = 'deleteRole'
+      expect((await del(OWNER, 'owner', big)).statusCode).toBe(502)
+      expect(await holder()).toMatchObject([{ role: big }])
+      expect((await call('GET', `/v1/orgs/${ORG}/roles`, OWNER, 'owner')).json().roles.map((r: { key: string }) => r.key)).toContain(big)
+      expect((await del(OWNER, 'owner', big)).statusCode).toBe(204)
+      expect(await holder()).toMatchObject([{ role: 'member' }])
+    })
+
     it('are given out under the same rule, and the built-in ones can be changed except the owner', async () => {
       await reset()
       const key = (await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', permissions: { 'project.write': 'org' } })).json().key as string
@@ -716,9 +804,9 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     it('are deleted by those who may; the built-in ones stay and the people fall back to member', async () => {
       await reset()
       const key = (await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', permissions: { 'project.write': 'org' } })).json().key as string
-      await db.db.update(schema.kcOrgMember).set({ role: key }).where(eq(schema.kcOrgMember.userId, MEMBER))
       expect((await call('DELETE', `/v1/orgs/${ORG}/roles/${key}`, MEMBER, 'member')).statusCode).toBe(403)
       expect((await call('DELETE', `/v1/orgs/${ORG}/roles/admin`, OWNER, 'owner')).statusCode).toBe(409)
+      await db.db.update(schema.kcOrgMember).set({ role: key }).where(eq(schema.kcOrgMember.userId, MEMBER))
       kc.calls = []
       expect((await call('DELETE', `/v1/orgs/${ORG}/roles/${key}`, ADMIN, 'admin')).statusCode).toBe(204)
       expect(kc.calls).toEqual([`setRole ${ORG} ${MEMBER} member`, `deleteRole ${ORG} ${key}`])

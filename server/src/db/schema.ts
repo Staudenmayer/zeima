@@ -144,6 +144,8 @@ export const kcOrgMember = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.orgId, t.userId] }),
+    // Requests look up a person's memberships.
+    index('kc_org_member_user').on(t.userId),
   ],
 )
 

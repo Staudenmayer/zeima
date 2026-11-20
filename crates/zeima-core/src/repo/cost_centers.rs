@@ -83,10 +83,11 @@ pub(crate) async fn resolve_cost_center(
     candidates.extend(
         sqlx::query_scalar::<_, String>(
             "SELECT cost_center_id FROM cost_center_assignment
-             WHERE user_id = ? AND deleted_at IS NULL
+             WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL
                AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)
              ORDER BY valid_from DESC",
         )
+        .bind(&ws)
         .bind(&user)
         .bind(date)
         .bind(date)
@@ -193,8 +194,9 @@ impl Core {
     pub async fn list_cost_center_assignments(&self) -> Result<Vec<CostCenterAssignment>> {
         let rows = sqlx::query(
             "SELECT id, cost_center_id, valid_from, valid_to FROM cost_center_assignment
-             WHERE user_id = ? AND deleted_at IS NULL ORDER BY valid_from DESC",
+             WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY valid_from DESC",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .fetch_all(self.pool())
         .await?;
@@ -224,7 +226,7 @@ impl Core {
             sqlx::query(
                 "UPDATE cost_center_assignment SET cost_center_id = ?, valid_from = ?, valid_to = ?,
                     updated_at = ?, hlc = ?, origin_device = ?
-                 WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+                 WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL",
             )
             .bind(&a.cost_center_id)
             .bind(a.valid_from)
@@ -234,6 +236,7 @@ impl Core {
             .bind(&s.device)
             .bind(&a.id)
             .bind(&user)
+            .bind(&ws)
             .execute(tx.conn())
             .await?
         } else {
@@ -267,10 +270,11 @@ impl Core {
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
         let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM cost_center_assignment WHERE id = ? AND user_id = ? AND deleted_at IS NULL)",
+            "SELECT EXISTS (SELECT 1 FROM cost_center_assignment WHERE id = ? AND user_id = ? AND workspace_id = ? AND deleted_at IS NULL)",
         )
         .bind(id)
         .bind(&user)
+        .bind(tx.ctx().workspace_id.clone())
         .fetch_one(tx.conn())
         .await?;
         if !exists {

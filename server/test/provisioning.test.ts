@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
@@ -233,6 +233,56 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       expect(org.pauses).toEqual([ADMIN])
       expect(org.sync).toEqual([ADMIN])
       expect((await rowsOf(personalWs)).entries).toEqual([person])
+      for (const t of [schema.pause, schema.timeEntry, schema.syncRow]) await db.db.delete(t)
+      await db.db.delete(schema.workspace)
+    })
+
+    /** What stays in the organization's workspace when a person goes: their rows other than entries and pauses. */
+    const RETAINED = ['absence', 'work_schedule', 'work_settings', 'balance_adjustment', 'work_location', 'meeting', 'meeting_response']
+    const seedRetained = async (ws: string, userId: string, k: number) => {
+      for (const [i, table] of RETAINED.entries()) {
+        await db.db.insert(schema.syncRow).values({ workspaceId: ws, tableName: table, rowId: id(k * 100 + i + 3000000), fields: { userId: { v: userId, h: 'h' } } })
+      }
+    }
+    const retainedOf = async (ws: string) =>
+      (await db.db.select().from(schema.syncRow).where(and(eq(schema.syncRow.workspaceId, ws), inArray(schema.syncRow.tableName, RETAINED)))).map((r) => r.tableName).sort()
+    /** With the token the person still holds: pulling returns nothing of the workspace and pushing is refused. */
+    const lockedOut = async (userId: string, orgWs: string, headers: { authorization: string }) => {
+      const pulled = (await app.inject({ url: '/v1/sync/pull', headers })).json().rows as { workspaceId: string }[]
+      expect(pulled.filter((r) => r.workspaceId === orgWs)).toEqual([])
+      const pushed = await app.inject({ method: 'POST', url: '/v1/sync/push', headers, payload: { workspaceId: orgWs, deviceId: id(801), changes: [] } })
+      expect([403, 404], `push as ${userId}: ${pushed.statusCode}`).toContain(pushed.statusCode)
+    }
+
+    it('keeps the organization\'s other records of a person SCIM removes, who loses access to the workspace', async () => {
+      const person = id(67)
+      await db.db.insert(schema.kcUser).values({ id: person, email: 'p67@acme.example', displayName: 'P' }).onConflictDoNothing()
+      await db.db.insert(schema.kcOrgMember).values({ orgId: ORG, userId: person, role: 'member' })
+      const { orgWs } = await seedData(person, ADMIN)
+      await seedRetained(orgWs, person, 1)
+      const stale = await as(person, 'member')
+      expect((await scim('DELETE', `/Users/${person}`)).statusCode).toBe(204)
+      expect(await retainedOf(orgWs)).toEqual([...RETAINED].sort())
+      await lockedOut(person, orgWs, stale)
+      for (const t of [schema.pause, schema.timeEntry, schema.syncRow]) await db.db.delete(t)
+      await db.db.delete(schema.workspace)
+    })
+
+    it('keeps the organization\'s other records of a person a check against Keycloak finds gone', async () => {
+      const person = id(68)
+      await db.db.insert(schema.kcUser).values({ id: person, email: 'p68@acme.example', displayName: 'P' }).onConflictDoNothing()
+      await db.db.insert(schema.kcOrgMember).values({ orgId: ORG, userId: person, role: 'member' })
+      const { orgWs } = await seedData(person, ADMIN)
+      await seedRetained(orgWs, person, 1)
+      const stale = await as(person, 'member')
+      const members = (await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, ORG))).filter((m) => m.userId !== person)
+      kc.members = members.map((m) => ({ id: m.userId, email: `${m.userId.slice(-1)}@example.com`, name: m.userId, enabled: true }))
+      kc.roles = { owner: [], admin: [], manager: [], member: [], ...Object.fromEntries(['owner', 'admin', 'manager', 'member'].map((r) => [r, members.filter((m) => m.role === r).map((m) => m.userId)])) }
+      await reconcileOrganization(db.db, kc, ORG)
+      expect((await db.db.select().from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, ORG), eq(schema.kcOrgMember.userId, person)))).length).toBe(0)
+      expect(await retainedOf(orgWs)).toEqual([...RETAINED].sort())
+      expect((await rowsOf(orgWs)).entries).toEqual([ADMIN])
+      await lockedOut(person, orgWs, stale)
       for (const t of [schema.pause, schema.timeEntry, schema.syncRow]) await db.db.delete(t)
       await db.db.delete(schema.workspace)
     })

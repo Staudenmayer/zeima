@@ -1028,7 +1028,7 @@ export default {
     reactivate: 'Reactivate account',
     remove: 'Remove from organization',
     removeConfirm: 'Remove {name} from the organization?',
-    removeHint: 'Their account and their own data stay; they lose access to the organization.',
+    removeHint: 'Their account and personal data stay. They lose access, and their copy of the organization\'s data is deleted from their devices. The organization keeps its records on the server, except their time entries and pauses, which are deleted.',
     noInvitations: 'No pending invitations.',
     withdraw: 'Withdraw invitation',
     invitationHint: 'People get their role when they sign in with the invited address. A pending invitation uses a seat.',

@@ -29,7 +29,7 @@ use super::sync_ids::{local_of_canonical, reference_in, remember, rule, Rule, RE
 use super::sync_outbox::{is_local_field, SYNCED_TABLES};
 use crate::hlc;
 use crate::sync::{merge_state, RowState, Versioned};
-use crate::{Core, Result};
+use crate::{Core, Error, Result};
 
 /// One row of `GET /v1/sync/pull`.
 #[derive(Debug, Clone, Deserialize)]
@@ -171,15 +171,24 @@ fn friendly_conflict(message: &str) -> String {
 /// A typed row as JSON with the sync's field names, or `None` if it is missing.
 async fn local_row_fields(
     conn: &mut SqliteConnection,
+    workspace_id: &str,
     table: &str,
     id: &str,
 ) -> Result<Option<BTreeMap<String, Value>>> {
     let cols = columns(conn, table).await?;
-    let Some(row) = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT * FROM {table} WHERE id = ?")))
-        .bind(id)
-        .fetch_optional(&mut *conn)
-        .await?
-    else {
+    let scope = if cols.contains("workspace_id") {
+        " AND workspace_id = ?"
+    } else {
+        ""
+    };
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT * FROM {table} WHERE id = ?{scope}"
+    )))
+    .bind(id);
+    if !scope.is_empty() {
+        query = query.bind(workspace_id);
+    }
+    let Some(row) = query.fetch_optional(&mut *conn).await? else {
         return Ok(None);
     };
     let mut out = BTreeMap::new();
@@ -215,6 +224,26 @@ async fn local_row_fields(
         }
     }
     Ok(Some(out))
+}
+
+/// Whether `id` is a row of `table` in a workspace other than `workspace_id`.
+async fn row_in_other_workspace(
+    conn: &mut SqliteConnection,
+    workspace_id: &str,
+    table: &str,
+    id: &str,
+) -> Result<bool> {
+    if !columns(conn, table).await?.contains("workspace_id") {
+        return Ok(false);
+    }
+    let other: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT count(*) > 0 FROM {table} WHERE id = ? AND workspace_id != ?"
+    )))
+    .bind(id)
+    .bind(workspace_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(other)
 }
 
 /// `budget_warn_pct` → `budgetWarnPct`.
@@ -442,6 +471,14 @@ impl Core {
             let local_id = self
                 .resolve_local(&mut tx, &row.table, &row.row_id, &merged)
                 .await?;
+            // An id that belongs to another workspace on this device is never taken over.
+            if row_in_other_workspace(&mut tx, &self.ctx().workspace_id, &row.table, &local_id).await? {
+                eprintln!(
+                    "skipped a synced {} row whose id belongs to another workspace",
+                    row.table
+                );
+                continue;
+            }
             let local_row = RemoteRow {
                 row_id: local_id.clone(),
                 ..row.clone()
@@ -585,12 +622,19 @@ impl Core {
     ) -> Result<Written> {
         let table = row.table.as_str();
         let cols = columns(conn, table).await?;
-        let exists: bool = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT count(*) > 0 FROM {table} WHERE id = ?"
+        let scope = if cols.contains("workspace_id") {
+            " AND workspace_id = ?"
+        } else {
+            ""
+        };
+        let mut exists_query = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) > 0 FROM {table} WHERE id = ?{scope}"
         )))
-        .bind(&row.row_id)
-        .fetch_one(&mut *conn)
-        .await?;
+        .bind(&row.row_id);
+        if !scope.is_empty() {
+            exists_query = exists_query.bind(self.ctx().workspace_id.clone());
+        }
+        let exists: bool = exists_query.fetch_one(&mut *conn).await?;
 
         // A row deleted on the server still takes the newer field values:
         // an edit that comes later may bring it back to life, and the fields
@@ -699,6 +743,14 @@ impl Core {
                 if column == "id" || !cols.contains(&column) {
                     continue;
                 }
+                // A web address that does not parse is dropped, not stored.
+                if table == "meeting" && name == "onlineUrl" {
+                    if let Value::String(text) = &field.v {
+                        if super::meetings::valid_online_url(text).is_none() {
+                            continue;
+                        }
+                    }
+                }
                 // References to rows that have other ids on this device.
                 let reference = REFERENCES
                     .iter()
@@ -773,7 +825,7 @@ impl Core {
         // would trip NOT NULL before the conflict clause is reached.
         let sql = if exists {
             format!(
-                "UPDATE {table} SET {sets} WHERE id = ?",
+                "UPDATE {table} SET {sets} WHERE id = ?{scope}",
                 sets = names
                     .iter()
                     .map(|c| format!("{c} = ?"))
@@ -801,11 +853,29 @@ impl Core {
         }
         if exists {
             query = query.bind(&row.row_id);
+            if !scope.is_empty() {
+                query = query.bind(self.ctx().workspace_id.clone());
+            }
         }
         query.execute(&mut *conn).await?;
 
         if table == "time_entry" {
             if let Some(Value::Array(ids)) = write.get("tagIds").map(|f| &f.v) {
+                // A tag of another workspace on this device is never linked (a tag not known yet is fine).
+                for id in ids.iter().filter_map(Value::as_str) {
+                    let elsewhere: Option<i64> =
+                        sqlx::query_scalar("SELECT 1 FROM tag WHERE id = ? AND workspace_id != ?")
+                            .bind(id)
+                            .bind(&self.ctx().workspace_id)
+                            .fetch_optional(&mut *conn)
+                            .await?;
+                    if elsewhere.is_some() {
+                        return Err(Error::validation(
+                            "tagIds",
+                            "refers to a tag of another workspace",
+                        ));
+                    }
+                }
                 sqlx::query("DELETE FROM time_entry_tag WHERE entry_id = ?")
                     .bind(&row.row_id)
                     .execute(&mut *conn)
@@ -867,7 +937,7 @@ impl Core {
         let mut conn = self.pool().acquire().await?;
         let state = load_state(&mut conn, table, row_id).await?;
         let local_id = self.resolve_local(&mut conn, table, row_id, &state).await?;
-        let local = local_row_fields(&mut conn, table, &local_id).await?;
+        let local = local_row_fields(&mut conn, &self.ctx().workspace_id, table, &local_id).await?;
 
         let mut fields: Vec<(String, Value)> = Vec::new();
         for (name, versioned) in &state.fields {

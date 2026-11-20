@@ -105,7 +105,29 @@ fn get_json(url: &str, token: &str) -> Result<serde_json::Value, String> {
     serde_json::from_str(&text).map_err(|e| format!("the server's answer: {e}"))
 }
 
-fn post_json(url: &str, token: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
+/// A failed request: the HTTP status when the server answered, and the message shown to the person.
+#[derive(Debug, Clone, PartialEq)]
+struct HttpFailure {
+    status: Option<u16>,
+    message: String,
+}
+
+impl From<String> for HttpFailure {
+    fn from(message: String) -> Self {
+        Self {
+            status: None,
+            message,
+        }
+    }
+}
+
+impl From<HttpFailure> for String {
+    fn from(f: HttpFailure) -> Self {
+        f.message
+    }
+}
+
+fn post_json(url: &str, token: &str, body: &serde_json::Value) -> Result<serde_json::Value, HttpFailure> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(HTTP_TIMEOUT))
@@ -117,13 +139,19 @@ fn post_json(url: &str, token: &str, body: &serde_json::Value) -> Result<serde_j
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .send(body.to_string())
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| HttpFailure::from(e.to_string()))?;
     let status = response.status().as_u16();
-    let text = response.body_mut().read_to_string().map_err(|e| e.to_string())?;
+    let text = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| HttpFailure::from(e.to_string()))?;
     if !(200..300).contains(&status) {
-        return Err(format!("the server answered {status}: {text}"));
+        return Err(HttpFailure {
+            status: Some(status),
+            message: format!("the server answered {status}: {text}"),
+        });
     }
-    serde_json::from_str(&text).map_err(|e| format!("the server's answer: {e}"))
+    serde_json::from_str(&text).map_err(|e| format!("the server's answer: {e}").into())
 }
 
 #[derive(Deserialize)]
@@ -203,11 +231,14 @@ async fn push_all(
     api: &str,
     token: &str,
     workspace_id: &str,
-) -> Result<usize, String> {
+) -> Result<usize, HttpFailure> {
     let device_id = core.ctx().device_id.clone();
     let mut sent = 0;
     for _ in 0..MAX_BATCHES {
-        let outbox = core.sync_outbox(SYNC_BATCH).await.map_err(|e| e.to_string())?;
+        let outbox = core
+            .sync_outbox(SYNC_BATCH)
+            .await
+            .map_err(|e| HttpFailure::from(e.to_string()))?;
         if outbox.is_empty() {
             break;
         }
@@ -222,15 +253,15 @@ async fn push_all(
             let (url, tok) = (format!("{api}/v1/sync/push"), token.to_string());
             let answer = tauri::async_runtime::spawn_blocking(move || post_json(&url, &tok, &body))
                 .await
-                .map_err(|e| e.to_string())??;
+                .map_err(|e| HttpFailure::from(e.to_string()))??;
             serde_json::from_value::<PushAnswer>(answer)
-                .map_err(|e| format!("the server's answer: {e}"))?
+                .map_err(|e| HttpFailure::from(format!("the server's answer: {e}")))?
                 .results
         };
         sent += outbox.changes.len();
         core.sync_mark_pushed(&outbox, &results)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| HttpFailure::from(e.to_string()))?;
     }
     Ok(sent)
 }
@@ -360,15 +391,79 @@ async fn refresh_entitlement(app: &AppHandle, api: &str, token: &str) {
     }
 }
 
+/// Whether the server's refusal of a push means the membership is really gone (forbidden / not found), as opposed
+/// to a passing failure (server error, offline) after which the data must be kept.
+fn membership_gone(error: &HttpFailure) -> bool {
+    matches!(error.status, Some(403 | 404))
+}
+
+/// `local_meta` key recording which server and account an organization's workspace was synced with.
+fn org_owner_key(workspace_id: &str) -> String {
+    format!("org_owner:{workspace_id}")
+}
+
+/// The value recorded for a workspace synced against this server (API origin) as this account.
+fn org_owner_value(api: &str, user_id: &str) -> String {
+    format!("{api}|{user_id}")
+}
+
+/// Whether a workspace's unsent changes may be pushed to this server with this account's token: only when it was
+/// recorded as belonging to exactly this server and account. A workspace without a record (adopted before records
+/// existed) counts as this account's when the account this device last synced as is the same one; the server it
+/// belongs to was not recorded then. Anything else (other server, other account, nobody known) must never be
+/// sent anywhere.
+fn may_push_pending(recorded: Option<&str>, previous_user: Option<&str>, api: &str, user_id: &str) -> bool {
+    match recorded {
+        Some(r) => r == org_owner_value(api, user_id),
+        None => previous_user == Some(user_id),
+    }
+}
+
+/// Whether a workspace missing from the server's list may be dropped: nothing waits to be pushed, or the push
+/// worked, or the server says the membership is gone. Otherwise its unsent changes are kept for the next sync.
+fn may_drop(had_pending: bool, push: &Result<usize, HttpFailure>) -> bool {
+    !had_pending || push.as_ref().is_ok() || push.as_ref().is_err_and(membership_gone)
+}
+
 /// Removes the organizations' workspaces on this device that the server no longer lists for this account,
-/// with their data. If the person was working in one, they are taken back to their personal workspace first.
-async fn drop_gone_workspaces(app: &AppHandle, listed: &[ServerWorkspace]) -> Result<(), String> {
+/// with their data. Changes not yet sent are pushed first; a workspace whose push fails for another reason than
+/// a lost membership stays until the next sync. If the person was working in one, they are taken back to their
+/// personal workspace first.
+async fn drop_gone_workspaces(
+    app: &AppHandle,
+    api: &str,
+    token: &str,
+    user_id: &str,
+    previous_user: Option<&str>,
+    listed: &[ServerWorkspace],
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     let local = state.core.workspaces().await.map_err(|e| e.to_string())?;
     let mut removed = false;
     for w in local.iter().filter(|w| w.kind == "org") {
         if listed.iter().any(|s| s.id == w.id) {
             continue;
+        }
+        let scope = state.core.scoped(&w.id, user_id);
+        let had_pending = !scope.sync_outbox(1).await.map_err(|e| e.to_string())?.is_empty();
+        let recorded = state
+            .core
+            .get_meta(&org_owner_key(&w.id))
+            .await
+            .map_err(|e| e.to_string())?;
+        // Unsent changes of a workspace that belongs to another server or account are dropped, never sent here.
+        if had_pending && may_push_pending(recorded.as_deref(), previous_user, api, user_id) {
+            if recorded.is_none() {
+                state
+                    .core
+                    .set_meta(&org_owner_key(&w.id), &org_owner_value(api, user_id))
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            let push = push_all(&scope, api, token, &w.id).await;
+            if !may_drop(true, &push) {
+                continue;
+            }
         }
         if state.data().ctx().workspace_id == w.id {
             crate::workspaces::go_personal(app).await;
@@ -401,6 +496,11 @@ async fn adopt_shared_workspaces(
         .await
         .map_err(|e| e.to_string())??;
     let core = &app.state::<AppState>().core;
+    // Which account the shared workspaces belonged to until now: read before it is overwritten below.
+    let previous_user = core
+        .get_meta(crate::workspaces::ACCOUNT_USER_KEY)
+        .await
+        .map_err(|e| e.to_string())?;
     // Which account the shared workspaces belong to, for switching offline.
     core.set_meta(crate::workspaces::ACCOUNT_USER_KEY, &user.id)
         .await
@@ -413,7 +513,7 @@ async fn adopt_shared_workspaces(
     let listed = serde_json::from_value::<Vec<ServerWorkspace>>(list)
         .map_err(|e| format!("the server's answer: {e}"))?;
     // Only after a good answer: organizations the person left, or was removed from, vanish with their data.
-    drop_gone_workspaces(app, &listed).await?;
+    drop_gone_workspaces(app, api, token, &user.id, previous_user.as_deref(), &listed).await?;
     let mut shared = Vec::new();
     for w in listed.into_iter().filter(|w| w.kind == "org") {
         let Some(org_id) = w.org_id.as_deref() else {
@@ -425,6 +525,9 @@ async fn adopt_shared_workspaces(
             .or(user.email.clone())
             .unwrap_or_else(|| "Me".into());
         core.adopt_org_workspace(&w.id, org_id, &w.name, &user.id, &name)
+            .await
+            .map_err(|e| e.to_string())?;
+        core.set_meta(&org_owner_key(&w.id), &org_owner_value(api, &user.id))
             .await
             .map_err(|e| e.to_string())?;
         shared.push((w.id.clone(), core.scoped(&w.id, &user.id)));
@@ -910,6 +1013,56 @@ mod tests {
             SyncErrorKind::UpdateNeeded
         );
         assert_eq!(classify("the server answered 500: oops"), SyncErrorKind::Server);
+    }
+
+    #[test]
+    fn a_gone_workspace_with_unsent_changes_is_dropped_only_when_the_membership_is_gone() {
+        let failed = |status: Option<u16>, m: &str| {
+            Err::<usize, HttpFailure>(HttpFailure {
+                status,
+                message: m.to_string(),
+            })
+        };
+        // Nothing to push: dropped as before.
+        assert!(may_drop(false, &Ok(0)));
+        // Pushed: dropped.
+        assert!(may_drop(true, &Ok(3)));
+        // Membership really gone, decided by the status and not by the text.
+        assert!(may_drop(true, &failed(Some(403), "forbidden")));
+        assert!(may_drop(true, &failed(Some(404), "not found")));
+        assert!(!may_drop(
+            true,
+            &failed(None, "the server answered 403: forged text")
+        ));
+        // Passing failures keep the data.
+        assert!(!may_drop(true, &failed(Some(500), "oops")));
+        assert!(!may_drop(true, &failed(None, "could not reach the server")));
+        assert!(!may_drop(true, &failed(Some(401), "expired")));
+    }
+
+    #[test]
+    fn unsent_changes_are_pushed_only_to_the_server_and_account_they_belong_to() {
+        let owner = org_owner_value("https://a.example/api", "user-1");
+        let a = "https://a.example/api";
+        assert!(may_push_pending(Some(&owner), None, a, "user-1"));
+        // Another server or another account: never pushed, whatever the last account was.
+        assert!(!may_push_pending(
+            Some(&owner),
+            Some("user-1"),
+            "https://b.example/api",
+            "user-1"
+        ));
+        assert!(!may_push_pending(Some(&owner), Some("user-1"), a, "user-2"));
+        // No record and no known previous account: never pushed.
+        assert!(!may_push_pending(None, None, a, "user-1"));
+    }
+
+    #[test]
+    fn a_workspace_adopted_before_records_existed_is_pushed_for_the_same_account_only() {
+        let a = "https://a.example/api";
+        assert!(may_push_pending(None, Some("user-1"), a, "user-1"));
+        assert!(!may_push_pending(None, Some("user-2"), a, "user-1"));
+        assert!(!may_push_pending(None, None, a, "user-1"));
     }
 
     #[test]

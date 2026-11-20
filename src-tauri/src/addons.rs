@@ -536,6 +536,47 @@ fn config(manifest: &AddonManifest, saved: &BTreeMap<String, String>) -> BTreeMa
         .collect()
 }
 
+/// Hosts from `host_settings` that the person saved with a value of their own. A manifest default is the
+/// add-on's choice, not theirs, so it never makes a host private.
+fn private_hosts(manifest: &AddonManifest, saved: &BTreeMap<String, String>) -> Vec<String> {
+    manifest
+        .host_settings
+        .iter()
+        .filter_map(|key| {
+            let value = saved.get(key)?;
+            let field = manifest.settings.iter().find(|f| &f.key == key)?;
+            if field.default.as_deref().is_some_and(|d| d.trim() == value.trim()) {
+                return None;
+            }
+            zeima_core::addon::host_of_address(value)
+        })
+        .collect()
+}
+
+/// Saved values that are only the previous manifest's default for a host setting: the form saves untouched fields
+/// too, so such a value was never typed by the person. After an update they are dropped, otherwise a changed or
+/// removed default would turn the old one into "typed" and make its host private.
+pub(crate) fn without_old_defaults(
+    old: &AddonManifest,
+    new: &AddonManifest,
+    saved: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut kept = saved.clone();
+    for key in &new.host_settings {
+        let old_default = old
+            .settings
+            .iter()
+            .find(|f| &f.key == key)
+            .and_then(|f| f.default.as_deref());
+        if let (Some(value), Some(default)) = (saved.get(key), old_default) {
+            if value.trim() == default.trim() {
+                kept.remove(key);
+            }
+        }
+    }
+    kept
+}
+
 fn build_plugin(
     services: &HostServices,
     dir: &Path,
@@ -545,15 +586,7 @@ fn build_plugin(
     // Hosts the person typed into a setting may be on their own network (a self-hosted server); the names in the
     // manifest may not (vendor/README-ZEIMA.md).
     let settings = config(manifest, &record.settings);
-    let typed: Vec<String> = manifest
-        .host_settings
-        .iter()
-        .filter_map(|key| {
-            settings
-                .get(key)
-                .and_then(|v| zeima_core::addon::host_of_address(v))
-        })
-        .collect();
+    let typed = private_hosts(manifest, &record.settings);
     let mut wasm_manifest = Manifest::new([Wasm::file(dir.join(&manifest.wasm))])
         .with_timeout(CALL_TIMEOUT)
         .with_memory_max(MEMORY_PAGES)
@@ -1084,6 +1117,58 @@ pub fn start(app: &AppHandle) {
 /// `addons/build.sh csv-export` and `addons/build.sh recent-notes`).
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn manifest_defaults_do_not_make_hosts_private() {
+        let src = "id = \"com.example.feed\"\nname = \"Feed\"\nversion = \"1.0.0\"\nauthor = \"A\"\nwasm = \"a.wasm\"\n\
+            permissions = [\"network\"]\nhost_settings = [\"feed\"]\n\n[[settings]]\nkey = \"feed\"\nlabel = \"Feed\"\n\
+            type = \"text\"\ndefault = \"http://127.0.0.1/x\"\n";
+        let manifest = AddonManifest::parse(src).unwrap();
+        let mut saved = BTreeMap::new();
+        assert!(super::private_hosts(&manifest, &saved).is_empty());
+        saved.insert("feed".to_string(), "http://127.0.0.1/x".to_string());
+        assert!(super::private_hosts(&manifest, &saved).is_empty());
+        saved.insert("feed".to_string(), "http://192.168.1.5/y".to_string());
+        assert_eq!(
+            super::private_hosts(&manifest, &saved),
+            vec!["192.168.1.5".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_saved_old_default_is_dropped_by_an_update_so_its_host_stays_public() {
+        let manifest = |default: &str| {
+            let default = if default.is_empty() {
+                String::new()
+            } else {
+                format!("default = \"{default}\"\n")
+            };
+            AddonManifest::parse(&format!(
+                "id = \"com.example.feed\"\nname = \"Feed\"\nversion = \"1.0.0\"\nauthor = \"A\"\nwasm = \"a.wasm\"\n\
+                permissions = [\"network\"]\nhost_settings = [\"feed\"]\n\n[[settings]]\nkey = \"feed\"\nlabel = \"Feed\"\n\
+                type = \"text\"\n{default}"
+            ))
+            .unwrap()
+        };
+        let (v1, v2) = (
+            manifest("http://127.0.0.1/x"),
+            manifest("https://feeds.example.org/x"),
+        );
+        // v1: the form saved the untouched default.
+        let saved: BTreeMap<String, String> = [("feed".to_string(), "http://127.0.0.1/x".to_string())].into();
+        assert!(super::private_hosts(&v1, &saved).is_empty());
+        // Without the cleanup, v2 would read it as typed.
+        assert_eq!(super::private_hosts(&v2, &saved), vec!["127.0.0.1".to_string()]);
+        let kept = super::without_old_defaults(&v1, &v2, &saved);
+        assert!(super::private_hosts(&v2, &kept).is_empty());
+        assert!(!kept.contains_key("feed"));
+        // The default removed in v2: same.
+        let v3 = manifest("");
+        assert!(super::private_hosts(&v3, &super::without_old_defaults(&v1, &v3, &saved)).is_empty());
+        // A value the person typed stays.
+        let typed: BTreeMap<String, String> = [("feed".to_string(), "http://10.0.0.5/x".to_string())].into();
+        assert_eq!(super::without_old_defaults(&v1, &v2, &typed), typed);
+    }
+
     use zeima_core::clock::ManualClock;
     use zeima_core::model::ProjectInput;
 

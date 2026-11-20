@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Check, CircleAlert, X, CircleCheck, CircleHelp, CircleX, ExternalLink, MapPin, Pencil, Play } from '@lucide/vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { webUrl } from '@/lib/webUrl'
 import { computed, ref, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import { commands, type AddonTimelineItem, type Meeting, type MeetingOccurrence, type RsvpStatus } from '@/bindings'
@@ -145,7 +146,7 @@ async function chooseScope(only: boolean) {
         <p class="tabular-nums text-muted-foreground">{{ format.day(item.startAt) }} · {{ format.time(item.startAt) }}–{{ format.time(item.endAt) }}</p>
         <template v-if="occurrence">
           <p v-if="occurrence.meeting.location" class="flex items-center gap-1.5"><MapPin class="size-4 shrink-0 text-muted-foreground" /> {{ occurrence.meeting.location }}</p>
-          <button v-if="occurrence.meeting.onlineUrl" type="button" class="flex items-center gap-1.5 hover:underline" @click="openUrl(occurrence.meeting.onlineUrl)"><ExternalLink class="size-4 shrink-0 text-muted-foreground" /> {{ $t('meetings.join') }}</button>
+          <button v-if="webUrl(occurrence.meeting.onlineUrl)" type="button" class="flex items-center gap-1.5 hover:underline" @click="openUrl(webUrl(occurrence.meeting.onlineUrl)!)"><ExternalLink class="size-4 shrink-0 text-muted-foreground" /> {{ $t('meetings.join') }}</button>
           <p v-if="occurrence.meeting.projectId && projects.byId.get(occurrence.meeting.projectId)" class="text-muted-foreground">{{ projects.byId.get(occurrence.meeting.projectId)?.name }}</p>
           <p v-if="occurrence.meeting.note" class="text-muted-foreground">{{ occurrence.meeting.note }}</p>
           <div class="grid gap-1.5">

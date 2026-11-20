@@ -37,28 +37,35 @@ fn pause_from_row(r: &SqliteRow) -> Result<Pause> {
     })
 }
 
-async fn fetch_open_pause<'e, E>(executor: E, user_id: &str) -> Result<Option<Pause>>
+async fn fetch_open_pause<'e, E>(executor: E, workspace_id: &str, user_id: &str) -> Result<Option<Pause>>
 where
     E: sqlx::Executor<'e, Database = Sqlite>,
 {
     let row = sqlx::query(concat!(
         "SELECT ",
         pause_columns!(),
-        " FROM pause WHERE user_id = ? AND end_at IS NULL AND deleted_at IS NULL"
+        " FROM pause WHERE workspace_id = ? AND user_id = ? AND end_at IS NULL AND deleted_at IS NULL"
     ))
+    .bind(workspace_id)
     .bind(user_id)
     .fetch_optional(executor)
     .await?;
     row.as_ref().map(pause_from_row).transpose()
 }
 
-pub(crate) async fn fetch_pause(conn: &mut sqlx::SqliteConnection, user_id: &str, id: &str) -> Result<Pause> {
+pub(crate) async fn fetch_pause(
+    conn: &mut sqlx::SqliteConnection,
+    workspace_id: &str,
+    user_id: &str,
+    id: &str,
+) -> Result<Pause> {
     let row = sqlx::query(concat!(
         "SELECT ",
         pause_columns!(),
-        " FROM pause WHERE id = ? AND user_id = ? AND deleted_at IS NULL"
+        " FROM pause WHERE id = ? AND workspace_id = ? AND user_id = ? AND deleted_at IS NULL"
     ))
     .bind(id)
+    .bind(workspace_id)
     .bind(user_id)
     .fetch_optional(conn)
     .await?
@@ -70,16 +77,21 @@ pub(crate) async fn fetch_pause(conn: &mut sqlx::SqliteConnection, user_id: &str
 }
 
 /// Auto-pauses waiting for a decision.
-pub(crate) async fn list_pending_pauses<'e, E>(executor: E, user_id: &str) -> Result<Vec<Pause>>
+pub(crate) async fn list_pending_pauses<'e, E>(
+    executor: E,
+    workspace_id: &str,
+    user_id: &str,
+) -> Result<Vec<Pause>>
 where
     E: sqlx::Executor<'e, Database = Sqlite>,
 {
     let rows = sqlx::query(concat!(
         "SELECT ",
         pause_columns!(),
-        " FROM pause WHERE user_id = ? AND accepted IS NULL AND kind != 'manual' AND deleted_at IS NULL
+        " FROM pause WHERE workspace_id = ? AND user_id = ? AND accepted IS NULL AND kind != 'manual' AND deleted_at IS NULL
           ORDER BY start_at"
     ))
+    .bind(workspace_id)
     .bind(user_id)
     .fetch_all(executor)
     .await?;
@@ -88,7 +100,7 @@ where
 
 pub(crate) async fn insert_pause(tx: &mut WriteTx<'_>, p: &Pause) -> Result<()> {
     let s = tx.stamp();
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO pause (id, workspace_id, user_id, start_at, end_at, kind, resume_entry_id,
             followup_entry_id, applied, accepted, created_at, updated_at, hlc, origin_device)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -108,8 +120,37 @@ pub(crate) async fn insert_pause(tx: &mut WriteTx<'_>, p: &Pause) -> Result<()> 
     .bind(&s.hlc)
     .bind(&s.device)
     .execute(tx.conn())
-    .await?;
+    .await;
+    if let Err(err) = inserted {
+        return Err(open_pause_conflict(tx, err).await);
+    }
     tx.log_upsert("pause", &p.id, &s, p).await
+}
+
+/// A unique-index violation on the open pause. The index is per user, so the open pause may belong to
+/// another workspace of the same account; say so when this workspace has none.
+async fn open_pause_conflict(tx: &mut WriteTx<'_>, err: sqlx::Error) -> Error {
+    match &err {
+        sqlx::Error::Database(db) if db.is_unique_violation() => {
+            let ws = tx.ctx().workspace_id.clone();
+            let user = tx.ctx().user_id.clone();
+            let here: std::result::Result<Option<i64>, sqlx::Error> = sqlx::query_scalar(
+                "SELECT 1 FROM pause
+                 WHERE workspace_id = ? AND user_id = ? AND end_at IS NULL AND deleted_at IS NULL",
+            )
+            .bind(ws)
+            .bind(user)
+            .fetch_optional(tx.conn())
+            .await;
+            match here {
+                Ok(None) => Error::Conflict(
+                    "A pause is already open in another workspace. End it there, then try again.".into(),
+                ),
+                _ => Error::Conflict("A pause is already open.".into()),
+            }
+        }
+        _ => Error::Db(err),
+    }
 }
 
 pub(crate) async fn update_pause(tx: &mut WriteTx<'_>, p: &Pause) -> Result<()> {
@@ -118,10 +159,11 @@ pub(crate) async fn update_pause(tx: &mut WriteTx<'_>, p: &Pause) -> Result<()> 
         updated_at: s.now,
         ..p.clone()
     };
-    sqlx::query(
+    let ws = tx.ctx().workspace_id.clone();
+    let done = sqlx::query(
         "UPDATE pause SET start_at = ?, end_at = ?, followup_entry_id = ?, applied = ?, accepted = ?,
             updated_at = ?, hlc = ?, origin_device = ?
-         WHERE id = ? AND user_id = ?",
+         WHERE id = ? AND user_id = ? AND workspace_id = ?",
     )
     .bind(p.start_at)
     .bind(p.end_at)
@@ -133,20 +175,29 @@ pub(crate) async fn update_pause(tx: &mut WriteTx<'_>, p: &Pause) -> Result<()> 
     .bind(&s.device)
     .bind(&p.id)
     .bind(&p.user_id)
+    .bind(&ws)
     .execute(tx.conn())
     .await?;
+    if done.rows_affected() == 0 {
+        return Err(Error::NotFound {
+            entity: "pause",
+            id: p.id.clone(),
+        });
+    }
     tx.log_upsert("pause", &p.id, &s, &p).await
 }
 
 impl Core {
     pub async fn timer_state(&self) -> Result<TimerState> {
         let user = &self.ctx().user_id;
-        if let Some(entry) = fetch_running(self.pool(), user).await? {
+        if let Some(entry) = fetch_running(self.pool(), &self.ctx().workspace_id, user).await? {
             return Ok(TimerState::Running { entry });
         }
-        if let Some(pause) = fetch_open_pause(self.pool(), user).await? {
+        if let Some(pause) = fetch_open_pause(self.pool(), &self.ctx().workspace_id, user).await? {
             let resume_entry = match &pause.resume_entry_id {
-                Some(id) => fetch_entry(self.pool(), user, id).await.ok(),
+                Some(id) => fetch_entry(self.pool(), &self.ctx().workspace_id, user, id)
+                    .await
+                    .ok(),
                 None => None,
             };
             return Ok(TimerState::Paused { pause, resume_entry });
@@ -213,8 +264,9 @@ impl Core {
             return Err(Error::Conflict("The timer is not paused.".into()));
         };
         let user = tx.ctx().user_id.clone();
+        let ws = tx.ctx().workspace_id.clone();
         let previous = match &pause.resume_entry_id {
-            Some(id) => fetch_entry(tx.conn(), &user, id).await.ok(),
+            Some(id) => fetch_entry(tx.conn(), &ws, &user, id).await.ok(),
             None => None,
         };
         let start = match previous {
@@ -257,12 +309,13 @@ impl Core {
         let ids: Vec<String> = sqlx::query_scalar(
             "SELECT e.project_id FROM time_entry e
                JOIN project p ON p.id = e.project_id
-              WHERE e.user_id = ? AND e.deleted_at IS NULL
+              WHERE e.workspace_id = ? AND e.user_id = ? AND e.deleted_at IS NULL
                 AND p.deleted_at IS NULL AND p.status != 'archived'
               GROUP BY e.project_id
               ORDER BY max(e.start_at) DESC
               LIMIT ?",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .bind(limit)
         .fetch_all(self.pool())
@@ -278,7 +331,8 @@ impl Core {
 /// Ends the running entry at `now`. Returns its id.
 async fn stop_running(tx: &mut WriteTx<'_>) -> Result<Option<String>> {
     let user = tx.ctx().user_id.clone();
-    let Some(entry) = fetch_running(tx.conn(), &user).await? else {
+    let ws = tx.ctx().workspace_id.clone();
+    let Some(entry) = fetch_running(tx.conn(), &ws, &user).await? else {
         return Ok(None);
     };
     let end = tx.now().max(entry.start_at);
@@ -298,7 +352,8 @@ async fn stop_running(tx: &mut WriteTx<'_>) -> Result<Option<String>> {
 /// Ends the open pause at `now`. Returns it.
 async fn close_pause(tx: &mut WriteTx<'_>) -> Result<Option<Pause>> {
     let user = tx.ctx().user_id.clone();
-    let Some(mut pause) = fetch_open_pause(tx.conn(), &user).await? else {
+    let ws = tx.ctx().workspace_id.clone();
+    let Some(mut pause) = fetch_open_pause(tx.conn(), &ws, &user).await? else {
         return Ok(None);
     };
     let s = tx.stamp();

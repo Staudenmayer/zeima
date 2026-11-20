@@ -93,7 +93,21 @@ export function meetingShapeProblem(startAt: unknown, endAt: unknown, tz: unknow
   return null
 }
 
-const parts = (ms: number, tz: string) => {
+type Parts = Record<'year' | 'month' | 'day' | 'hour' | 'minute' | 'second', number>
+const partsCache = new Map<string, Parts>()
+
+/** Wall-clock parts of `ms` in `tz`; remembered (bounded), as the same instants come up for many meetings in one check. */
+const parts = (ms: number, tz: string): Parts => {
+  const key = `${tz}|${ms}`
+  const known = partsCache.get(key)
+  if (known) return known
+  const v = partsOf(ms, tz)
+  if (partsCache.size >= 20_000) partsCache.clear()
+  partsCache.set(key, v)
+  return v
+}
+
+const partsOf = (ms: number, tz: string) => {
   const v = Object.fromEntries(
     formatter(tz)
       .formatToParts(new Date(ms))
@@ -161,13 +175,28 @@ export function occurrences(startAt: number, endAt: number, tz: string, rrule: s
 
   const out: [number, number][] = []
   let produced = 0
-  for (let p = 0; p < 5000; p++) {
+  const firstDay = Date.UTC(d0[0], d0[1] - 1, d0[2])
+  // Periods that end well before the window hold nothing of it: skip them, counting what they produce.
+  let first0 = 0
+  if (rule.freq === 'DAILY' || rule.freq === 'WEEKLY') {
+    const period = (rule.freq === 'DAILY' ? 1 : 7) * rule.interval * 86_400_000
+    first0 = Math.max(0, Math.floor((from - len - 10 * 86_400_000 - firstDay) / period))
+    if (first0 > 0) {
+      if (rule.freq === 'DAILY') produced = first0
+      else {
+        const days = new Set(rule.byDay.length ? rule.byDay : [weekday0])
+        produced = [...days].filter((d) => d >= weekday0).length + (first0 - 1) * days.size
+      }
+      if (rule.count !== null && produced >= rule.count) return out
+    }
+  }
+  for (let p = first0; p < 5000; p++) {
     for (const [y, m, d] of datesOf(p)) {
-      const key = dateKey(y, m, d)
-      if (key < dateKey(...d0)) continue
-      if ((rule.until !== null && key > rule.until) || (rule.count !== null && produced >= rule.count)) return out
+      const day = Date.UTC(y, m - 1, d)
+      if (day < firstDay) continue
+      if ((rule.until !== null && dateKey(y, m, d) > rule.until) || (rule.count !== null && produced >= rule.count)) return out
       // Far before the window: counted, but not worth the zone arithmetic (a day's wall time is within a day of UTC's).
-      if (Date.UTC(y, m - 1, d) + 3 * 86_400_000 + len < from) {
+      if (day + 3 * 86_400_000 + len < from) {
         produced++
         continue
       }

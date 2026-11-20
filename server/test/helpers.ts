@@ -1,8 +1,11 @@
 // Test app with local signing keys instead of Keycloak's JWKS.
 
+import { randomUUID } from 'node:crypto'
+import { eq } from 'drizzle-orm'
 import { createLocalJWKSet, exportJWK, generateKeyPair, type JWTPayload, SignJWT } from 'jose'
 import { type AppOptions, buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
+import { type Db, schema } from '../src/db/index.ts'
 
 export const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'silent', METRICS_ENABLED: 'false' })
 
@@ -35,4 +38,26 @@ export async function token(claims: JWTPayload = {}, options: { expiresIn?: stri
 
 export async function testApp(options: AppOptions = {}) {
   return buildApp(config, { logger: false, keys, readiness: {}, ...options })
+}
+
+/**
+ * Makes the database mirror of Keycloak's organizations agree with the groups of a token: the API takes membership, role
+ * and departments from the mirror, so a test that mints a token for an organization member needs the member in it too.
+ * Existing rows are changed to the token's role; nothing is removed.
+ */
+export async function syncMirror(db: Db, sub: string, groups: readonly string[]) {
+  for (const path of groups) {
+    const [, root, orgId, kind, ...rest] = path.split('/')
+    if (root !== 'orgs' || !orgId || !kind) continue
+    const [org] = await db.select({ id: schema.organization.id }).from(schema.organization).where(eq(schema.organization.id, orgId))
+    if (!org) continue
+    await db.insert(schema.kcUser).values({ id: sub, email: `${sub}@example.test` }).onConflictDoNothing()
+    if (kind === 'roles' && rest.length === 1) {
+      await db.insert(schema.kcOrgMember).values({ orgId, userId: sub, role: rest[0]! }).onConflictDoUpdate({ target: [schema.kcOrgMember.orgId, schema.kcOrgMember.userId], set: { role: rest[0]! } })
+    } else if (kind === 'groups') {
+      await db.insert(schema.kcOrgMember).values({ orgId, userId: sub, role: 'member' }).onConflictDoNothing()
+      const [group] = await db.insert(schema.kcGroup).values({ id: randomUUID(), orgId, path }).onConflictDoUpdate({ target: schema.kcGroup.path, set: { orgId } }).returning({ id: schema.kcGroup.id })
+      await db.insert(schema.kcGroupMember).values({ groupId: group!.id, userId: sub }).onConflictDoNothing()
+    }
+  }
 }

@@ -184,6 +184,7 @@ fn zeima_public(ip: std::net::IpAddr) -> bool {
                 || o[0] >= 240
                 || (o[0] == 100 && (64..=127).contains(&o[1]))
                 || (o[0] == 192 && o[1] == 0 && (o[2] == 0 || o[2] == 2))
+                || (o[0] == 192 && o[1] == 88 && o[2] == 99)
                 || (o[0] == 198 && (o[1] == 18 || o[1] == 19))
                 || (o[0] == 198 && o[1] == 51 && o[2] == 100)
                 || (o[0] == 203 && o[1] == 0 && o[2] == 113))
@@ -193,8 +194,12 @@ fn zeima_public(ip: std::net::IpAddr) -> bool {
                 return zeima_public(IpAddr::V4(v4));
             }
             let s = v6.segments();
-            // Global unicast only, minus documentation, 6to4 and Teredo.
-            (s[0] & 0xe000) == 0x2000 && s[0] != 0x2002 && !(s[0] == 0x2001 && (s[1] == 0 || s[1] == 0x0db8))
+            // Global unicast only, minus documentation (2001:db8::/32 and 3fff::/20), 6to4, Teredo and the other IETF
+            // special blocks (2001::/23).
+            (s[0] & 0xe000) == 0x2000
+                && s[0] != 0x2002
+                && !(s[0] == 0x2001 && (s[1] < 0x0200 || s[1] == 0x0db8))
+                && !(s[0] == 0x3fff && s[1] & 0xf000 == 0)
         }
     }
 }
@@ -228,12 +233,37 @@ impl ureq::unversioned::resolver::Resolver for ZeimaResolver {
     }
 }
 
+/// No redirects and no proxy: a proxy (from the environment, which ureq reads by default) would resolve the
+/// target itself and skip `ZeimaResolver`.
+fn zeima_config() -> ureq::config::Config {
+    zeima_config_from(ureq::Agent::config_builder())
+}
+
+fn zeima_config_from(builder: ureq::config::ConfigBuilder<ureq::typestate::AgentScope>) -> ureq::config::Config {
+    builder
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .proxy(None)
+        .build()
+}
+
+/// Parses a request URL; only http(s) without userinfo is accepted.
+fn zeima_url(raw: &str) -> Result<url::Url, Error> {
+    let url = url::Url::parse(raw).map_err(|e| Error::msg(format!("Invalid URL: {e:?}")))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(Error::msg("Invalid URL: only http and https are allowed"));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(Error::msg("Invalid URL: credentials in the URL are not allowed"));
+    }
+    Ok(url)
+}
+
 fn zeima_agent(config: &std::collections::BTreeMap<String, String>, host: &str) -> ureq::Agent {
     let private_ok = config
         .get("zeima.private_hosts")
         .is_some_and(|list| list.as_str().split(',').any(|h| h.trim().eq_ignore_ascii_case(host)));
-    let cfg = ureq::Agent::config_builder().max_redirects(0).http_status_as_error(false).build();
-    ureq::Agent::with_parts(cfg, ureq::unversioned::transport::DefaultConnector::default(), ZeimaResolver { private_ok })
+    ureq::Agent::with_parts(zeima_config(), ureq::unversioned::transport::DefaultConnector::default(), ZeimaResolver { private_ok })
 }
 
 /// Make an HTTP request
@@ -279,10 +309,7 @@ pub(crate) fn http_request(
 
         let body_offset = args!(input, 1, i64) as u64;
 
-        let url = match url::Url::parse(&req.url) {
-            Ok(u) => u,
-            Err(e) => return Err(Error::msg(format!("Invalid URL: {e:?}"))),
-        };
+        let url = zeima_url(&req.url)?;
         let allowed_hosts = &data.manifest.allowed_hosts;
         let host_str = url.host_str().unwrap_or_default();
         let host_matches = if let Some(allowed_hosts) = allowed_hosts {
@@ -314,7 +341,7 @@ pub(crate) fn http_request(
                     .to_uppercase()
                     .as_str(),
             )
-            .uri(&req.url);
+            .uri(url.as_str());
 
         for (k, v) in req.headers.iter() {
             r = r.header(k, v);
@@ -576,5 +603,46 @@ pub(crate) const fn log_level_to_int(level: tracing::Level) -> i32 {
         tracing::Level::INFO => 2,
         tracing::Level::WARN => 3,
         tracing::Level::ERROR => 4,
+    }
+}
+
+#[cfg(all(test, feature = "http"))]
+mod zeima_tests {
+    use super::*;
+
+    #[test]
+    fn config_ignores_a_configured_proxy() {
+        // Without touching the process environment (which other tests read): the builder starts with a proxy, as
+        // it would from HTTP_PROXY, and the Zeima config must remove it.
+        let proxy = ureq::Proxy::new("http://127.0.0.1:9").unwrap();
+        let builder = ureq::Agent::config_builder().proxy(Some(proxy));
+        assert!(builder.build().proxy().is_some());
+        let builder = ureq::Agent::config_builder().proxy(Some(ureq::Proxy::new("http://127.0.0.1:9").unwrap()));
+        let config = zeima_config_from(builder);
+        assert!(config.proxy().is_none());
+        assert_eq!(config.max_redirects(), 0);
+    }
+
+    #[test]
+    fn url_rejects_userinfo_and_other_schemes() {
+        assert!(zeima_url("https://user:pw@example.com/").is_err());
+        assert!(zeima_url("https://user@example.com/").is_err());
+        assert!(zeima_url("file:///etc/hosts").is_err());
+        assert!(zeima_url("ftp://example.com/").is_err());
+        assert_eq!(zeima_url("https://example.com/a b").unwrap().as_str(), "https://example.com/a%20b");
+    }
+
+    #[test]
+    fn private_addresses_are_not_public() {
+        for ip in [
+            "127.0.0.1", "0.1.2.3", "10.0.0.1", "100.64.0.1", "169.254.169.254", "192.168.0.1",
+            "::1", "::", "::ffff:127.0.0.1", "::127.0.0.1", "::a9fe:a9fe", "fc00::1", "fd00::1", "fe80::1",
+            "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "2001:1::1", "3fff::1", "3fff:fff:ffff::1", "192.88.99.1",
+        ] {
+            assert!(!zeima_public(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["8.8.8.8", "2606:4700:4700::1111", "3fff:1000::1", "192.88.98.1", "192.88.100.1"] {
+            assert!(zeima_public(ip.parse().unwrap()), "{ip}");
+        }
     }
 }

@@ -16,7 +16,8 @@ import { Quota } from '../../plugins/quota.ts'
 import { PRESENCE_STATES, type PresenceState } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { reconcileOrganization } from './reconcile.ts'
-import { forgetRoles, loadRoles, roleOf } from './roles.ts'
+import { forgetMembership, forgetOrganizationMemberships, forgetRoles, loadRoles, roleOf } from './roles.ts'
+import { lockPushOrder } from '../../db/locks.ts'
 import { freeBusy } from '../../meetings/freebusy.ts'
 import { roomBookings } from '../../meetings/rooms.ts'
 import { audit, auditEntries, avatarsOf, createOrganization, deleteOrganization, memberOf, ownerCount, purgeMemberOrgData, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers, withOwnerLock } from './service.ts'
@@ -197,6 +198,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       // The database first (in one transaction), then Keycloak: a failure at Keycloak leaves a stray identity-provider
       // organization that deleting again (or the operator) removes, and never members of an organization that has no data.
       await deleteOrganization(db, orgId)
+      forgetOrganizationMemberships(orgId)
       try {
         await kc.deleteOrganization(orgId)
       } catch (err) {
@@ -278,6 +280,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
           await kc.setRole(orgId, userId, role)
           await tx.update(schema.kcOrgMember).set({ role }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
         })
+        forgetMembership(userId)
         await audit(db, { orgId, actorId: actor.user.id, action: 'member.role', target: userId, detail: { from: target.role, to: role } })
       }
 
@@ -310,7 +313,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     {
       schema: {
         tags: ['organizations'],
-        summary: 'Removes a member from the organization (their account and personal workspace stay; their data in this organization is deleted)',
+        summary: 'Removes a member from the organization (their account and personal workspace stay; they lose access and their local copy of the organization data is deleted; the organization keeps its records on the server, except the time entries and pauses of that person, which are deleted)',
         security: SECURITY,
         params: MemberParams,
         response: { 204: Type.Null(), ...problems(401, 403, 404, 409, 502, 503) },
@@ -338,10 +341,13 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
           throw new HttpProblem(409, 'last_owner', 'an organization needs at least one owner; make someone else an owner first, or delete the organization')
         }
         await keycloak().removeMember(orgId, userId)
+        // Pushes finish first or see the membership gone.
+        await lockPushOrder(tx)
         await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
         await tx.execute(sql`delete from kc_group_member where user_id = ${userId} and group_id in (select id from kc_group where org_id = ${orgId})`)
         await purgeMemberOrgData(tx, orgId, userId)
       })
+      forgetMembership(userId)
       await audit(db, { orgId, actorId: actor.user.id, action: userId === actor.user.id ? 'member.leave' : 'member.remove', target: userId })
       return reply.code(204).send(null)
     },
@@ -640,6 +646,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         .update(schema.kcGroup)
         .set({ path: sql`${`${prefix(orgId)}${newPath}`} || substr(${schema.kcGroup.path}, ${group.path.length + 1})` })
         .where(and(eq(schema.kcGroup.orgId, orgId), sql`(${schema.kcGroup.path} = ${group.path} or ${schema.kcGroup.path} like ${like})`))
+      forgetOrganizationMemberships(orgId)
       await audit(db, { orgId, actorId: actor.user.id, action: 'group.rename', target: newPath, detail: { from: oldPath } })
       return (await loadGroups(orgId)).find((g) => g.id === groupId)!
     },
@@ -668,6 +675,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       await db
         .delete(schema.kcGroup)
         .where(and(eq(schema.kcGroup.orgId, orgId), sql`(${schema.kcGroup.path} = ${group.path} or ${schema.kcGroup.path} like ${`${group.path.replace(/[\\%_]/g, '\\$&')}/%`})`))
+      forgetOrganizationMemberships(orgId)
       await audit(db, { orgId, actorId: actor.user.id, action: 'group.delete', target: group.path.slice(prefix(orgId).length) })
       return reply.code(204).send(null)
     },
@@ -708,6 +716,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
           await kc.removeFromGroup(userId, groupId)
           await db.delete(schema.kcGroupMember).where(and(eq(schema.kcGroupMember.groupId, groupId), eq(schema.kcGroupMember.userId, userId)))
         }
+        forgetMembership(userId)
         await audit(db, {
           orgId,
           actorId: actor.user.id,
@@ -890,7 +899,9 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const members = (await listMembers(db, orgId)).filter((m) => m.active)
       // Email addresses follow the member list's rule: someone who may see only themselves does not get everybody's.
       const readScope = scopeOf(actorIn({ user: request.user! }, orgId), 'member.read')
-      const seeEmails = readScope === 'org' || readScope === 'group'
+      const mine = actorIn({ user: request.user! }, orgId).user.orgs[orgId]!
+      // 'org' sees all, 'group' the people sharing a department, anyone else (own scope, or none) only themselves.
+      const visible = readScope === 'org' ? null : new Set(readScope === 'group' ? await sharingGroups(db, orgId, mine.groups) : [])
       const jobs = new Map((await jobsOf(db, orgId)).map((j) => [j.id, j]))
       const held = await db
         .select({ userId: schema.kcOrgMember.userId, jobId: schema.kcOrgMember.jobId })
@@ -911,7 +922,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const pictures = await avatarsOf(db, members.map((m) => m.id))
       return members.map((m) => {
         const job = jobs.get(jobOf.get(m.id) ?? '')
-        return { id: m.id, name: m.name, email: seeEmails || m.id === request.user!.id ? m.email : null, avatar: pictures.get(m.id) ?? null, departments: departments.get(m.id) ?? [], jobId: job?.id ?? null, jobTitle: job?.name ?? null, jobDescription: job?.description || null }
+        return { id: m.id, name: m.name, email: visible === null || visible.has(m.id) || m.id === request.user!.id ? m.email : null, avatar: pictures.get(m.id) ?? null, departments: departments.get(m.id) ?? [], jobId: job?.id ?? null, jobTitle: job?.name ?? null, jobDescription: job?.description || null }
       })
     },
   )
@@ -1124,16 +1135,35 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       if (!role) throw new HttpProblem(404, 'not_found', 'no such role')
       if (isBuiltinRole(roleKey)) throw new HttpProblem(409, 'builtin', 'the built-in roles cannot be deleted')
       if (actor.user.orgs[orgId]!.role === roleKey) throw new HttpProblem(403, 'forbidden', 'you cannot delete the role you have yourself')
-      const holders = await db
-        .select({ userId: schema.kcOrgMember.userId })
-        .from(schema.kcOrgMember)
-        .where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.role, roleKey)))
+      // Deleting takes the role away from everyone who has it: the deleter must cover what it allowed, as when changing it.
+      if (!covers(actor.user.orgs[orgId]!.permissions, role.permissions)) {
+        throw new HttpProblem(403, 'forbidden', 'this role has permissions you do not have yourself')
+      }
+      if (actor.user.orgs[orgId]!.role !== 'owner' && administers(role.permissions)) {
+        throw new HttpProblem(403, 'forbidden', 'only an owner deletes a role that manages roles')
+      }
       const kc = keycloak()
-      for (const h of holders) await kc.setRole(orgId, h.userId, 'member')
-      await db.update(schema.kcOrgMember).set({ role: 'member' }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.role, roleKey)))
-      await kc.deleteRole(orgId, roleKey)
-      await db.delete(schema.orgRole).where(and(eq(schema.orgRole.id, roleKey), eq(schema.orgRole.orgId, orgId)))
+      let held: string[] = []
+      // The database first, in one transaction, then Keycloak: a failure at Keycloak rolls the database back and leaves the role.
+      try {
+        await db.transaction(async (tx) => {
+          const holders = await tx
+            .update(schema.kcOrgMember)
+            .set({ role: 'member' })
+            .where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.role, roleKey)))
+            .returning({ userId: schema.kcOrgMember.userId })
+          await tx.delete(schema.orgRole).where(and(eq(schema.orgRole.id, roleKey), eq(schema.orgRole.orgId, orgId)))
+          held = holders.map((h) => h.userId)
+          for (const h of holders) await kc.setRole(orgId, h.userId, 'member')
+          await kc.deleteRole(orgId, roleKey)
+        })
+      } catch (err) {
+        if (err instanceof HttpProblem) throw err
+        request.log.error({ err, orgId }, 'Keycloak could not apply the role deletion')
+        throw new HttpProblem(502, 'keycloak_failed', 'Keycloak could not delete the role')
+      }
       forgetRoles(orgId)
+      for (const userId of held) forgetMembership(userId)
       await audit(db, { orgId, actorId: actor.user.id, action: 'role.delete', target: role.name })
       return reply.code(204).send(null)
     },
