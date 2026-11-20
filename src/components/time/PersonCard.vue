@@ -6,6 +6,7 @@ import { toast } from 'vue-sonner'
 import { Badge } from '@/components/ui/badge'
 import UserAvatar from '@/components/time/UserAvatar.vue'
 import { errorMessage } from '@/lib/ipc'
+import { mailtoUrl } from '@/lib/mailto'
 import { PRESENCE_COLORS } from '@/lib/presence'
 import { useOrgStore } from '@/stores/org'
 import { useProjectsStore } from '@/stores/projects'
@@ -28,8 +29,10 @@ const role = computed(() => org.members.find((m) => m.id === props.userId)?.role
 
 /** Opens the person's mail program (the webview does not follow `mailto:` links itself). */
 async function mail(address: string) {
+  const url = mailtoUrl(address)
+  if (!url) return
   try {
-    await openUrl(`mailto:${address}`)
+    await openUrl(url)
   } catch (err) {
     toast.error(errorMessage(err))
   }
@@ -54,7 +57,7 @@ async function mail(address: string) {
         </div>
         <a
           v-if="entry?.email"
-          :href="`mailto:${entry.email}`"
+          :href="mailtoUrl(entry.email) ?? undefined"
           class="w-fit text-muted-foreground underline underline-offset-2 hover:text-foreground"
           :title="$t('directory.writeEmail')"
           @click.prevent="mail(entry.email)"
