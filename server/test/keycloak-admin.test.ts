@@ -19,6 +19,36 @@ describe('Keycloak answers', () => {
   })
 })
 
+describe('upstream details stay out of problems (CWE-209)', () => {
+  const internal = { apiUrl: 'http://kc.internal:8443/admin/realms/zeima', tokenUrl: 'http://kc.internal:8443/token', clientId: 'x', clientSecret: 'y' }
+  const logged: unknown[] = []
+  const log = { warn: (...a: unknown[]) => void logged.push(a) }
+  const answering = (status: number, body: string): typeof fetch =>
+    (async (url: string | URL | Request) => {
+      if (String(url).endsWith('/token')) return new Response(JSON.stringify({ access_token: 't', expires_in: 300 }), { status: 200 })
+      return new Response(body, { status })
+    }) as typeof fetch
+  const secret = 'SECRET-keycloak-text'
+
+  it('an unreachable Keycloak is reported without its host or port, and logged', async () => {
+    const down = (async () => {
+      throw new Error('connect ECONNREFUSED kc.internal:8443')
+    }) as typeof fetch
+    const err = await new HttpKeycloakAdmin(internal, down, log).findUserByEmail('a@b.co').catch((e: unknown) => e)
+    expect(err).toMatchObject({ status: 502, code: 'keycloak_unreachable' })
+    expect((err as Error).message).not.toMatch(/kc\.internal|8443|ECONNREFUSED/)
+    expect(JSON.stringify(logged)).toContain('cannot reach Keycloak')
+  })
+
+  it.each([400, 409, 500])('a %i from Keycloak keeps its status but not its text', async (status) => {
+    const body = JSON.stringify({ errorMessage: secret, error_description: secret })
+    const err = await new HttpKeycloakAdmin(internal, answering(status, body), log).createGroup('o', ['x']).catch((e: unknown) => e)
+    expect(err).toMatchObject({ status: status === 500 ? 502 : status })
+    expect((err as Error).message).not.toContain(secret)
+    expect(JSON.stringify(logged)).toContain(secret)
+  })
+})
+
 describe('setSso', () => {
   it('keeps the addresses and certificates of an imported document and drops its other settings', async () => {
     const bodies: Record<string, unknown>[] = []

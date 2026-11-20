@@ -7,6 +7,7 @@
 //   /orgs/<orgId>/roles/<role>         one group per role; a user is in one
 //   /orgs/<orgId>/groups/<…>           departments
 
+import type { FastifyBaseLogger } from 'fastify'
 import type { Config } from '../config.ts'
 import { ORG_ROLES, type RoleKey } from '../plugins/permissions.ts'
 import { HttpProblem } from '../plugins/errors.ts'
@@ -179,9 +180,18 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
   private readonly admin: NonNullable<Config['keycloak']['admin']>
   private readonly fetchImpl: typeof fetch
 
-  constructor(admin: NonNullable<Config['keycloak']['admin']>, fetchImpl: typeof fetch = fetch) {
+  private readonly log: Pick<FastifyBaseLogger, 'warn'>
+
+  constructor(admin: NonNullable<Config['keycloak']['admin']>, fetchImpl: typeof fetch = fetch, log: Pick<FastifyBaseLogger, 'warn'> = console) {
     this.admin = admin
     this.fetchImpl = fetchImpl
+    this.log = log
+  }
+
+  /** The upstream detail (host, port, Keycloak's own text) goes to the log, never into a response. */
+  private unreachable(err: unknown): HttpProblem {
+    this.log.warn({ err }, 'cannot reach Keycloak')
+    return new HttpProblem(502, 'keycloak_unreachable', 'cannot reach the identity provider')
   }
 
   private async accessToken(): Promise<string> {
@@ -197,7 +207,7 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
       }),
       signal: AbortSignal.timeout(10_000),
     }).catch((err: unknown) => {
-      throw new HttpProblem(502, 'keycloak_unreachable', `cannot reach Keycloak: ${(err as Error).message}`)
+      throw this.unreachable(err)
     })
     if (!res.ok) throw new HttpProblem(502, 'keycloak_auth_failed', `Keycloak refused the API's admin client (${res.status})`)
     const body = (await res.json()) as { access_token: string; expires_in: number }
@@ -220,16 +230,17 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
     }
     const res = await this.fetchImpl(`${this.admin.apiUrl}${path}`, { method, headers, body, signal: AbortSignal.timeout(15_000) }).catch(
       (err: unknown) => {
-        throw new HttpProblem(502, 'keycloak_unreachable', `cannot reach Keycloak: ${(err as Error).message}`)
+        throw this.unreachable(err)
       },
     )
     if (res.ok) return res
     const detail = await res.text().catch(() => '')
     if (res.status === 403) throw new HttpProblem(502, 'keycloak_forbidden', `Keycloak refused the API's service account for ${method} ${path}: it lacks a role (docs/keycloak.md, "Service account roles")`)
     if (res.status === 404) throw new HttpProblem(404, 'not_found', 'not found in Keycloak')
-    if (res.status === 409) throw new HttpProblem(409, 'conflict', keycloakMessage(detail) || 'already exists')
-    if (res.status === 400) throw new HttpProblem(400, 'bad_request', keycloakMessage(detail) || 'Keycloak rejected the request')
-    throw new HttpProblem(502, 'keycloak_error', `Keycloak answered ${res.status} for ${method} ${path}: ${keycloakMessage(detail) || 'no details'}`)
+    this.log.warn({ method, path, status: res.status, detail: keycloakMessage(detail) }, 'Keycloak refused a request')
+    if (res.status === 409) throw new HttpProblem(409, 'conflict', 'already exists')
+    if (res.status === 400) throw new HttpProblem(400, 'bad_request', 'the identity provider rejected the request')
+    throw new HttpProblem(502, 'keycloak_error', `the identity provider answered ${res.status}`)
   }
 
   /** The id from a `201 Location: …/<id>` response. */
