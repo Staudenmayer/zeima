@@ -11,8 +11,9 @@ impl Core {
     /// The synced display settings, if any device has saved them yet.
     pub async fn display_settings(&self) -> Result<Option<Value>> {
         let json: Option<String> = sqlx::query_scalar(
-            "SELECT settings_json FROM display_settings WHERE user_id = ? AND deleted_at IS NULL",
+            "SELECT settings_json FROM display_settings WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .fetch_optional(self.pool())
         .await?;
@@ -33,11 +34,13 @@ impl Core {
         }
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
-        let existing: Option<String> =
-            sqlx::query_scalar("SELECT id FROM display_settings WHERE user_id = ? AND deleted_at IS NULL")
-                .bind(&user)
-                .fetch_optional(tx.conn())
-                .await?;
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM display_settings WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL",
+        )
+        .bind(tx.ctx().workspace_id.clone())
+        .bind(&user)
+        .fetch_optional(tx.conn())
+        .await?;
         let id = existing.unwrap_or_else(crate::ids::new_id);
         let s = tx.stamp();
         sqlx::query(

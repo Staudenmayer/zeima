@@ -287,8 +287,9 @@ impl Core {
 
         let user = tx.ctx().user_id.clone();
         let has_schedule: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM work_schedule WHERE user_id = ? AND deleted_at IS NULL)",
+            "SELECT EXISTS (SELECT 1 FROM work_schedule WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL)",
         )
+        .bind(tx.ctx().workspace_id.clone())
         .bind(&user)
         .fetch_one(tx.conn())
         .await?;
@@ -308,8 +309,9 @@ impl Core {
 
     pub async fn work_settings(&self) -> Result<WorkSettings> {
         let json: Option<String> = sqlx::query_scalar(
-            "SELECT settings_json FROM work_settings WHERE user_id = ? AND deleted_at IS NULL",
+            "SELECT settings_json FROM work_settings WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .fetch_optional(self.pool())
         .await?;
@@ -324,11 +326,13 @@ impl Core {
         settings.validate()?;
         let mut tx = self.begin().await?;
         let user = tx.ctx().user_id.clone();
-        let existing: Option<String> =
-            sqlx::query_scalar("SELECT id FROM work_settings WHERE user_id = ? AND deleted_at IS NULL")
-                .bind(&user)
-                .fetch_optional(tx.conn())
-                .await?;
+        let existing: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM work_settings WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL",
+        )
+        .bind(tx.ctx().workspace_id.clone())
+        .bind(&user)
+        .fetch_optional(tx.conn())
+        .await?;
         let id = existing.unwrap_or_else(crate::ids::new_id);
         let s = tx.stamp();
         sqlx::query(
@@ -361,8 +365,9 @@ impl Core {
     pub async fn list_schedules(&self) -> Result<Vec<WorkSchedule>> {
         let rows = sqlx::query(
             "SELECT id, valid_from, model, days_json FROM work_schedule
-             WHERE user_id = ? AND deleted_at IS NULL ORDER BY valid_from",
+             WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY valid_from",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .fetch_all(self.pool())
         .await?;
@@ -515,9 +520,10 @@ impl Core {
     pub async fn list_absences(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<Absence>> {
         let rows = sqlx::query(
             "SELECT id, user_id, type_id, start_date, end_date, half_day, status, note, decided_by, decision_note FROM absence
-             WHERE user_id = ? AND deleted_at IS NULL AND start_date <= ? AND end_date >= ?
+             WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL AND start_date <= ? AND end_date >= ?
              ORDER BY start_date",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .bind(to)
         .bind(from)
@@ -848,8 +854,9 @@ impl Core {
     pub async fn list_adjustments(&self) -> Result<Vec<BalanceAdjustment>> {
         let rows = sqlx::query(
             "SELECT id, date, minutes, reason FROM balance_adjustment
-             WHERE user_id = ? AND deleted_at IS NULL ORDER BY date DESC",
+             WHERE workspace_id = ? AND user_id = ? AND deleted_at IS NULL ORDER BY date DESC",
         )
+        .bind(&self.ctx().workspace_id)
         .bind(&self.ctx().user_id)
         .fetch_all(self.pool())
         .await?;

@@ -88,7 +88,7 @@ impl Core {
             let used_ms: i64 = sqlx::query_scalar(
                 "SELECT coalesce(sum(min(coalesce(end_at, ?1), ?3) - max(start_at, ?2)), 0)
                  FROM time_entry
-                 WHERE project_id = ?4 AND user_id = ?5 AND deleted_at IS NULL
+                 WHERE project_id = ?4 AND user_id = ?5 AND workspace_id = ?6 AND deleted_at IS NULL
                    AND start_at < ?3 AND coalesce(end_at, ?1) > ?2",
             )
             .bind(now)
@@ -96,6 +96,7 @@ impl Core {
             .bind(to)
             .bind(&p.id)
             .bind(&self.ctx().user_id)
+            .bind(&self.ctx().workspace_id)
             .fetch_one(self.pool())
             .await?;
             out.push(BudgetStatus {

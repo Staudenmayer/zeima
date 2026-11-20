@@ -29,7 +29,7 @@ use super::sync_ids::{local_of_canonical, reference_in, remember, rule, Rule, RE
 use super::sync_outbox::{is_local_field, SYNCED_TABLES};
 use crate::hlc;
 use crate::sync::{merge_state, RowState, Versioned};
-use crate::{Core, Result};
+use crate::{Core, Error, Result};
 
 /// One row of `GET /v1/sync/pull`.
 #[derive(Debug, Clone, Deserialize)]
@@ -861,6 +861,21 @@ impl Core {
 
         if table == "time_entry" {
             if let Some(Value::Array(ids)) = write.get("tagIds").map(|f| &f.v) {
+                // A tag of another workspace on this device is never linked (a tag not known yet is fine).
+                for id in ids.iter().filter_map(Value::as_str) {
+                    let elsewhere: Option<i64> =
+                        sqlx::query_scalar("SELECT 1 FROM tag WHERE id = ? AND workspace_id != ?")
+                            .bind(id)
+                            .bind(&self.ctx().workspace_id)
+                            .fetch_optional(&mut *conn)
+                            .await?;
+                    if elsewhere.is_some() {
+                        return Err(Error::validation(
+                            "tagIds",
+                            "refers to a tag of another workspace",
+                        ));
+                    }
+                }
                 sqlx::query("DELETE FROM time_entry_tag WHERE entry_id = ?")
                     .bind(&row.row_id)
                     .execute(&mut *conn)

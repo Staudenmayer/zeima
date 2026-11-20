@@ -106,3 +106,148 @@ async fn a_pulled_row_reusing_another_workspaces_id_leaves_it_unchanged() {
     assert_eq!(after.workspace_id, mine.workspace_id);
     assert!(org.list_projects(false).await.unwrap().is_empty());
 }
+
+const ORG_WS_B: &str = "0192f000-0000-7000-8000-00000000a002";
+const ORG_B: &str = "0192f000-0000-7000-8000-00000000b002";
+
+/// Two organizations on one server: the account id is the same in both.
+async fn two_orgs() -> (Core, Core, Core) {
+    let (personal, a) = setup().await;
+    personal
+        .adopt_org_workspace(ORG_WS_B, ORG_B, "Globex", ME, "Ada")
+        .await
+        .unwrap();
+    let b = personal.scoped(ORG_WS_B, ME);
+    (personal, a, b)
+}
+
+#[tokio::test]
+async fn a_running_entry_of_one_organization_is_out_of_reach_from_another() {
+    use zeima_core::model::{ActivityInput, EntryInput, StartTimer, TimerState};
+    use zeima_core::summary::Range;
+
+    let (_personal, a, b) = two_orgs().await;
+    let activity = a
+        .create_activity(ActivityInput {
+            name: "Work".into(),
+            color: "#3b82f6".into(),
+            archived: false,
+        })
+        .await
+        .unwrap();
+    let TimerState::Running { entry } = a
+        .start_timer(StartTimer {
+            activity_id: Some(activity.id.clone()),
+            project_id: None,
+            tag_ids: Vec::new(),
+            note: "secret".into(),
+            billable: None,
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("not running");
+    };
+    let before = b.sync_outbox(100).await.unwrap().changes.len();
+
+    // Not visible.
+    assert!(matches!(b.timer_state().await.unwrap(), TimerState::Idle));
+    assert!(matches!(
+        b.get_entry(&entry.id).await,
+        Err(Error::NotFound { .. })
+    ));
+    let range = Range {
+        from: 0,
+        to: i64::MAX,
+    };
+    assert!(b.list_entries(range).await.unwrap().is_empty());
+    // Not stoppable.
+    assert!(matches!(b.stop_timer().await.unwrap(), TimerState::Idle));
+    // Not updatable.
+    let input = EntryInput {
+        activity_id: Some(activity.id.clone()),
+        project_id: None,
+        start_at: entry.start_at,
+        end_at: Some(entry.start_at + 60_000),
+        tz: None,
+        note: "changed".into(),
+        billable: None,
+        tag_ids: Vec::new(),
+        cost_center_id: None,
+    };
+    let err = b.update_entry(&entry.id, input).await.unwrap_err();
+    assert!(matches!(err, Error::NotFound { .. }), "{err:?}");
+
+    // Nothing was logged for B, and A's entry is untouched.
+    assert_eq!(b.sync_outbox(100).await.unwrap().changes.len(), before);
+    let mine = a.get_entry(&entry.id).await.unwrap();
+    assert_eq!(mine.note, "secret");
+    assert!(mine.end_at.is_none());
+}
+
+#[tokio::test]
+async fn a_synced_entry_cannot_link_a_tag_of_another_workspace() {
+    let (_personal, a, b) = two_orgs().await;
+    let foreign = b.create_tag(tag("Foreign")).await.unwrap();
+    let own = a.create_tag(tag("Own")).await.unwrap();
+    let activity = a
+        .create_activity(zeima_core::model::ActivityInput {
+            name: "Work".into(),
+            color: "#3b82f6".into(),
+            archived: false,
+        })
+        .await
+        .unwrap();
+    let stamp = |v: serde_json::Value| Versioned {
+        v,
+        h: format!("{:015}-000000-server", T0 + 1000),
+    };
+    let row_with = |entry_id: &str, tags: serde_json::Value| {
+        let fields: BTreeMap<String, Versioned> = [
+            ("userId", ME.into()),
+            ("source", "manual".into()),
+            ("activityId", activity.id.clone().into()),
+            ("startAt", (T0).into()),
+            ("endAt", (T0 + 60_000).into()),
+            ("tz", "UTC".into()),
+            ("note", "x".into()),
+            ("tagIds", tags),
+        ]
+        .into_iter()
+        .map(|(k, v): (&str, serde_json::Value)| (k.to_string(), stamp(v)))
+        .collect();
+        RemoteRow {
+            workspace_id: ORG_WS.into(),
+            table: "time_entry".into(),
+            row_id: entry_id.into(),
+            fields,
+            deleted: None,
+        }
+    };
+    // Control: the same row with a tag of its own workspace is applied.
+    let good = "0192f000-0000-7000-8000-00000000e002";
+    let report = a
+        .sync_apply(&[row_with(good, serde_json::json!([own.id]))])
+        .await
+        .unwrap();
+    assert_eq!(
+        report.conflicts,
+        0,
+        "{report:?} {:?}",
+        a.sync_conflicts()
+            .await
+            .unwrap()
+            .iter()
+            .map(|c| c.message.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(a.get_entry(good).await.unwrap().tag_ids, vec![own.id.clone()]);
+
+    let bad = "0192f000-0000-7000-8000-00000000e001";
+    let report = a
+        .sync_apply(&[row_with(bad, serde_json::json!([foreign.id]))])
+        .await
+        .unwrap();
+    assert_eq!(report.conflicts, 1, "{report:?}");
+    assert!(matches!(a.get_entry(bad).await, Err(Error::NotFound { .. })));
+}
