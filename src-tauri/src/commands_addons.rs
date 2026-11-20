@@ -455,12 +455,10 @@ pub(crate) async fn install_package(
         .filter(|d| d.exists())
     {
         let installed = crate::registry::installed_signature(&dir);
-        if let Some(old_key) = installed.key_id.as_deref() {
-            if signature.key_id.as_deref() != Some(old_key) {
-                return Err(invalid(
-                    "this package is not from the publisher of the installed add-on; uninstall the add-on first (that also deletes its saved secrets and connected accounts)",
-                ));
-            }
+        if !signature.continues(&installed) {
+            return Err(invalid(
+                "this package is not from the publisher of the installed add-on; uninstall the add-on first (that also deletes its saved secrets and connected accounts)",
+            ));
         }
         // A connected account's token goes to the provider's token endpoint: that host may not change in an update.
         if let Ok(old) = read_manifest(&dir) {
@@ -1017,6 +1015,7 @@ mod tests {
             status: SignatureStatus::ServerTrusted,
             key_id: Some("k".into()),
             signer: Some("Acme IT".into()),
+            fingerprint: None,
         };
         let manifest = manifest_with("\"entries:read\", \"network\"");
         let fresh = consent_text(&manifest, &signature, None, false);

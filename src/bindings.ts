@@ -1381,6 +1381,11 @@ export type SignatureCheck = {
 	keyId: string | null,
 	/**  The publisher's name, for a trusted key. */
 	signer: string | null,
+	/**
+	 *  SHA-256 (hex) of the public key that verified the signature. Set only when the signature verified; `key_id`
+	 *  is a label copied from the package and proves nothing by itself.
+	 */
+	fingerprint?: string | null,
 };
 
 /**  What the person is told about who made an addon. */

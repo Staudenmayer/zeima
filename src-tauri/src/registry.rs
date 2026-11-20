@@ -354,6 +354,7 @@ pub async fn addon_registry(
             },
             key_id: e.key_id.clone(),
             signer: signer.clone(),
+            fingerprint: None,
         };
         out.push(RegistryAddon {
             id: e.id.clone(),
@@ -528,6 +529,7 @@ mod tests {
             status: SignatureStatus::ServerTrusted,
             key_id: Some("k".into()),
             signer: Some("Pub".into()),
+            fingerprint: Some("f".into()),
         }
     }
 
@@ -554,6 +556,7 @@ mod tests {
             status: SignatureStatus::UnknownKey,
             key_id: Some("x".into()),
             signer: None,
+            fingerprint: None,
         };
         assert!(r.refuses("a.b", &unknown).is_some());
     }
