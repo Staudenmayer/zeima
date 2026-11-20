@@ -343,3 +343,30 @@ async fn computed_days_are_not_shared_between_organizations() {
     assert_eq!(b.work_days(day, day).await.unwrap()[0].worked_ms, 0);
     assert_eq!(a.work_days(day, day).await.unwrap()[0].worked_ms, worked_a);
 }
+
+#[tokio::test]
+async fn a_timer_running_in_another_workspace_is_named_in_the_error() {
+    use zeima_core::model::{ActivityInput, StartTimer};
+
+    let (_personal, a, b) = two_orgs().await;
+    let start = |activity_id: String| StartTimer {
+        activity_id: Some(activity_id),
+        project_id: None,
+        tag_ids: Vec::new(),
+        note: String::new(),
+        billable: None,
+    };
+    let act = ActivityInput {
+        name: "Work".into(),
+        color: "#3b82f6".into(),
+        archived: false,
+    };
+    let act_a = a.create_activity(act.clone()).await.unwrap().id;
+    let act_b = b.create_activity(act).await.unwrap().id;
+    a.start_timer(start(act_a)).await.unwrap();
+    let err = b.start_timer(start(act_b)).await.unwrap_err();
+    match err {
+        Error::Conflict(m) => assert!(m.contains("another workspace"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+}

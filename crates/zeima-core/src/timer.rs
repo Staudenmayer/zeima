@@ -100,7 +100,7 @@ where
 
 pub(crate) async fn insert_pause(tx: &mut WriteTx<'_>, p: &Pause) -> Result<()> {
     let s = tx.stamp();
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO pause (id, workspace_id, user_id, start_at, end_at, kind, resume_entry_id,
             followup_entry_id, applied, accepted, created_at, updated_at, hlc, origin_device)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -120,8 +120,37 @@ pub(crate) async fn insert_pause(tx: &mut WriteTx<'_>, p: &Pause) -> Result<()> 
     .bind(&s.hlc)
     .bind(&s.device)
     .execute(tx.conn())
-    .await?;
+    .await;
+    if let Err(err) = inserted {
+        return Err(open_pause_conflict(tx, err).await);
+    }
     tx.log_upsert("pause", &p.id, &s, p).await
+}
+
+/// A unique-index violation on the open pause. The index is per user, so the open pause may belong to
+/// another workspace of the same account; say so when this workspace has none.
+async fn open_pause_conflict(tx: &mut WriteTx<'_>, err: sqlx::Error) -> Error {
+    match &err {
+        sqlx::Error::Database(db) if db.is_unique_violation() => {
+            let ws = tx.ctx().workspace_id.clone();
+            let user = tx.ctx().user_id.clone();
+            let here: std::result::Result<Option<i64>, sqlx::Error> = sqlx::query_scalar(
+                "SELECT 1 FROM pause
+                 WHERE workspace_id = ? AND user_id = ? AND end_at IS NULL AND deleted_at IS NULL",
+            )
+            .bind(ws)
+            .bind(user)
+            .fetch_optional(tx.conn())
+            .await;
+            match here {
+                Ok(None) => Error::Conflict(
+                    "A pause is already open in another workspace. End it there, then try again.".into(),
+                ),
+                _ => Error::Conflict("A pause is already open.".into()),
+            }
+        }
+        _ => Error::Db(err),
+    }
 }
 
 pub(crate) async fn update_pause(tx: &mut WriteTx<'_>, p: &Pause) -> Result<()> {

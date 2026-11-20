@@ -501,7 +501,7 @@ pub(crate) async fn new_entry(
 
 pub(crate) async fn insert_entry(tx: &mut WriteTx<'_>, e: &TimeEntry) -> Result<()> {
     let s = tx.stamp();
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO time_entry (id, workspace_id, user_id, activity_id, project_id, start_at, end_at, tz,
             note, billable, source, source_ref, locked, cost_center_id, created_at, updated_at, hlc,
             origin_device)
@@ -526,8 +526,10 @@ pub(crate) async fn insert_entry(tx: &mut WriteTx<'_>, e: &TimeEntry) -> Result<
     .bind(&s.hlc)
     .bind(&s.device)
     .execute(tx.conn())
-    .await
-    .map_err(running_conflict)?;
+    .await;
+    if let Err(err) = inserted {
+        return Err(running_conflict(tx, err).await);
+    }
     write_tags(tx.conn(), &e.id, &e.tag_ids).await?;
     invalidate_entry_days(tx, e.start_at, e.end_at).await?;
     tx.emit(DomainEvent::EntryCreated { entry: e.clone() });
@@ -552,7 +554,7 @@ pub(crate) async fn update_entry_row(tx: &mut WriteTx<'_>, mut e: TimeEntry) -> 
     invalidate_entry_days(tx, e.start_at, e.end_at).await?;
     let s = tx.stamp();
     e.updated_at = s.now;
-    let done = sqlx::query(
+    let updated = sqlx::query(
         "UPDATE time_entry SET activity_id = ?, project_id = ?, start_at = ?, end_at = ?, tz = ?, note = ?,
             billable = ?, locked = ?, cost_center_id = ?, updated_at = ?, hlc = ?, origin_device = ?
          WHERE id = ? AND user_id = ? AND workspace_id = ?",
@@ -573,8 +575,11 @@ pub(crate) async fn update_entry_row(tx: &mut WriteTx<'_>, mut e: TimeEntry) -> 
     .bind(&e.user_id)
     .bind(&ws)
     .execute(tx.conn())
-    .await
-    .map_err(running_conflict)?;
+    .await;
+    let done = match updated {
+        Ok(done) => done,
+        Err(err) => return Err(running_conflict(tx, err).await),
+    };
     if done.rows_affected() == 0 {
         return Err(not_found("entry", &e.id));
     }
@@ -599,10 +604,27 @@ async fn write_tags(conn: &mut SqliteConnection, entry_id: &str, tag_ids: &[Stri
     Ok(())
 }
 
-fn running_conflict(err: sqlx::Error) -> Error {
+/// A unique-index violation on the running entry. The index is per user, so the running entry may belong
+/// to another workspace of the same account; say so when this workspace has none.
+async fn running_conflict(tx: &mut WriteTx<'_>, err: sqlx::Error) -> Error {
     match &err {
         sqlx::Error::Database(db) if db.is_unique_violation() => {
-            Error::Conflict("Another entry is already running.".into())
+            let ws = tx.ctx().workspace_id.clone();
+            let user = tx.ctx().user_id.clone();
+            let here: std::result::Result<Option<i64>, sqlx::Error> = sqlx::query_scalar(
+                "SELECT 1 FROM time_entry
+                 WHERE workspace_id = ? AND user_id = ? AND end_at IS NULL AND deleted_at IS NULL",
+            )
+            .bind(ws)
+            .bind(user)
+            .fetch_optional(tx.conn())
+            .await;
+            match here {
+                Ok(None) => Error::Conflict(
+                    "A timer is already running in another workspace. Stop it there, then try again.".into(),
+                ),
+                _ => Error::Conflict("Another entry is already running.".into()),
+            }
         }
         _ => Error::Db(err),
     }
