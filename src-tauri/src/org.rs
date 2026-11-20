@@ -87,6 +87,8 @@ pub fn allowed(method: &str, path: &str) -> bool {
         && !path.contains("..")
         && !path.contains("//")
         && !path.contains('\\')
+        // A path parameter (`;x=y`) is read by some servers and proxies as part of the segment.
+        && !path.contains(';')
         // Percent-encoded dots and slashes (%2e%2e, %2f) would pass the checks above and be decoded by the server.
         && !path.contains('%')
         && !path
@@ -107,14 +109,45 @@ pub fn allowed(method: &str, path: &str) -> bool {
 }
 
 /// The text of the native question the app asks the person before sending this, if any: destructive organization
-/// changes must not depend on the web view alone (script running in it could otherwise send them).
-pub fn confirmation(method: &str, path: &str) -> Option<&'static str> {
+/// changes must not depend on the web view alone (script running in it could otherwise send them). It names the
+/// organization and the member, role or token concerned (as sent, shortened), so the person sees what is changed.
+pub fn confirmation(method: &str, path: &str) -> Option<String> {
     const LDAP: &str = "Change or remove the company directory? People may no longer be able to sign in with it.\n\nDas Firmenverzeichnis ändern oder entfernen? Personen können sich eventuell nicht mehr damit anmelden.";
     let bare = path.split('?').next().unwrap_or("");
     if bare == "/v1/admin/ldap" && (method == "PUT" || method == "DELETE") {
-        return Some(LDAP);
+        return Some(LDAP.to_string());
     }
-    org_route(method, &org_segments(path)?).flatten()
+    let segments = org_segments(path)?;
+    let text = org_route(method, &segments).flatten()?;
+    Some(format!("{text}\n\n{}", target(&segments)))
+}
+
+/// Shortens an id taken from the path for display.
+fn short(id: &str) -> String {
+    const MAX: usize = 40;
+    if id.chars().count() > MAX {
+        format!("{}…", id.chars().take(MAX).collect::<String>())
+    } else {
+        id.to_string()
+    }
+}
+
+/// Which organization, and which member, role or token, a request names.
+fn target(segments: &[&str]) -> String {
+    let mut out = String::new();
+    if let Some(org) = segments.first() {
+        out.push_str(&format!("Organization / Organisation: {}", short(org)));
+    }
+    let label = match segments {
+        [_, "members", _, ..] => Some("Member / Mitglied"),
+        [_, "roles", _] => Some("Role / Rolle"),
+        [_, "scim", "tokens", _] => Some("Token"),
+        _ => None,
+    };
+    if let (Some(label), Some(id)) = (label, segments.last()) {
+        out.push_str(&format!("\n{label}: {}", short(id)));
+    }
+    out
 }
 
 async fn confirm(app: &AppHandle, text: &str) -> bool {
@@ -188,7 +221,7 @@ pub async fn org_request(
         return Err(err("forbidden", "this request is not allowed"));
     }
     if let Some(text) = confirmation(&method, &path) {
-        if !confirm(&app, text).await {
+        if !confirm(&app, &text).await {
             return Err(err("cancelled", "not confirmed"));
         }
     }
@@ -280,12 +313,26 @@ mod tests {
     }
 
     #[test]
+    fn confirmations_name_the_target() {
+        let text = confirmation("DELETE", "/v1/orgs/org-1/members/user-9").unwrap();
+        assert!(text.contains("org-1") && text.contains("user-9"), "{text}");
+        let text = confirmation("DELETE", "/v1/orgs/org-1").unwrap();
+        assert!(text.contains("org-1"), "{text}");
+        let long = "a".repeat(200);
+        let text = confirmation("DELETE", &format!("/v1/orgs/{long}")).unwrap();
+        assert!(text.len() < 400 && !text.contains(&long), "{text}");
+    }
+
+    #[test]
     fn non_canonical_organization_paths_are_refused() {
         assert!(!allowed("DELETE", "/v1/orgs/./x"));
         assert!(!allowed("DELETE", "/v1/orgs/x/"));
         assert!(!allowed("DELETE", "/v1/orgs/x/./"));
         assert!(!allowed("DELETE", "/v1/orgs/x/."));
         assert!(!allowed("GET", "/v1/orgs/./x"));
+        assert!(!allowed("DELETE", "/v1/orgs/x;a=b"));
+        assert!(!allowed("DELETE", "/v1/orgs/x/members/u;a=b"));
+        assert!(!allowed("GET", "/v1/orgs/x/members;a=b"));
         assert!(confirmation("DELETE", "/v1/orgs/x/").is_none());
         assert!(allowed("DELETE", "/v1/orgs/x"));
         assert!(allowed("GET", "/v1/orgs/x/members?limit=5"));
