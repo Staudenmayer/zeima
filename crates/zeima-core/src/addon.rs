@@ -362,10 +362,16 @@ pub fn display_safe(text: &str) -> String {
 
 fn check_display(field: &'static str, text: &str, max: usize) -> Result<()> {
     if text.chars().count() > max {
-        return Err(Error::validation(field, format!("must be at most {max} characters")));
+        return Err(Error::validation(
+            field,
+            format!("must be at most {max} characters"),
+        ));
     }
     if text.chars().any(is_unsafe_display_char) {
-        return Err(Error::validation(field, "must not contain control or direction-changing characters"));
+        return Err(Error::validation(
+            field,
+            "must not contain control or direction-changing characters",
+        ));
     }
     Ok(())
 }
@@ -615,9 +621,10 @@ mod tests {
 
     #[test]
     fn invisible_format_characters_are_not_displayable() {
-        for c in ['\u{AD}', '\u{61C}', '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}',
-            '\u{2060}', '\u{2062}', '\u{2064}', '\u{FEFF}', '\u{202E}', '\u{2066}', '\u{7}', '\n']
-        {
+        for c in [
+            '\u{AD}', '\u{61C}', '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{2060}',
+            '\u{2062}', '\u{2064}', '\u{FEFF}', '\u{202E}', '\u{2066}', '\u{7}', '\n',
+        ] {
             assert!(is_unsafe_display_char(c), "{:x}", c as u32);
         }
         assert!(!is_unsafe_display_char('a') && !is_unsafe_display_char('ä') && !is_unsafe_display_char(' '));
@@ -728,7 +735,9 @@ auth_params = { access_type = "offline", prompt = "consent" }
         for ok in ["com.example.csv-export", "a.b", "zeima.meetings"] {
             assert!(is_addon_id(ok), "{ok}");
         }
-        for bad in ["C:", ".", "a/b", "..", "x:y", "", "a", "a..b", "a.b\\c", "C:.a", "A.b", "a.b.", "a.1b"] {
+        for bad in [
+            "C:", ".", "a/b", "..", "x:y", "", "a", "a..b", "a.b\\c", "C:.a", "A.b", "a.b.", "a.1b",
+        ] {
             assert!(!is_addon_id(bad), "{bad}");
         }
     }

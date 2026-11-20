@@ -263,9 +263,15 @@ fn consent_text(
         }
         (S::ServerTrusted, Some(name)) => {
             if de {
-                format!("Signiert von {} (vom Server der Installation bestätigt)", safe(name))
+                format!(
+                    "Signiert von {} (vom Server der Installation bestätigt)",
+                    safe(name)
+                )
             } else {
-                format!("Signed by {} (vouched for by this installation's server)", safe(name))
+                format!(
+                    "Signed by {} (vouched for by this installation's server)",
+                    safe(name)
+                )
             }
         }
         (S::UnknownKey, _) => (if de {
@@ -1108,7 +1114,10 @@ mod tests {
         let text = consent_text(&manifest, &SignatureCheck::unsigned(), None, false);
         assert!(text.contains("h0.example.com"));
         assert!(!text.contains("h39.example.com"));
-        assert!(text.contains(&format!("+{} more", 40 - MAX_HOSTS_SHOWN)), "{text}");
+        assert!(
+            text.contains(&format!("+{} more", 40 - MAX_HOSTS_SHOWN)),
+            "{text}"
+        );
     }
 
     #[test]
@@ -1120,7 +1129,8 @@ mod tests {
         let text = consent_text(&manifest, &SignatureCheck::unsigned(), None, false);
         assert_eq!(text.lines().count(), plain.lines().count());
         assert!(!text.contains("Signed by X\n"));
-        assert!(!text.chars().any(|c| c.is_control() && c != '\n' || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')));
+        assert!(!text.chars().any(|c| c.is_control() && c != '\n'
+            || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')));
     }
 
     /// A signed package built the way `scripts/addons.mjs` makes it is read, and its signature checks out;

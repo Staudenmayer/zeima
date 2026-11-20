@@ -264,12 +264,7 @@ mod tests {
         assert!(signed_by(1, "pub", true, "pub").continues(&installed));
         assert!(signed_by(1, "pub", false, "pub").continues(&installed));
         // (a) The key is not known: only the claimed id matches.
-        let unknown = check(
-            b"m",
-            b"w",
-            Some(r#"{"keyId":"pub","signature":"AAAA"}"#),
-            &[],
-        );
+        let unknown = check(b"m", b"w", Some(r#"{"keyId":"pub","signature":"AAAA"}"#), &[]);
         assert_eq!(unknown.status, SignatureStatus::UnknownKey);
         assert!(!unknown.continues(&installed));
         // (b) The id now belongs to a different, server-published key.

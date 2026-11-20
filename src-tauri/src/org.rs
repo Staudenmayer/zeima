@@ -43,9 +43,7 @@ pub fn allowed(method: &str, path: &str) -> bool {
         || path == "/v1/admin/ldap/test"
         || path == "/v1/admin/ldap/sync"
         || path == "/v1/orgs"
-        || path
-            .strip_prefix("/v1/orgs/")
-            .is_some_and(canonical_segments);
+        || path.strip_prefix("/v1/orgs/").is_some_and(canonical_segments);
     // `/v1/me` is read-only; the profile picture can be set (PUT) and removed (DELETE).
     let method_ok = match path {
         "/v1/me" => method == "GET",
