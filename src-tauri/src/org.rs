@@ -18,6 +18,13 @@ fn err(code: &str, message: impl ToString) -> CmdError {
     CmdError::other(code, message)
 }
 
+/// Every `/`-separated segment (query string aside) is non-empty and not `.`: `/v1/orgs/./x` and `/v1/orgs/x/` name
+/// the same resource as `/v1/orgs/x` for the server, but would slip past the exact-shape check of the confirmation.
+fn canonical_segments(rest: &str) -> bool {
+    let rest = rest.split('?').next().unwrap_or("");
+    rest.split('/').all(|s| !s.is_empty() && s != ".")
+}
+
 /// Whether the app may send this request: a known method and a plain path
 /// below `/v1/orgs` (or exactly `/v1/me`), without tricks.
 pub fn allowed(method: &str, path: &str) -> bool {
@@ -38,7 +45,7 @@ pub fn allowed(method: &str, path: &str) -> bool {
         || path == "/v1/orgs"
         || path
             .strip_prefix("/v1/orgs/")
-            .is_some_and(|rest| !rest.is_empty());
+            .is_some_and(canonical_segments);
     // `/v1/me` is read-only; the profile picture can be set (PUT) and removed (DELETE).
     let method_ok = match path {
         "/v1/me" => method == "GET",
@@ -58,7 +65,7 @@ pub fn needs_confirmation(method: &str, path: &str) -> bool {
     method == "DELETE"
         && path
             .strip_prefix("/v1/orgs/")
-            .is_some_and(|rest| !rest.is_empty() && !rest.contains('/'))
+            .is_some_and(|rest| canonical_segments(rest) && !rest.contains('/'))
 }
 
 async fn confirm(app: &AppHandle, text: &str) -> bool {
@@ -188,6 +195,19 @@ mod tests {
         assert!(needs_confirmation("DELETE", "/v1/orgs/0b2f"));
         assert!(!needs_confirmation("DELETE", "/v1/orgs/0b2f/members/8a1c"));
         assert!(!needs_confirmation("GET", "/v1/orgs/0b2f"));
+    }
+
+    #[test]
+    fn non_canonical_organization_paths_are_refused() {
+        assert!(!allowed("DELETE", "/v1/orgs/./x"));
+        assert!(!allowed("DELETE", "/v1/orgs/x/"));
+        assert!(!allowed("DELETE", "/v1/orgs/x/./"));
+        assert!(!allowed("DELETE", "/v1/orgs/x/."));
+        assert!(!allowed("GET", "/v1/orgs/./x"));
+        assert!(!needs_confirmation("DELETE", "/v1/orgs/x/"));
+        assert!(allowed("DELETE", "/v1/orgs/x"));
+        assert!(allowed("GET", "/v1/orgs/x/members?limit=5"));
+        assert!(allowed("GET", "/v1/orgs"));
     }
 
     #[test]
