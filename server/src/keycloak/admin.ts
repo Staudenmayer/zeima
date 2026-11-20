@@ -130,19 +130,30 @@ const LDAP_NAME = 'zeima-ldap'
 /** The Keycloak alias of an organization's identity provider; it is part of the address the provider redirects to. */
 export const ssoAlias = (orgId: string) => `sso-${orgId}`
 
+/** The imported settings that name an address; the provider is contacted at each, so each must be public. */
+export const SSO_ADDRESS_KEYS = [
+  'authorizationUrl', 'tokenUrl', 'userInfoUrl', 'jwksUrl', 'logoutUrl', 'tokenIntrospectionUrl', 'metadataDescriptorUrl',
+  'singleSignOnServiceUrl', 'singleLogoutServiceUrl', 'artifactResolutionServiceUrl',
+] as const
+
 /**
  * The settings of a parsed OIDC or SAML document that are kept: its addresses, issuer, entity ids and
- * certificates. Everything else in the parser's answer is dropped, so a document cannot set other
- * provider options (the ones that matter are set below).
+ * certificates, and the SAML logout binding. Everything else in the parser's answer is dropped, so a
+ * document cannot set other provider options (the ones that matter are set below). The address keys come
+ * from the one list above, so what is kept and what is checked cannot drift apart.
  */
-export const IMPORTED_SSO_KEYS: ReadonlySet<string> = new Set([
-  'issuer', 'authorizationUrl', 'tokenUrl', 'userInfoUrl', 'jwksUrl', 'logoutUrl', 'tokenIntrospectionUrl', 'metadataDescriptorUrl',
-  'singleSignOnServiceUrl', 'singleLogoutServiceUrl', 'artifactResolutionServiceUrl',
-  'entityId', 'idpEntityId', 'signingCertificate', 'encryptionPublicKey',
+export const IMPORTED_SSO_KEYS: ReadonlySet<string> = new Set<string>([
+  ...SSO_ADDRESS_KEYS,
+  'issuer', 'entityId', 'idpEntityId', 'signingCertificate', 'encryptionPublicKey', 'postBindingLogout',
 ])
 
+/** Settings a document may only turn on: 'true' is kept, anything else is dropped, so it cannot lower security. */
+const RATCHET_SSO_KEYS: readonly string[] = ['wantAuthnRequestsSigned']
+
 const pickImported = (imported: Record<string, string>): Record<string, string> =>
-  Object.fromEntries(Object.entries(imported).filter(([k]) => IMPORTED_SSO_KEYS.has(k)))
+  Object.fromEntries(
+    Object.entries(imported).filter(([k, v]) => IMPORTED_SSO_KEYS.has(k) || (RATCHET_SSO_KEYS.includes(k) && v === 'true')),
+  )
 
 export interface KcUser {
   id: string

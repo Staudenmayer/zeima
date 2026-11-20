@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HttpKeycloakAdmin } from '../src/keycloak/admin.ts'
+import { HttpKeycloakAdmin, type SsoInput } from '../src/keycloak/admin.ts'
 
 const admin = { apiUrl: 'http://kc/admin/realms/zeima', tokenUrl: 'http://kc/token', clientId: 'x', clientSecret: 'y' }
 const fakeFetch = (status: number): typeof fetch =>
@@ -70,5 +70,33 @@ describe('setSso', () => {
     expect(config).not.toHaveProperty('hideOnLogin')
     expect(config).not.toHaveProperty('trustEmail')
     expect(config).not.toHaveProperty('extra.option')
+  })
+
+  describe('SAML metadata', () => {
+    const saml: SsoInput = { protocol: 'saml', name: 'Acme', enabled: true, sourceUrl: 'https://login.acme.example/metadata', domains: ['acme.example'] }
+    const run = async (imported: Record<string, string>) => {
+      const bodies: Record<string, unknown>[] = []
+      const f = (async (url: string | URL | Request, init?: RequestInit) => {
+        const u = String(url)
+        if (u.endsWith('/token')) return new Response(JSON.stringify({ access_token: 't', expires_in: 300 }), { status: 200 })
+        if (init?.method === 'POST' && u.endsWith('/identity-provider/instances')) bodies.push(JSON.parse(String(init.body)))
+        if (u.includes('/identity-provider/instances/')) return new Response('', { status: 404 })
+        return new Response('{}', { status: 200 })
+      }) as typeof fetch
+      await new HttpKeycloakAdmin(admin, f).setSso('o1', saml, imported)
+      return (bodies[0] as { config: Record<string, string> }).config
+    }
+
+    it('keeps a signed-request requirement and the logout binding from the document', async () => {
+      const config = await run({ singleSignOnServiceUrl: 'https://login.acme.example/sso', wantAuthnRequestsSigned: 'true', postBindingLogout: 'true', 'extra.option': 'x' })
+      expect(config).toMatchObject({ wantAuthnRequestsSigned: 'true', postBindingLogout: 'true', validateSignature: 'true' })
+      expect(config).not.toHaveProperty('extra.option')
+    })
+
+    it('never lets the document lower a setting that only ratchets up', async () => {
+      for (const value of ['false', '', 'TRUE', '1']) {
+        expect(await run({ wantAuthnRequestsSigned: value })).not.toHaveProperty('wantAuthnRequestsSigned')
+      }
+    })
   })
 })
