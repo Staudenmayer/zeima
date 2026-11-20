@@ -360,14 +360,46 @@ async fn refresh_entitlement(app: &AppHandle, api: &str, token: &str) {
     }
 }
 
+/// Whether the server's refusal of a push means the membership is really gone (forbidden / not found), as opposed
+/// to a passing failure (server error, offline) after which the data must be kept.
+fn membership_gone(error: &str) -> bool {
+    ["403", "404"]
+        .iter()
+        .any(|code| error.starts_with(&format!("the server answered {code}")))
+}
+
+/// Whether a workspace missing from the server's list may be dropped: nothing waits to be pushed, or the push
+/// worked, or the server says the membership is gone. Otherwise its unsent changes are kept for the next sync.
+fn may_drop(had_pending: bool, push: &Result<usize, String>) -> bool {
+    !had_pending || push.as_ref().is_ok() || push.as_ref().is_err_and(|e| membership_gone(e))
+}
+
 /// Removes the organizations' workspaces on this device that the server no longer lists for this account,
-/// with their data. If the person was working in one, they are taken back to their personal workspace first.
-async fn drop_gone_workspaces(app: &AppHandle, listed: &[ServerWorkspace]) -> Result<(), String> {
+/// with their data. Changes not yet sent are pushed first; a workspace whose push fails for another reason than
+/// a lost membership stays until the next sync. If the person was working in one, they are taken back to their
+/// personal workspace first.
+async fn drop_gone_workspaces(
+    app: &AppHandle,
+    api: &str,
+    token: &str,
+    user_id: &str,
+    listed: &[ServerWorkspace],
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     let local = state.core.workspaces().await.map_err(|e| e.to_string())?;
     let mut removed = false;
     for w in local.iter().filter(|w| w.kind == "org") {
         if listed.iter().any(|s| s.id == w.id) {
+            continue;
+        }
+        let scope = state.core.scoped(&w.id, user_id);
+        let had_pending = !scope.sync_outbox(1).await.map_err(|e| e.to_string())?.is_empty();
+        let push = if had_pending {
+            push_all(&scope, api, token, &w.id).await
+        } else {
+            Ok(0)
+        };
+        if !may_drop(had_pending, &push) {
             continue;
         }
         if state.data().ctx().workspace_id == w.id {
@@ -413,7 +445,7 @@ async fn adopt_shared_workspaces(
     let listed = serde_json::from_value::<Vec<ServerWorkspace>>(list)
         .map_err(|e| format!("the server's answer: {e}"))?;
     // Only after a good answer: organizations the person left, or was removed from, vanish with their data.
-    drop_gone_workspaces(app, &listed).await?;
+    drop_gone_workspaces(app, api, token, &user.id, &listed).await?;
     let mut shared = Vec::new();
     for w in listed.into_iter().filter(|w| w.kind == "org") {
         let Some(org_id) = w.org_id.as_deref() else {
@@ -910,6 +942,25 @@ mod tests {
             SyncErrorKind::UpdateNeeded
         );
         assert_eq!(classify("the server answered 500: oops"), SyncErrorKind::Server);
+    }
+
+    #[test]
+    fn a_gone_workspace_with_unsent_changes_is_dropped_only_when_the_membership_is_gone() {
+        let failed = |m: &str| Err::<usize, String>(m.to_string());
+        // Nothing to push: dropped as before.
+        assert!(may_drop(false, &Ok(0)));
+        // Pushed: dropped.
+        assert!(may_drop(true, &Ok(3)));
+        // Membership really gone.
+        assert!(may_drop(true, &failed("the server answered 403: forbidden")));
+        assert!(may_drop(true, &failed("the server answered 404: not found")));
+        // Passing failures keep the data.
+        assert!(!may_drop(true, &failed("the server answered 500: oops")));
+        assert!(!may_drop(
+            true,
+            &failed("could not reach the server: Connection Failed")
+        ));
+        assert!(!may_drop(true, &failed("the server answered 401: expired")));
     }
 
     #[test]
