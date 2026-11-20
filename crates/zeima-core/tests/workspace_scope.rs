@@ -251,3 +251,95 @@ async fn a_synced_entry_cannot_link_a_tag_of_another_workspace() {
     assert_eq!(report.conflicts, 1, "{report:?}");
     assert!(matches!(a.get_entry(bad).await, Err(Error::NotFound { .. })));
 }
+
+fn schedule_input(valid_from: &str) -> zeima_core::WorkScheduleInput {
+    zeima_core::WorkScheduleInput {
+        valid_from: valid_from.parse().unwrap(),
+        model: zeima_core::worktime::ScheduleModel::Flextime,
+        days: (0..7)
+            .map(|_| zeima_core::worktime::DayPlan {
+                target_minutes: 480,
+                core_start: None,
+                core_end: None,
+            })
+            .collect(),
+    }
+}
+
+#[tokio::test]
+async fn settings_and_schedules_of_two_organizations_do_not_collide() {
+    let (_personal, a, b) = two_orgs().await;
+
+    a.set_display_settings(&serde_json::json!({"language": "de"}))
+        .await
+        .unwrap();
+    b.set_display_settings(&serde_json::json!({"language": "fr"}))
+        .await
+        .unwrap();
+    assert_eq!(a.display_settings().await.unwrap().unwrap()["language"], "de");
+    assert_eq!(b.display_settings().await.unwrap().unwrap()["language"], "fr");
+
+    let sa = zeima_core::model::WorkSettings {
+        deduct_breaks: true,
+        ..Default::default()
+    };
+    let sb = zeima_core::model::WorkSettings {
+        deduct_breaks: false,
+        ..Default::default()
+    };
+    // The organization sets work settings and schedules through a managing handle.
+    let (ma, mb) = (a.managing(ME), b.managing(ME));
+    ma.set_work_settings(sa).await.unwrap();
+    mb.set_work_settings(sb).await.unwrap();
+    assert!(a.work_settings().await.unwrap().deduct_breaks);
+    assert!(!b.work_settings().await.unwrap().deduct_breaks);
+
+    ma.save_schedule(None, schedule_input("2026-01-01"))
+        .await
+        .unwrap();
+    mb.save_schedule(None, schedule_input("2026-01-01"))
+        .await
+        .unwrap();
+    assert_eq!(a.list_schedules().await.unwrap().len(), 1);
+    assert_eq!(b.list_schedules().await.unwrap().len(), 1);
+    // Within one workspace the date is still taken once.
+    assert!(ma
+        .save_schedule(None, schedule_input("2026-01-01"))
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn computed_days_are_not_shared_between_organizations() {
+    use zeima_core::model::EntryInput;
+
+    let (_personal, a, b) = two_orgs().await;
+    let activity = a
+        .create_activity(zeima_core::model::ActivityInput {
+            name: "Work".into(),
+            color: "#3b82f6".into(),
+            archived: false,
+        })
+        .await
+        .unwrap();
+    let day: chrono::NaiveDate = "2026-10-03".parse().unwrap();
+    let start = T0 - 2 * 86_400_000 + 8 * 3_600_000;
+    a.create_entry(EntryInput {
+        activity_id: Some(activity.id),
+        project_id: None,
+        start_at: start,
+        end_at: Some(start + 3_600_000),
+        tz: Some("UTC".into()),
+        note: String::new(),
+        billable: None,
+        tag_ids: Vec::new(),
+        cost_center_id: None,
+    })
+    .await
+    .unwrap();
+    // A's read fills the cache; B must not be served A's day.
+    let worked_a = a.work_days(day, day).await.unwrap()[0].worked_ms;
+    assert!(worked_a > 0, "{worked_a}");
+    assert_eq!(b.work_days(day, day).await.unwrap()[0].worked_ms, 0);
+    assert_eq!(a.work_days(day, day).await.unwrap()[0].worked_ms, worked_a);
+}

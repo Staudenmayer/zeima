@@ -149,18 +149,33 @@ fn model_str(model: ScheduleModel) -> &'static str {
 /// too, because of the rest-time check). `to = None` invalidates all later days.
 pub(crate) async fn invalidate_days(
     conn: &mut SqliteConnection,
+    workspace_id: &str,
     user_id: &str,
     from: NaiveDate,
     to: Option<NaiveDate>,
 ) -> Result<()> {
     let to = to.map(|d| d + Duration::days(1)).unwrap_or(NaiveDate::MAX);
-    sqlx::query("DELETE FROM daily_summary WHERE user_id = ? AND date >= ? AND date <= ?")
-        .bind(user_id)
-        .bind(from)
-        .bind(to)
-        .execute(conn)
-        .await?;
+    sqlx::query(
+        "DELETE FROM daily_summary WHERE workspace_id = ? AND user_id = ? AND date >= ? AND date <= ?",
+    )
+    .bind(workspace_id)
+    .bind(user_id)
+    .bind(from)
+    .bind(to)
+    .execute(conn)
+    .await?;
     Ok(())
+}
+
+/// `invalidate_days` for the workspace of the transaction.
+async fn invalidate_days_tx(
+    tx: &mut WriteTx<'_>,
+    user_id: &str,
+    from: NaiveDate,
+    to: Option<NaiveDate>,
+) -> Result<()> {
+    let workspace = tx.ctx().workspace_id.clone();
+    invalidate_days(tx.conn(), &workspace, user_id, from, to).await
 }
 
 /// Invalidates the days touched by an entry spanning `[start, end]`.
@@ -169,7 +184,7 @@ pub(crate) async fn invalidate_entry_days(tx: &mut WriteTx<'_>, start: i64, end:
     let user = tx.ctx().user_id.clone();
     let from = worktime::local_date(start, tz);
     let to = end.map(|e| worktime::local_date(e, tz));
-    invalidate_days(tx.conn(), &user, from, to).await
+    invalidate_days_tx(tx, &user, from, to).await
 }
 
 async fn invalidate_all(tx: &mut WriteTx<'_>) -> Result<()> {
@@ -397,7 +412,7 @@ impl Core {
         .await?;
         let valid_from = valid_from.ok_or_else(|| not_found("schedule", id))?;
         soft_delete(&mut tx, "work_schedule", id).await?;
-        invalidate_days(tx.conn(), &user, valid_from, None).await?;
+        invalidate_days_tx(&mut tx, &user, valid_from, None).await?;
         tx.commit().await
     }
 
@@ -651,7 +666,7 @@ impl Core {
         let to = previous
             .as_ref()
             .map_or(absence.end_date, |p| p.end_date.max(absence.end_date));
-        invalidate_days(tx.conn(), &user, from, Some(to)).await?;
+        invalidate_days_tx(&mut tx, &user, from, Some(to)).await?;
         tx.commit().await?;
         Ok(absence)
     }
@@ -720,8 +735,8 @@ impl Core {
         .execute(tx.conn())
         .await?;
         tx.log_upsert("absence", id, &s, &absence).await?;
-        invalidate_days(
-            tx.conn(),
+        invalidate_days_tx(
+            &mut tx,
             &absence.user_id,
             absence.start_date,
             Some(absence.end_date),
@@ -745,7 +760,7 @@ impl Core {
         .ok_or_else(|| not_found("absence", id))?;
         let (from, to): (NaiveDate, NaiveDate) = (row.try_get("start_date")?, row.try_get("end_date")?);
         soft_delete(&mut tx, "absence", id).await?;
-        invalidate_days(tx.conn(), &user, from, Some(to)).await?;
+        invalidate_days_tx(&mut tx, &user, from, Some(to)).await?;
         tx.commit().await
     }
 
@@ -799,7 +814,7 @@ impl Core {
         .await?;
         tx.log_upsert("custom_holiday", &h.id, &s, &h).await?;
         let user = tx.ctx().user_id.clone();
-        invalidate_days(tx.conn(), &user, date, Some(date)).await?;
+        invalidate_days_tx(&mut tx, &user, date, Some(date)).await?;
         tx.commit().await?;
         Ok(h)
     }
@@ -817,7 +832,7 @@ impl Core {
         let date = date.ok_or_else(|| not_found("holiday", id))?;
         soft_delete(&mut tx, "custom_holiday", id).await?;
         let user = tx.ctx().user_id.clone();
-        invalidate_days(tx.conn(), &user, date, Some(date)).await?;
+        invalidate_days_tx(&mut tx, &user, date, Some(date)).await?;
         tx.commit().await
     }
 
@@ -908,7 +923,7 @@ impl Core {
         .execute(tx.conn())
         .await?;
         tx.log_upsert("balance_adjustment", &a.id, &s, &a).await?;
-        invalidate_days(tx.conn(), &user, a.date, Some(a.date)).await?;
+        invalidate_days_tx(&mut tx, &user, a.date, Some(a.date)).await?;
         tx.commit().await?;
         Ok(a)
     }
@@ -927,7 +942,7 @@ impl Core {
         .await?;
         let date = date.ok_or_else(|| not_found("adjustment", id))?;
         soft_delete(&mut tx, "balance_adjustment", id).await?;
-        invalidate_days(tx.conn(), &user, date, Some(date)).await?;
+        invalidate_days_tx(&mut tx, &user, date, Some(date)).await?;
         tx.commit().await
     }
 
@@ -946,8 +961,10 @@ impl Core {
         if from <= cache_to {
             let rows = sqlx::query(
                 "SELECT data FROM daily_summary
-                 WHERE user_id = ? AND date >= ? AND date <= ? AND profile_version = ? ORDER BY date",
+                 WHERE workspace_id = ? AND user_id = ? AND date >= ? AND date <= ? AND profile_version = ?
+                 ORDER BY date",
             )
+            .bind(&self.ctx().workspace_id)
             .bind(&self.ctx().user_id)
             .bind(from)
             .bind(cache_to)
@@ -976,11 +993,12 @@ impl Core {
         let mut tx = self.pool().begin().await?;
         for day in days.iter().filter(|d| d.date < today) {
             sqlx::query(
-                "INSERT INTO daily_summary (user_id, date, data, profile_version, computed_at)
-                 VALUES (?, ?, ?, ?, ?)
-                 ON CONFLICT (user_id, date) DO UPDATE SET data = excluded.data,
+                "INSERT INTO daily_summary (workspace_id, user_id, date, data, profile_version, computed_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (workspace_id, user_id, date) DO UPDATE SET data = excluded.data,
                     profile_version = excluded.profile_version, computed_at = excluded.computed_at",
             )
+            .bind(&self.ctx().workspace_id)
             .bind(&self.ctx().user_id)
             .bind(day.date)
             .bind(serde_json::to_string(day)?)
@@ -1226,7 +1244,7 @@ async fn write_schedule(
     tx.log_upsert("work_schedule", &schedule.id, &s, &schedule)
         .await?;
     let from = previous_from.map_or(schedule.valid_from, |p| p.min(schedule.valid_from));
-    invalidate_days(tx.conn(), &user, from, None).await?;
+    invalidate_days_tx(tx, &user, from, None).await?;
     Ok(schedule)
 }
 
