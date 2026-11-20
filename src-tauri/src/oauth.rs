@@ -66,6 +66,9 @@ fn post_with_agent(agent: ureq::Agent) -> PostForm {
     })
 }
 
+/// Keep in step with `zeima_public` in vendor/extism/src/pdk.rs (the same rules; that function is private to the
+/// vendored crate, so no test can compare the two directly).
+///
 /// Whether an address is on the public internet: global unicast only, without loopback, private, link-local, CGNAT,
 /// documentation, benchmarking, multicast, reserved, 6to4, Teredo, NAT64 and IPv4-mapped/compatible forms of those.
 pub(crate) fn is_global(ip: std::net::IpAddr) -> bool {
@@ -103,6 +106,9 @@ pub(crate) fn is_global(ip: std::net::IpAddr) -> bool {
     }
 }
 
+/// Capacity of ureq's `ResolvedSocketAddrs`.
+const MAX_PINNED_ADDRS: usize = 16;
+
 /// Name lookup; injected so tests need no DNS.
 type Lookup = Arc<dyn Fn(&str, u16) -> std::io::Result<Vec<std::net::SocketAddr>> + Send + Sync>;
 
@@ -119,7 +125,10 @@ impl std::fmt::Display for Refused {
 impl std::error::Error for Refused {}
 
 fn refuse(message: String) -> ureq::Error {
-    ureq::Error::Io(std::io::Error::new(std::io::ErrorKind::PermissionDenied, Refused(message)))
+    ureq::Error::Io(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        Refused(message),
+    ))
 }
 
 /// Resolves the host once and hands ureq only the addresses that were checked, so the connection goes to exactly
@@ -142,7 +151,9 @@ impl ureq::unversioned::resolver::Resolver for PublicResolver {
         _config: &ureq::config::Config,
         _timeout: ureq::unversioned::transport::NextTimeout,
     ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
-        let host = uri.host().ok_or_else(|| refuse("the token endpoint has no host".into()))?;
+        let host = uri
+            .host()
+            .ok_or_else(|| refuse("the token endpoint has no host".into()))?;
         let host = host.trim_start_matches('[').trim_end_matches(']');
         let port = uri.port_u16().unwrap_or(443);
         let addrs = (self.lookup)(host, port)
@@ -150,8 +161,9 @@ impl ureq::unversioned::resolver::Resolver for PublicResolver {
         if addrs.is_empty() || addrs.iter().any(|a| !(self.allowed)(a.ip())) {
             return Err(refuse("the token endpoint is not on the public internet".into()));
         }
+        // ureq's list holds 16 entries and its `push` does not check the capacity, so more than that must not be pushed.
         let mut out = self.empty();
-        for a in addrs {
+        for a in addrs.into_iter().take(MAX_PINNED_ADDRS) {
             out.push(a);
         }
         Ok(out)
@@ -555,21 +567,50 @@ mod tests {
     #[test]
     fn address_classifier_rejects_special_ranges() {
         for bad in [
-            "0.1.2.3", "192.0.0.9", "192.0.2.1", "192.88.99.1", "198.18.0.1", "198.19.255.1", "198.51.100.1",
-            "203.0.113.1", "224.0.0.1", "239.1.1.1", "240.0.0.1", "255.255.255.255", "100.127.0.1",
-            "::", "::2", "::127.0.0.1", "::ffff:127.0.0.1", "::ffff:0.0.0.0", "2001::1", "2001:1ff::1", "2001:db8::1",
-            "3fff::1", "3fff:fff::1", "2002::1", "ff02::1", "5f00::1",
+            "0.1.2.3",
+            "192.0.0.9",
+            "192.0.2.1",
+            "192.88.99.1",
+            "198.18.0.1",
+            "198.19.255.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "239.1.1.1",
+            "240.0.0.1",
+            "255.255.255.255",
+            "100.127.0.1",
+            "::",
+            "::2",
+            "::127.0.0.1",
+            "::ffff:127.0.0.1",
+            "::ffff:0.0.0.0",
+            "2001::1",
+            "2001:1ff::1",
+            "2001:db8::1",
+            "3fff::1",
+            "3fff:fff::1",
+            "2002::1",
+            "ff02::1",
+            "5f00::1",
         ] {
             assert!(!is_global(bad.parse().unwrap()), "{bad}");
         }
-        for good in ["198.20.0.1", "100.128.0.1", "2001:200::1", "3fff:1000::1", "::ffff:8.8.8.8"] {
+        for good in [
+            "198.20.0.1",
+            "100.128.0.1",
+            "2001:200::1",
+            "3fff:1000::1",
+            "::ffff:8.8.8.8",
+        ] {
             assert!(is_global(good.parse().unwrap()), "{good}");
         }
     }
 
-    /// Stands in for "public" in the test below; the real classifier would not accept loopback.
+    /// Stands in for "public" in the tests below; the real classifier would not accept loopback. Both listeners are on
+    /// 127.0.0.1 (other 127.x aliases do not exist on every OS) and differ by port.
     fn test_allowed(ip: std::net::IpAddr) -> bool {
-        ip == "127.0.0.2".parse::<std::net::IpAddr>().unwrap()
+        ip.is_loopback()
     }
 
     fn accepted(l: &TcpListener) -> bool {
@@ -582,21 +623,43 @@ mod tests {
     /// address that was checked and never to the later answer.
     #[test]
     fn token_post_connects_only_to_the_checked_address() {
-        let checked = TcpListener::bind("127.0.0.2:0").unwrap();
+        let checked = TcpListener::bind("127.0.0.1:0").unwrap();
         let internal = TcpListener::bind("127.0.0.1:0").unwrap();
         let checked_addr = checked.local_addr().unwrap();
         let internal_addr = internal.local_addr().unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = calls.clone();
         let lookup: Lookup = Arc::new(move |_, _| {
-            let addr: SocketAddr = if counter.fetch_add(1, Ordering::SeqCst) == 0 { checked_addr } else { internal_addr };
+            let addr: SocketAddr = if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                checked_addr
+            } else {
+                internal_addr
+            };
             Ok(vec![addr])
         });
         let post = post_form_public_with(lookup, test_allowed);
         let url = format!("https://token.example.test:{}/token", checked_addr.port());
         let _ = post(&url, &[("code".into(), "secret-code".into())]);
         assert!(accepted(&checked), "the checked address was not used");
-        assert!(!accepted(&internal), "connected to the address of a second lookup");
+        assert!(
+            !accepted(&internal),
+            "connected to the address of a second lookup"
+        );
+    }
+
+    /// A host with more addresses than ureq's list holds must not panic (the app aborts on panic).
+    #[test]
+    fn token_post_survives_more_addresses_than_the_list_holds() {
+        let checked = TcpListener::bind("127.0.0.1:0").unwrap();
+        let first = checked.local_addr().unwrap();
+        let mut addrs = vec![first];
+        addrs.extend(
+            (1..=20u16).map(|i| SocketAddr::from(([127, 0, 0, 1], first.port().wrapping_add(i).max(1024)))),
+        );
+        let post = post_form_public_with(Arc::new(move |_, _| Ok(addrs.clone())), test_allowed);
+        let url = format!("https://token.example.test:{}/token", first.port());
+        let _ = post(&url, &[]);
+        assert!(accepted(&checked), "the first address was not used");
     }
 
     #[test]
