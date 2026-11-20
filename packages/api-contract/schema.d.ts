@@ -236,7 +236,7 @@ export interface paths {
         get?: never;
         /**
          * Sets the signed-in user's profile picture
-         * @description A PNG, JPEG or WebP as a data URL, at most 80000 characters (the app shrinks pictures to a small square first). Everyone in the user's organizations sees it.
+         * @description A PNG, JPEG or WebP as a data URL, at most 80000 characters. The server decodes it and stores its own WebP of at most 256 by 256 pixels. Everyone in the user's organizations sees it.
          */
         put: {
             parameters: {
