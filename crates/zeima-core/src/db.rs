@@ -299,7 +299,9 @@ impl Core {
             return Ok(false);
         }
         // Rows refer to each other (pauses to entries, entries to projects); check only at the end.
-        sqlx::query("PRAGMA defer_foreign_keys = ON").execute(&mut *tx).await?;
+        sqlx::query("PRAGMA defer_foreign_keys = ON")
+            .execute(&mut *tx)
+            .await?;
         let tables: Vec<(String, i64)> = sqlx::query_as(
             "SELECT m.name, EXISTS (SELECT 1 FROM pragma_table_info(m.name) WHERE name = 'id')
              FROM sqlite_master m
@@ -308,10 +310,12 @@ impl Core {
         )
         .fetch_all(&mut *tx)
         .await?;
-        sqlx::query("DELETE FROM time_entry_tag WHERE entry_id IN (SELECT id FROM time_entry WHERE workspace_id = ?)")
-            .bind(workspace_id)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "DELETE FROM time_entry_tag WHERE entry_id IN (SELECT id FROM time_entry WHERE workspace_id = ?)",
+        )
+        .bind(workspace_id)
+        .execute(&mut *tx)
+        .await?;
         for (table, has_id) in &tables {
             if *has_id != 0 {
                 for state in ["sync_state", "sync_conflict"] {
@@ -333,10 +337,12 @@ impl Core {
             }
         }
         for (table, _) in &tables {
-            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM \"{table}\" WHERE workspace_id = ?")))
-                .bind(workspace_id)
-                .execute(&mut *tx)
-                .await?;
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM \"{table}\" WHERE workspace_id = ?"
+            )))
+            .bind(workspace_id)
+            .execute(&mut *tx)
+            .await?;
         }
         sqlx::query("DELETE FROM change_log WHERE workspace_id = ?")
             .bind(workspace_id)
