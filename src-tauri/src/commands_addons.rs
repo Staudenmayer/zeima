@@ -82,7 +82,10 @@ async fn info(app: &AppHandle, addons: &Addons, record: AddonRecord) -> AddonInf
         .filter_map(|n| n.strip_prefix("oauth:").map(str::to_string))
         .collect();
     let dir = addons_dir(app).ok().map(|d| d.join(&record.id));
-    let signature = dir.as_deref().map(crate::registry::installed_signature).unwrap_or_else(SignatureCheck::unsigned);
+    let signature = dir
+        .as_deref()
+        .map(crate::registry::installed_signature)
+        .unwrap_or_else(SignatureCheck::unsigned);
     let blocked = addons.blocked(&record.id, &signature);
     AddonInfo {
         signature,
@@ -124,7 +127,12 @@ pub(crate) fn read_package(path: &Path) -> Result<Package, CmdError> {
         let wasm = std::fs::read(&wasm_path).map_err(io_err)?;
         // A manifest next to its module (development) is never signed.
         let manifest_src = std::fs::read(dir.join(MANIFEST_FILE)).map_err(io_err)?;
-        return Ok(Package { manifest, manifest_src, wasm, signature: None });
+        return Ok(Package {
+            manifest,
+            manifest_src,
+            wasm,
+            signature: None,
+        });
     }
 
     read_zip(std::fs::File::open(path).map_err(io_err)?)
@@ -140,7 +148,11 @@ fn read_zip<R: Read + std::io::Seek>(reader: R) -> Result<Package, CmdError> {
     let mut zip = zip::ZipArchive::new(reader).map_err(|e| invalid(format!("not a zip file: {e}")))?;
     // addon.toml at the root or in one top-level folder.
     let manifest_name = (0..zip.len())
-        .filter_map(|i| zip.by_index(i).ok().and_then(|f| f.name().ok().map(|n| n.to_string())))
+        .filter_map(|i| {
+            zip.by_index(i)
+                .ok()
+                .and_then(|f| f.name().ok().map(|n| n.to_string()))
+        })
         .filter(|n| {
             n == MANIFEST_FILE || n.matches('/').count() == 1 && n.ends_with(&format!("/{MANIFEST_FILE}"))
         })
@@ -179,7 +191,12 @@ fn read_zip<R: Read + std::io::Seek>(reader: R) -> Result<Package, CmdError> {
         .by_name(&format!("{prefix}{}", zeima_core::addon_sig::SIGNATURE_FILE))
         .ok()
         .map(|f| f.take(16 * 1024).read_to_string(&mut signature).is_ok());
-    Ok(Package { manifest, manifest_src, wasm, signature: signed.unwrap_or(false).then_some(signature) })
+    Ok(Package {
+        manifest,
+        manifest_src,
+        wasm,
+        signature: signed.unwrap_or(false).then_some(signature),
+    })
 }
 
 /// The words of the native question: who made it, what it may do, and (for an update) what is new.
@@ -218,16 +235,35 @@ fn consent_text(
         }
     };
     let who = match (signature.status, &signature.signer) {
-        (S::Trusted, Some(name)) => if de { format!("Signiert von {name}") } else { format!("Signed by {name}") },
-        (S::ServerTrusted, Some(name)) => {
-            if de { format!("Signiert von {name} (vom Server der Installation bestätigt)") } else { format!("Signed by {name} (vouched for by this installation's server)") }
+        (S::Trusted, Some(name)) => {
+            if de {
+                format!("Signiert von {name}")
+            } else {
+                format!("Signed by {name}")
+            }
         }
-        (S::UnknownKey, _) => (if de { "Von einem unbekannten Herausgeber signiert" } else { "Signed by an unknown publisher" }).into(),
+        (S::ServerTrusted, Some(name)) => {
+            if de {
+                format!("Signiert von {name} (vom Server der Installation bestätigt)")
+            } else {
+                format!("Signed by {name} (vouched for by this installation's server)")
+            }
+        }
+        (S::UnknownKey, _) => (if de {
+            "Von einem unbekannten Herausgeber signiert"
+        } else {
+            "Signed by an unknown publisher"
+        })
+        .into(),
         _ => (if de { "Nicht signiert" } else { "Not signed" }).into(),
     };
     let mut hosts = manifest.allowed_hosts.clone();
     if !manifest.host_settings.is_empty() {
-        hosts.push(if de { "(Adresse aus den Einstellungen)".into() } else { "(the address in its settings)".into() });
+        hosts.push(if de {
+            "(Adresse aus den Einstellungen)".into()
+        } else {
+            "(the address in its settings)".into()
+        });
     }
     let perms: Vec<String> = manifest
         .permissions
@@ -238,18 +274,63 @@ fn consent_text(
         })
         .collect();
     let added: Vec<&P> = existing
-        .map(|r| manifest.permissions.iter().filter(|p| !r.granted.contains(p)).collect())
+        .map(|r| {
+            manifest
+                .permissions
+                .iter()
+                .filter(|p| !r.granted.contains(p))
+                .collect()
+        })
         .unwrap_or_default();
-    let mut text = format!("{} {} — {}\n{who}\n\n", manifest.name, manifest.version, manifest.author);
-    text.push_str(if de { "Es darf:\n" } else { "It will be allowed to:\n" });
+    let mut text = format!(
+        "{} {} — {}\n{who}\n\n",
+        manifest.name, manifest.version, manifest.author
+    );
+    let accounts: Vec<String> = manifest
+        .oauth
+        .iter()
+        .filter_map(|p| {
+            p.token_url
+                .strip_prefix("https://")
+                .and_then(|r| r.split(['/', '?']).next())
+                .map(|h| format!("{} ({h})", p.name))
+        })
+        .collect();
+    text.push_str(if de {
+        "Es darf:\n"
+    } else {
+        "It will be allowed to:\n"
+    });
     text.push_str(&if perms.is_empty() {
-        if de { "  • nichts außer dem eigenen Speicher".to_string() } else { "  • nothing beyond its own storage".to_string() }
+        if de {
+            "  • nichts außer dem eigenen Speicher".to_string()
+        } else {
+            "  • nothing beyond its own storage".to_string()
+        }
     } else {
         perms.join("\n")
     });
+    if !accounts.is_empty() {
+        text.push_str(if de {
+            "\n\nKonten, die es verbinden kann (Anmeldedaten gehen an diese Server):\n  • "
+        } else {
+            "\n\nAccounts it can connect (sign-in data is sent to these servers):\n  • "
+        });
+        text.push_str(&accounts.join("\n  • "));
+    }
     if existing.is_some() && !added.is_empty() {
-        text.push_str(if de { "\n\nNEU in dieser Version:\n" } else { "\n\nNEW in this version:\n" });
-        text.push_str(&added.iter().map(|p| format!("  • {}", label(p))).collect::<Vec<_>>().join("\n"));
+        text.push_str(if de {
+            "\n\nNEU in dieser Version:\n"
+        } else {
+            "\n\nNEW in this version:\n"
+        });
+        text.push_str(
+            &added
+                .iter()
+                .map(|p| format!("  • {}", label(p)))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
     }
     text
 }
@@ -260,7 +341,11 @@ async fn ask_consent(app: &AppHandle, text: String, de: bool) -> bool {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .message(text)
-        .title(if de { "Addon installieren?" } else { "Install addon?" })
+        .title(if de {
+            "Addon installieren?"
+        } else {
+            "Install addon?"
+        })
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
             (if de { "Installieren" } else { "Install" }).into(),
@@ -279,7 +364,11 @@ fn manifest_toml(manifest: &AddonManifest) -> Result<String, CmdError> {
 /// Lets the user pick a package and shows what it asks for.
 #[tauri::command]
 #[specta::specta]
-pub async fn addon_pick(app: AppHandle, state: State<'_, AppState>, addons: State<'_, Addons>) -> CmdResult<Option<AddonPackage>> {
+pub async fn addon_pick(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    addons: State<'_, Addons>,
+) -> CmdResult<Option<AddonPackage>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
@@ -322,7 +411,12 @@ pub async fn addon_install(
 /// Whether `a` is an older version than `b` (dot-separated numbers; a pre-release suffix is ignored).
 pub(crate) fn version_older(a: &str, b: &str) -> bool {
     let nums = |v: &str| -> Vec<u64> {
-        v.split(['-', '+']).next().unwrap_or("").split('.').map(|p| p.trim().parse().unwrap_or(0)).collect()
+        v.split(['-', '+'])
+            .next()
+            .unwrap_or("")
+            .split('.')
+            .map(|p| p.trim().parse().unwrap_or(0))
+            .collect()
     };
     let (mut x, mut y) = (nums(a), nums(b));
     let n = x.len().max(y.len());
@@ -351,6 +445,40 @@ pub(crate) async fn install_package(
                 "version {} is older than the installed {}; uninstall the add-on first to go back",
                 manifest.version, installed.version
             )));
+        }
+    }
+    // An update comes from the publisher that made the installed add-on: everything the add-on owns (its secrets, its
+    // stored data, its connected accounts) is filed under its id, so a different publisher must not inherit it.
+    if let Some(dir) = addons_dir(app)
+        .ok()
+        .map(|d| d.join(&manifest.id))
+        .filter(|d| d.exists())
+    {
+        let installed = crate::registry::installed_signature(&dir);
+        if let Some(old_key) = installed.key_id.as_deref() {
+            if signature.key_id.as_deref() != Some(old_key) {
+                return Err(invalid(
+                    "this package is not from the publisher of the installed add-on; uninstall the add-on first (that also deletes its saved secrets and connected accounts)",
+                ));
+            }
+        }
+        // A connected account's token goes to the provider's token endpoint: that host may not change in an update.
+        if let Ok(old) = read_manifest(&dir) {
+            for p in &manifest.oauth {
+                if let Some(o) = old.oauth.iter().find(|o| o.id == p.id) {
+                    let host = |u: &str| {
+                        u.strip_prefix("https://")
+                            .and_then(|r| r.split(['/', '?']).next())
+                            .map(str::to_ascii_lowercase)
+                    };
+                    if host(&o.token_url) != host(&p.token_url) {
+                        return Err(invalid(format!(
+                            "the token endpoint of account type '{}' changed; uninstall the add-on first to connect it again",
+                            p.id
+                        )));
+                    }
+                }
+            }
         }
     }
     if !manifest.supports_app(&app.package_info().version.to_string()) {
@@ -428,6 +556,9 @@ pub async fn addon_save_settings(
     id: String,
     settings: BTreeMap<String, String>,
 ) -> CmdResult<AddonInfo> {
+    if id.is_empty() || id.contains(['/', '\\', ':']) || id.contains("..") {
+        return Err(invalid("not an add-on id"));
+    }
     let dir = addons_dir(&app).map_err(io_err)?.join(&id);
     let manifest = read_manifest(&dir).map_err(invalid)?;
     let mut clean = BTreeMap::new();
@@ -569,12 +700,10 @@ pub async fn addon_oauth_connect(
         &id,
         &provider,
         services.secrets.clone(),
-        services.post_form.clone(),
+        services.addon_post_form.clone(),
         &services.tokens,
         state.core.now_ms(),
-        move |url| {
-            crate::trust::open_link(&opener, url)
-        },
+        move |url| crate::trust::open_link(&opener, url),
         cancel,
         &pages,
     )
@@ -884,7 +1013,11 @@ mod tests {
     fn the_question_says_who_made_it_what_it_may_do_and_what_an_update_adds() {
         use zeima_core::addon::Permission;
         use zeima_core::addon_sig::SignatureStatus;
-        let signature = SignatureCheck { status: SignatureStatus::ServerTrusted, key_id: Some("k".into()), signer: Some("Acme IT".into()) };
+        let signature = SignatureCheck {
+            status: SignatureStatus::ServerTrusted,
+            key_id: Some("k".into()),
+            signer: Some("Acme IT".into()),
+        };
         let manifest = manifest_with("\"entries:read\", \"network\"");
         let fresh = consent_text(&manifest, &signature, None, false);
         assert!(fresh.contains("Demo 2.0.0 — Example"));
@@ -903,13 +1036,25 @@ mod tests {
             installed_at: 0,
             updated_at: 0,
         };
-        let update = consent_text(&manifest, &signature, Some(&record(vec![Permission::EntriesRead])), false);
+        let update = consent_text(
+            &manifest,
+            &signature,
+            Some(&record(vec![Permission::EntriesRead])),
+            false,
+        );
         assert!(update.contains("NEW in this version:\n  • connect to other computers"));
-        let same = consent_text(&manifest, &signature, Some(&record(vec![Permission::EntriesRead, Permission::Network])), false);
+        let same = consent_text(
+            &manifest,
+            &signature,
+            Some(&record(vec![Permission::EntriesRead, Permission::Network])),
+            false,
+        );
         assert!(!same.contains("NEW"));
         // Unsigned and in German.
         let unsigned = consent_text(&manifest_with(""), &SignatureCheck::unsigned(), None, true);
-        assert!(unsigned.contains("Nicht signiert") && unsigned.contains("nichts außer dem eigenen Speicher"));
+        assert!(
+            unsigned.contains("Nicht signiert") && unsigned.contains("nichts außer dem eigenen Speicher")
+        );
     }
 
     /// A signed package built the way `scripts/addons.mjs` makes it is read, and its signature checks out;
@@ -920,7 +1065,9 @@ mod tests {
             serde_json::from_str(include_str!("../../packages/shared-fixtures/addons/vectors.json")).unwrap();
         let good = &v["cases"][0];
         let manifest = good["manifest"].as_str().unwrap();
-        let wasm = base64::engine::general_purpose::STANDARD.decode(good["wasmBase64"].as_str().unwrap()).unwrap();
+        let wasm = base64::engine::general_purpose::STANDARD
+            .decode(good["wasmBase64"].as_str().unwrap())
+            .unwrap();
         let signature = good["signature"].to_string();
         let trusted = [TrustedKey {
             key_id: v["key"]["keyId"].as_str().unwrap().into(),
@@ -948,18 +1095,27 @@ mod tests {
         let path = write("good", &wasm, Some(&signature));
         let p = read_package(&path).unwrap();
         assert_eq!(p.manifest.id, "dev.example.demo");
-        assert_eq!(check(&p.manifest_src, &p.wasm, p.signature.as_deref(), &trusted).status, SignatureStatus::Trusted);
+        assert_eq!(
+            check(&p.manifest_src, &p.wasm, p.signature.as_deref(), &trusted).status,
+            SignatureStatus::Trusted
+        );
 
         let mut changed = wasm.clone();
         changed.push(1);
         let path2 = write("changed", &changed, Some(&signature));
         let p = read_package(&path2).unwrap();
-        assert_eq!(check(&p.manifest_src, &p.wasm, p.signature.as_deref(), &trusted).status, SignatureStatus::Invalid);
+        assert_eq!(
+            check(&p.manifest_src, &p.wasm, p.signature.as_deref(), &trusted).status,
+            SignatureStatus::Invalid
+        );
 
         let path3 = write("unsigned", &wasm, None);
         let p = read_package(&path3).unwrap();
         assert!(p.signature.is_none());
-        assert_eq!(check(&p.manifest_src, &p.wasm, p.signature.as_deref(), &trusted).status, SignatureStatus::Unsigned);
+        assert_eq!(
+            check(&p.manifest_src, &p.wasm, p.signature.as_deref(), &trusted).status,
+            SignatureStatus::Unsigned
+        );
         for f in [path, path2, path3] {
             let _ = std::fs::remove_file(f);
         }

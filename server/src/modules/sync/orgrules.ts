@@ -108,6 +108,22 @@ async function checkEntryPolicy(db: Db, actor: Actor, orgId: string, change: Cha
  * A pause is part of the time it interrupts: it cannot be added to, or moved into, a locked entry of the same person
  * (that would change the net time of a period a manager has closed) unless the writer may edit locked entries.
  */
+/** The locked time entries of a person, looked up once per request (a push has up to 500 changes, one transaction). */
+const lockedCache = new WeakMap<object, Map<string, { rowId: string; fields: unknown }[]>>()
+async function lockedEntriesOf(db: Db, workspace: string, owner: string) {
+  let perTx = lockedCache.get(db)
+  if (!perTx) lockedCache.set(db, (perTx = new Map()))
+  const key = `${workspace}|${owner}`
+  const hit = perTx.get(key)
+  if (hit) return hit
+  const rows = await db
+    .select({ rowId: schema.syncRow.rowId, fields: schema.syncRow.fields })
+    .from(schema.syncRow)
+    .where(and(eq(schema.syncRow.workspaceId, workspace), eq(schema.syncRow.tableName, 'time_entry'), sql`${schema.syncRow.fields} -> 'userId' ->> 'v' = ${owner}`, sql`${schema.syncRow.fields} -> 'locked' ->> 'v' = 'true'`))
+  perTx.set(key, rows)
+  return rows
+}
+
 async function checkPause(db: Db, actor: Actor, orgId: string, owner: string, merged: Record<string, unknown>): Promise<Outcome | null> {
   if (scopeOf(actor, 'entry.write_locked') === 'org') return null
   const workspace = await orgWorkspaceId(db, orgId)
@@ -115,10 +131,7 @@ async function checkPause(db: Db, actor: Actor, orgId: string, owner: string, me
   const start = plain(merged.startAt)
   const end = plain(merged.endAt)
   const resume = plain(merged.resumeEntryId)
-  const rows = await db
-    .select({ rowId: schema.syncRow.rowId, fields: schema.syncRow.fields })
-    .from(schema.syncRow)
-    .where(and(eq(schema.syncRow.workspaceId, workspace), eq(schema.syncRow.tableName, 'time_entry'), sql`${schema.syncRow.fields} -> 'userId' ->> 'v' = ${owner}`, sql`${schema.syncRow.fields} -> 'locked' ->> 'v' = 'true'`))
+  const rows = await lockedEntriesOf(db, workspace, owner)
   for (const r of rows) {
     const f = flatten('time_entry', r.fields as Record<string, unknown>)
     const entryStart = f.startAt
@@ -237,7 +250,8 @@ async function checkAbsence(
   const badField: Outcome = { status: 'rejected', reason: 'forbidden_field' }
   const fields = change.fields ?? {}
   if (owner === actor.user.id) {
-    if (change.op === 'delete') return null
+    // A decided request is a record (who decided, when): its owner asks again by changing it, but cannot make it vanish.
+    if (change.op === 'delete') return current && plain(current.fields.status) !== 'requested' ? forbidden : null
     // The decision fields are the approver's: the owner clears them only by asking again (status `requested`).
     if (DECISION_FIELDS.some((f) => f in fields) && fields.status !== 'requested') return badField
     // A decided absence changes only by a change newer than the decision: the stamp is the client's claim, and a

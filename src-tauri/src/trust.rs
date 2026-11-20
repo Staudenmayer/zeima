@@ -11,11 +11,18 @@ use crate::account::{Discovery, OidcConfig};
 
 /// `localhost`, `127.x.x.x` and `::1`: this machine, where a development server needs no certificate.
 pub fn is_loopback(host: &str) -> bool {
-    let host = host.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
+    let host = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_ascii_lowercase();
     host == "localhost"
         || host.ends_with(".localhost")
-        || host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
-        || host.parse::<std::net::Ipv6Addr>().is_ok_and(|ip| ip.is_loopback())
+        || host
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|ip| ip.is_loopback())
+        || host
+            .parse::<std::net::Ipv6Addr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 /// The registrable domain (`id.zeima.example.co.uk` → `example.co.uk`), by the full Public Suffix List (hosting
@@ -57,7 +64,10 @@ pub fn check_discovery(server_url: &str, discovery: &Discovery) -> Result<(), St
     let server = Url::parse(server_url).map_err(|_| "that is not a valid address".to_string())?;
     let server_host = server.host_str().unwrap_or_default().to_string();
     let local = is_loopback(&server_host);
-    for (label, raw) in [("sign-in", discovery.issuer.as_str()), ("API", discovery.api_url.as_str())] {
+    for (label, raw) in [
+        ("sign-in", discovery.issuer.as_str()),
+        ("API", discovery.api_url.as_str()),
+    ] {
         let url = parse(label, raw)?;
         check_scheme(label, &url, local)?;
         let host = url.host_str().unwrap_or_default();
@@ -73,10 +83,16 @@ pub fn check_discovery(server_url: &str, discovery: &Discovery) -> Result<(), St
 
 /// What the sign-in service's own document may say: the endpoints are https and on the issuer's site.
 pub fn check_oidc(server_url: &str, issuer: &str, oidc: &OidcConfig) -> Result<(), String> {
-    let local = Url::parse(server_url).ok().and_then(|u| u.host_str().map(is_loopback)).unwrap_or(false);
+    let local = Url::parse(server_url)
+        .ok()
+        .and_then(|u| u.host_str().map(is_loopback))
+        .unwrap_or(false);
     let issuer_url = parse("sign-in", issuer)?;
     let issuer_host = issuer_url.host_str().unwrap_or_default().to_string();
-    for (label, raw) in [("authorization", oidc.authorization_endpoint.as_str()), ("token", oidc.token_endpoint.as_str())] {
+    for (label, raw) in [
+        ("authorization", oidc.authorization_endpoint.as_str()),
+        ("token", oidc.token_endpoint.as_str()),
+    ] {
         let url = parse(label, raw)?;
         check_scheme(label, &url, local)?;
         let host = url.host_str().unwrap_or_default();
@@ -101,7 +117,9 @@ pub fn checked_link(raw: &str) -> Result<Url, String> {
 /// Opens a link in the browser after `checked_link`.
 pub fn open_link(app: &AppHandle, raw: &str) -> Result<(), String> {
     let url = checked_link(raw)?;
-    app.opener().open_url(url.as_str(), None::<&str>).map_err(|e| format!("could not open the browser: {e}"))
+    app.opener()
+        .open_url(url.as_str(), None::<&str>)
+        .map_err(|e| format!("could not open the browser: {e}"))
 }
 
 #[cfg(test)]
@@ -109,18 +127,40 @@ mod tests {
     use super::*;
 
     fn discovery(issuer: &str, api: &str) -> Discovery {
-        Discovery { api_url: api.into(), issuer: issuer.into(), client_id: "c".into(), api_versions: vec![1], min_client_version: None }
+        Discovery {
+            api_url: api.into(),
+            issuer: issuer.into(),
+            client_id: "c".into(),
+            api_versions: vec![1],
+            min_client_version: None,
+        }
     }
     fn oidc(auth: &str, token: &str) -> OidcConfig {
-        OidcConfig { authorization_endpoint: auth.into(), token_endpoint: token.into() }
+        OidcConfig {
+            authorization_endpoint: auth.into(),
+            token_endpoint: token.into(),
+        }
     }
 
     #[test]
     fn loopback_is_this_machine_only() {
-        for h in ["localhost", "127.0.0.1", "127.9.9.9", "[::1]", "::1", "app.localhost"] {
+        for h in [
+            "localhost",
+            "127.0.0.1",
+            "127.9.9.9",
+            "[::1]",
+            "::1",
+            "app.localhost",
+        ] {
             assert!(is_loopback(h), "{h}");
         }
-        for h in ["example.com", "10.0.0.1", "localhost.example.com", "192.168.1.1", "0.0.0.0"] {
+        for h in [
+            "example.com",
+            "10.0.0.1",
+            "localhost.example.com",
+            "192.168.1.1",
+            "0.0.0.0",
+        ] {
             assert!(!is_loopback(h), "{h}");
         }
     }
@@ -139,7 +179,12 @@ mod tests {
         assert!(!same_site("a.vercel.app", "b.vercel.app"));
         assert!(!same_site("x.github.io", "y.github.io"));
         assert!(same_site("id.x.github.io", "time.x.github.io"));
-        for (a, b) in [("a.blogspot.com", "b.blogspot.com"), ("a.ts.net", "b.ts.net"), ("a.web.app", "b.web.app"), ("a.netlify.app", "b.netlify.app")] {
+        for (a, b) in [
+            ("a.blogspot.com", "b.blogspot.com"),
+            ("a.ts.net", "b.ts.net"),
+            ("a.web.app", "b.web.app"),
+            ("a.netlify.app", "b.netlify.app"),
+        ] {
             assert!(!same_site(a, b), "{a} {b}");
         }
         assert!(!same_site("example.com", "example.com.evil.com"));
@@ -147,24 +192,40 @@ mod tests {
 
     #[test]
     fn a_server_may_name_its_own_sign_in_and_api_over_https() {
-        let ok = discovery("https://id.zeima.example.com/realms/zeima", "https://zeima.example.com");
+        let ok = discovery(
+            "https://id.zeima.example.com/realms/zeima",
+            "https://zeima.example.com",
+        );
         assert!(check_discovery("https://zeima.example.com", &ok).is_ok());
         // Sibling hosts of one site are fine.
-        assert!(check_discovery("https://time.example.com", &discovery("https://login.example.com/realms/z", "https://time.example.com")).is_ok());
+        assert!(check_discovery(
+            "https://time.example.com",
+            &discovery("https://login.example.com/realms/z", "https://time.example.com")
+        )
+        .is_ok());
     }
 
     #[test]
     fn a_server_may_not_send_the_app_elsewhere() {
         let server = "https://zeima.example.com";
         let elsewhere = discovery("https://login.evil.com/realms/zeima", "https://zeima.example.com");
-        assert!(check_discovery(server, &elsewhere).unwrap_err().contains("another website"));
+        assert!(check_discovery(server, &elsewhere)
+            .unwrap_err()
+            .contains("another website"));
         let api_elsewhere = discovery("https://id.example.com/realms/zeima", "https://evil.com");
         assert!(check_discovery(server, &api_elsewhere).is_err());
         let plain = discovery("http://id.example.com/realms/zeima", "https://zeima.example.com");
         assert!(check_discovery(server, &plain).unwrap_err().contains("https"));
-        let lookalike = discovery("https://example.com.evil.com/realms/zeima", "https://zeima.example.com");
+        let lookalike = discovery(
+            "https://example.com.evil.com/realms/zeima",
+            "https://zeima.example.com",
+        );
         assert!(check_discovery(server, &lookalike).is_err());
-        assert!(check_discovery(server, &discovery("file:///etc/passwd", "https://zeima.example.com")).is_err());
+        assert!(check_discovery(
+            server,
+            &discovery("file:///etc/passwd", "https://zeima.example.com")
+        )
+        .is_err());
     }
 
     #[test]
@@ -181,10 +242,33 @@ mod tests {
     fn the_sign_in_endpoints_stay_on_the_issuers_site_over_https() {
         let server = "https://zeima.example.com";
         let issuer = "https://id.example.com/realms/zeima";
-        assert!(check_oidc(server, issuer, &oidc("https://id.example.com/realms/zeima/auth", "https://id.example.com/realms/zeima/token")).is_ok());
-        assert!(check_oidc(server, issuer, &oidc("https://phish.example.net/auth", "https://id.example.com/token")).is_err());
-        assert!(check_oidc(server, issuer, &oidc("https://id.example.com/auth", "http://id.example.com/token")).is_err());
-        assert!(check_oidc("http://localhost:3000", "http://localhost:8080/realms/zeima", &oidc("http://localhost:8080/a", "http://localhost:8080/t")).is_ok());
+        assert!(check_oidc(
+            server,
+            issuer,
+            &oidc(
+                "https://id.example.com/realms/zeima/auth",
+                "https://id.example.com/realms/zeima/token"
+            )
+        )
+        .is_ok());
+        assert!(check_oidc(
+            server,
+            issuer,
+            &oidc("https://phish.example.net/auth", "https://id.example.com/token")
+        )
+        .is_err());
+        assert!(check_oidc(
+            server,
+            issuer,
+            &oidc("https://id.example.com/auth", "http://id.example.com/token")
+        )
+        .is_err());
+        assert!(check_oidc(
+            "http://localhost:3000",
+            "http://localhost:8080/realms/zeima",
+            &oidc("http://localhost:8080/a", "http://localhost:8080/t")
+        )
+        .is_ok());
     }
 
     #[test]
@@ -192,7 +276,16 @@ mod tests {
         assert!(checked_link("https://store.example.com/checkout/1").is_ok());
         assert!(checked_link("mailto:help@example.com").is_ok());
         assert!(checked_link("http://localhost:5173/x").is_ok());
-        for bad in ["file:///etc/passwd", "http://example.com/", "javascript:alert(1)", "ms-msdt:/id", "steam://run/1", "smb://host/share", "not a url", ""] {
+        for bad in [
+            "file:///etc/passwd",
+            "http://example.com/",
+            "javascript:alert(1)",
+            "ms-msdt:/id",
+            "steam://run/1",
+            "smb://host/share",
+            "not a url",
+            "",
+        ] {
             assert!(checked_link(bad).is_err(), "{bad}");
         }
     }

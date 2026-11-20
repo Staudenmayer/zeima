@@ -166,7 +166,10 @@ impl Core {
             .fetch_one(&mut *tx)
             .await?;
         if used + value.len() as i64 > KV_MAX_TOTAL_BYTES {
-            return Err(Error::validation("value", "an addon may store at most 5 MB in all"));
+            return Err(Error::validation(
+                "value",
+                "an addon may store at most 5 MB in all",
+            ));
         }
         sqlx::query(
             "INSERT INTO addon_kv (addon_id, key, value) VALUES (?, ?, ?)

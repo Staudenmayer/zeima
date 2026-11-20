@@ -288,9 +288,14 @@ pub fn validate(def: &ProfileDef) -> Result<()> {
     let id_ok = def.id.len() >= 2
         && def.id.len() <= 8
         && def.id.starts_with(|c: char| c.is_ascii_uppercase())
-        && def.id.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
+        && def
+            .id
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
     if !id_ok {
-        return Err(bad("the id must be 2 to 8 capital letters or digits (an ISO 3166-1 code for a country)".into()));
+        return Err(bad(
+            "the id must be 2 to 8 capital letters or digits (an ISO 3166-1 code for a country)".into(),
+        ));
     }
     if def.name.is_empty() || !def.name.contains_key("en") {
         return Err(bad("needs an English name".into()));
@@ -312,7 +317,11 @@ pub fn validate(def: &ProfileDef) -> Result<()> {
         if !code.starts_with(&format!("{}-", def.id)) {
             return Err(bad(format!("region {code} must start with {}-", def.id)));
         }
-        if let Some(unknown) = region.remove_holidays.iter().find(|r| !def.holidays.iter().any(|h| &h.id == *r)) {
+        if let Some(unknown) = region
+            .remove_holidays
+            .iter()
+            .find(|r| !def.holidays.iter().any(|h| &h.id == *r))
+        {
             return Err(bad(format!("region {code} removes unknown holiday {unknown}")));
         }
         regions.push(Some(code));
@@ -340,7 +349,9 @@ pub fn set_extra(files: &[(String, String)]) -> Vec<String> {
     let mut good: Vec<ProfileDef> = Vec::new();
     for (file, source) in files {
         match parse(source).and_then(|def| validate(&def).map(|()| def)) {
-            Ok(def) if good.iter().any(|g| g.id == def.id) => problems.push(format!("{file}: {} is defined twice", def.id)),
+            Ok(def) if good.iter().any(|g| g.id == def.id) => {
+                problems.push(format!("{file}: {} is defined twice", def.id))
+            }
             Ok(def) => good.push(def),
             Err(e) => problems.push(format!("{file}: {e}")),
         }
@@ -356,7 +367,11 @@ pub fn is_bundled(id: &str) -> bool {
 
 /// Whether `id` is a profile that came from outside the app (or replaces a bundled one).
 pub fn is_extra(id: &str) -> bool {
-    EXTRA.read().unwrap_or_else(|e| e.into_inner()).iter().any(|p| p.id.eq_ignore_ascii_case(id))
+    EXTRA
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|p| p.id.eq_ignore_ascii_case(id))
 }
 
 pub fn list() -> Vec<ProfileInfo> {

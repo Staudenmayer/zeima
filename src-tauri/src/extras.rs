@@ -24,12 +24,22 @@ const REFRESH_EVERY: Duration = Duration::from_secs(6 * 3600);
 const CACHE_DIR: &str = ".server";
 
 fn local_dir(app: &AppHandle) -> Option<PathBuf> {
-    crate::instance::data_dir(app).ok().map(|d| d.join("jurisdictions"))
+    crate::instance::data_dir(app)
+        .ok()
+        .map(|d| d.join("jurisdictions"))
 }
 
 fn is_profile_file(name: &str) -> bool {
-    let Some(stem) = name.strip_suffix(".toml") else { return false };
-    !stem.ends_with(".fixtures") && !stem.is_empty() && !stem.starts_with('.')
+    let Some(stem) = name.strip_suffix(".toml") else {
+        return false;
+    };
+    // Plain names only: ':' and device names mean something to Windows, and the server's names are not trusted.
+    !stem.ends_with(".fixtures")
+        && !stem.is_empty()
+        && !stem.starts_with('.')
+        && stem
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
 }
 
 /// The `*.toml` profile files of a folder (name, text), by name.
@@ -61,7 +71,9 @@ pub fn load(app: &AppHandle) {
     // folder on this machine, which the person's administrator controls.
     let (mut files, refused) = without_replacements(read_files(&dir.join(CACHE_DIR)));
     for name in refused {
-        eprintln!("country profile of the server ignored: {name} would replace a profile that ships with the app");
+        eprintln!(
+            "country profile of the server ignored: {name} would replace a profile that ships with the app"
+        );
     }
     files.extend(read_files(&dir));
     let problems = jurisdiction::set_extra(&dedup_last_wins(files));
@@ -110,7 +122,10 @@ struct ServedFile {
 /// Downloads the server's profiles into the cache folder (replacing what was there).
 fn fetch(server: &str, cache: &Path) -> Result<usize, String> {
     let (discovery, _) = discover(server)?;
-    let body = account::http_get(&format!("{}/v1/jurisdictions", discovery.api_url.trim_end_matches('/')))?;
+    let body = account::http_get(&format!(
+        "{}/v1/jurisdictions",
+        discovery.api_url.trim_end_matches('/')
+    ))?;
     let served: Served = serde_json::from_str(&body).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(cache).map_err(|e| e.to_string())?;
     for (name, _) in read_files(cache) {
@@ -164,15 +179,20 @@ mod tests {
         assert!(!is_profile_file("LU.fixtures.toml"));
         assert!(!is_profile_file("notes.txt"));
         assert!(!is_profile_file(".toml"));
+        assert!(!is_profile_file("a:b.toml"));
+        assert!(!is_profile_file("CON .toml"));
         assert!(!is_profile_file(".hidden.toml"));
     }
 
     #[test]
     fn a_server_cannot_replace_a_profile_that_ships_with_the_app() {
         let src = |id: &str| {
-            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../crates/zeima-core/jurisdictions/AT.toml"))
-                .unwrap()
-                .replacen("id = \"AT\"", &format!("id = \"{id}\""), 1)
+            std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../crates/zeima-core/jurisdictions/AT.toml"
+            ))
+            .unwrap()
+            .replacen("id = \"AT\"", &format!("id = \"{id}\""), 1)
         };
         let (kept, refused) = without_replacements(vec![
             ("AT.toml".into(), src("AT")),
@@ -180,7 +200,10 @@ mod tests {
             ("junk.toml".into(), "not a profile".into()),
         ]);
         assert_eq!(refused, vec!["AT.toml".to_string()]);
-        assert_eq!(kept.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), vec!["LU.toml", "junk.toml"]);
+        assert_eq!(
+            kept.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            vec!["LU.toml", "junk.toml"]
+        );
     }
 
     #[test]
@@ -192,7 +215,10 @@ mod tests {
         std::fs::write(dir.join("A.fixtures.toml"), "x").unwrap();
         std::fs::write(dir.join("readme.md"), "x").unwrap();
         let files = read_files(&dir);
-        assert_eq!(files, vec![("A.toml".into(), "a".into()), ("B.toml".into(), "b".into())]);
+        assert_eq!(
+            files,
+            vec![("A.toml".into(), "a".into()), ("B.toml".into(), "b".into())]
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

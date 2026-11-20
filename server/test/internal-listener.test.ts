@@ -54,6 +54,12 @@ describe('the internal port', () => {
 
   const get = (port: number, path: string, method = 'GET') => fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { 'content-type': 'application/json' }, body: method === 'POST' ? '{}' : undefined })
 
+  it('serves nothing but the internal routes (PT6-07)', async () => {
+    expect((await get(internalPort, '/v1/me')).status).toBe(404)
+    expect((await get(internalPort, '/healthz')).status).toBe(404)
+    expect((await get(publicPort, '/healthz')).status).toBe(200)
+  })
+
   it('is the only place the metrics are served', async () => {
     expect((await get(publicPort, '/metrics')).status).toBe(404)
     expect((await get(internalPort, '/metrics')).status).toBe(200)

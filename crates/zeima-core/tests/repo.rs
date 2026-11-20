@@ -425,16 +425,27 @@ async fn bulk_update_keeps_entries_without_activity_editable() {
 #[tokio::test]
 async fn merge_combines_entries_with_the_given_values() {
     let (core, _) = setup().await;
-    let a = core.create_entry(manual(None, T0, T0 + 30 * MIN, vec![])).await.unwrap();
+    let a = core
+        .create_entry(manual(None, T0, T0 + 30 * MIN, vec![]))
+        .await
+        .unwrap();
     let b = core
-        .create_entry(manual(None, T0 + 2 * 60 * MIN, T0 + 2 * 60 * MIN + 45 * MIN, vec![]))
+        .create_entry(manual(
+            None,
+            T0 + 2 * 60 * MIN,
+            T0 + 2 * 60 * MIN + 45 * MIN,
+            vec![],
+        ))
         .await
         .unwrap();
     let mut input = manual(None, T0, T0 + 75 * MIN, vec![]);
     input.note = "both".into();
     input.billable = Some(true);
 
-    let merged = core.merge_entries(&[b.id.clone(), a.id.clone()], input.clone()).await.unwrap();
+    let merged = core
+        .merge_entries(&[b.id.clone(), a.id.clone()], input.clone())
+        .await
+        .unwrap();
     assert_eq!(merged.id, a.id);
     assert_eq!(merged.start_at, T0);
     assert_eq!(merged.end_at, Some(T0 + 75 * MIN));

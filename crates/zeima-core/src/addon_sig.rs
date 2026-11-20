@@ -58,7 +58,11 @@ pub struct SignatureCheck {
 
 impl SignatureCheck {
     fn of(status: SignatureStatus, key_id: Option<String>, signer: Option<String>) -> Self {
-        Self { status, key_id, signer }
+        Self {
+            status,
+            key_id,
+            signer,
+        }
     }
 
     pub fn unsigned() -> Self {
@@ -67,7 +71,10 @@ impl SignatureCheck {
 
     /// Whether the signature is good: a publisher the app or its server trusts made exactly these files.
     pub fn is_trusted(&self) -> bool {
-        matches!(self.status, SignatureStatus::Trusted | SignatureStatus::ServerTrusted)
+        matches!(
+            self.status,
+            SignatureStatus::Trusted | SignatureStatus::ServerTrusted
+        )
     }
 }
 
@@ -103,7 +110,12 @@ pub fn parse_public_key(raw: &str) -> Option<VerifyingKey> {
 }
 
 /// Checks the package's signature file (if any) against the trusted keys.
-pub fn check(manifest_src: &[u8], wasm: &[u8], signature_json: Option<&str>, trusted: &[TrustedKey]) -> SignatureCheck {
+pub fn check(
+    manifest_src: &[u8],
+    wasm: &[u8],
+    signature_json: Option<&str>,
+    trusted: &[TrustedKey],
+) -> SignatureCheck {
     let Some(raw) = signature_json else {
         return SignatureCheck::unsigned();
     };
@@ -154,7 +166,10 @@ mod tests {
 
     #[test]
     fn shared_vectors() {
-        let v: Vectors = serde_json::from_str(include_str!("../../../packages/shared-fixtures/addons/vectors.json")).unwrap();
+        let v: Vectors = serde_json::from_str(include_str!(
+            "../../../packages/shared-fixtures/addons/vectors.json"
+        ))
+        .unwrap();
         let trusted = [TrustedKey {
             key_id: v.key.key_id.clone(),
             name: v.key.name.clone(),
@@ -162,23 +177,41 @@ mod tests {
             vendor: true,
         }];
         for c in v.cases {
-            let wasm = base64::engine::general_purpose::STANDARD.decode(&c.wasm_base64).unwrap();
+            let wasm = base64::engine::general_purpose::STANDARD
+                .decode(&c.wasm_base64)
+                .unwrap();
             let sig = c.signature.as_ref().map(|s| s.to_string());
             let got = check(c.manifest.as_bytes(), &wasm, sig.as_deref(), &trusted);
-            let want: SignatureStatus = serde_json::from_value(serde_json::Value::String(c.expect.clone())).unwrap();
+            let want: SignatureStatus =
+                serde_json::from_value(serde_json::Value::String(c.expect.clone())).unwrap();
             assert_eq!(got.status, want, "{}", c.name);
-            assert_eq!(got.signer.is_some(), want == SignatureStatus::Trusted, "{}", c.name);
+            assert_eq!(
+                got.signer.is_some(),
+                want == SignatureStatus::Trusted,
+                "{}",
+                c.name
+            );
             // The same files signed by a key the server handed out are "server trusted", never vendor trusted.
-            let by_server = [TrustedKey { vendor: false, ..trusted[0].clone() }];
+            let by_server = [TrustedKey {
+                vendor: false,
+                ..trusted[0].clone()
+            }];
             let got = check(c.manifest.as_bytes(), &wasm, sig.as_deref(), &by_server);
-            let want_server = if want == SignatureStatus::Trusted { SignatureStatus::ServerTrusted } else { want };
+            let want_server = if want == SignatureStatus::Trusted {
+                SignatureStatus::ServerTrusted
+            } else {
+                want
+            };
             assert_eq!(got.status, want_server, "{} (server key)", c.name);
         }
     }
 
     #[test]
     fn a_malformed_signature_file_is_invalid() {
-        assert_eq!(check(b"m", b"w", Some("not json"), &[]).status, SignatureStatus::Invalid);
+        assert_eq!(
+            check(b"m", b"w", Some("not json"), &[]).status,
+            SignatureStatus::Invalid
+        );
         assert_eq!(check(b"m", b"w", None, &[]).status, SignatureStatus::Unsigned);
     }
 }

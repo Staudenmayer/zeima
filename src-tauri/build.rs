@@ -17,6 +17,8 @@ fn main() {
         .map(|name| &*Box::leak(name.to_string().into_boxed_str()))
         .collect();
     let commands: &'static [&'static str] = Box::leak(names.into_boxed_slice());
-    tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(commands)))
-        .expect("tauri build");
+    tauri_build::try_build(
+        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(commands)),
+    )
+    .expect("tauri build");
 }

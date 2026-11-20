@@ -85,10 +85,16 @@ impl OrgRule {
     /// Why this organization does not let `addon_id` (with this signature) in; `None` if it does.
     pub fn refuses(&self, addon_id: &str, signature: &SignatureCheck) -> Option<String> {
         if self.mode == "allowlist" && !self.allowed.iter().any(|a| a.eq_ignore_ascii_case(addon_id)) {
-            return Some(format!("{} only allows the addons on its list; {addon_id} is not on it.", self.org_name));
+            return Some(format!(
+                "{} only allows the addons on its list; {addon_id} is not on it.",
+                self.org_name
+            ));
         }
         if self.require_signed && !signature.is_trusted() {
-            return Some(format!("{} only allows addons signed by a publisher it trusts.", self.org_name));
+            return Some(format!(
+                "{} only allows addons signed by a publisher it trusts.",
+                self.org_name
+            ));
         }
         None
     }
@@ -107,12 +113,22 @@ pub fn trusted_keys(publishers: &[Publisher]) -> Vec<TrustedKey> {
 /// `vendor` keys come first, so a server cannot override a vendor key id with its own key.
 fn keys_of(vendor: &[Publisher], server: &[Publisher]) -> Vec<TrustedKey> {
     let make = |p: &Publisher, is_vendor: bool| {
-        Some(TrustedKey { key_id: p.key_id.clone(), name: p.name.clone(), key: addon_sig::parse_public_key(&p.public_key)?, vendor: is_vendor })
+        Some(TrustedKey {
+            key_id: p.key_id.clone(),
+            name: p.name.clone(),
+            key: addon_sig::parse_public_key(&p.public_key)?,
+            vendor: is_vendor,
+        })
     };
     vendor
         .iter()
         .filter_map(|p| make(p, true))
-        .chain(server.iter().filter(|p| !vendor.iter().any(|v| v.key_id == p.key_id)).filter_map(|p| make(p, false)))
+        .chain(
+            server
+                .iter()
+                .filter(|p| !vendor.iter().any(|v| v.key_id == p.key_id))
+                .filter_map(|p| make(p, false)),
+        )
         .collect()
 }
 
@@ -159,7 +175,10 @@ pub fn load_state(app: &AppHandle) {
 fn save_state(app: &AppHandle) {
     let addons = app.state::<Addons>();
     let (publishers, rules) = addons.trust_snapshot();
-    if let (Some(path), Ok(text)) = (state_path(app), serde_json::to_string(&Saved { publishers, rules })) {
+    if let (Some(path), Ok(text)) = (
+        state_path(app),
+        serde_json::to_string(&Saved { publishers, rules }),
+    ) {
         let _ = std::fs::write(path, text);
     }
 }
@@ -187,12 +206,17 @@ async fn session(app: &AppHandle) -> Result<Option<(String, String)>, CmdError> 
     Ok(Some((discovery.api_url.trim_end_matches('/').to_string(), token)))
 }
 
-async fn get_json<T: serde::de::DeserializeOwned + Send + 'static>(api: &str, path: &str, token: &str) -> Result<T, CmdError> {
+async fn get_json<T: serde::de::DeserializeOwned + Send + 'static>(
+    api: &str,
+    path: &str,
+    token: &str,
+) -> Result<T, CmdError> {
     let (url, token) = (format!("{api}{path}"), token.to_string());
-    let (status, text) = tauri::async_runtime::spawn_blocking(move || crate::org::call("GET", &url, &token, None))
-        .await
-        .map_err(|e| err("io", e))?
-        .map_err(|e| err("server", format!("could not reach the server: {e}")))?;
+    let (status, text) =
+        tauri::async_runtime::spawn_blocking(move || crate::org::call("GET", &url, &token, None))
+            .await
+            .map_err(|e| err("io", e))?
+            .map_err(|e| err("server", format!("could not reach the server: {e}")))?;
     if !(200..300).contains(&status) {
         return Err(err("server", format!("the server answered {status}")));
     }
@@ -283,10 +307,19 @@ async fn fetch_index(app: &AppHandle) -> Result<(String, String, Index), CmdErro
 
 #[tauri::command]
 #[specta::specta]
-pub async fn addon_registry(app: AppHandle, state: State<'_, AppState>, addons: State<'_, Addons>) -> CmdResult<RegistryView> {
+pub async fn addon_registry(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    addons: State<'_, Addons>,
+) -> CmdResult<RegistryView> {
     let index = match fetch_index(&app).await {
         Ok((_, _, index)) => index,
-        Err(e) => return Ok(RegistryView { addons: Vec::new(), error: Some(e.message) }),
+        Err(e) => {
+            return Ok(RegistryView {
+                addons: Vec::new(),
+                error: Some(e.message),
+            })
+        }
     };
     let version = app.package_info().version.to_string();
     let mut out = Vec::new();
@@ -294,17 +327,24 @@ pub async fn addon_registry(app: AppHandle, state: State<'_, AppState>, addons: 
     let mut newest: Vec<&IndexEntry> = Vec::new();
     for e in &index.addons {
         match newest.iter().position(|n| n.id == e.id) {
-            Some(i) if zeima_core::addon::parse_version(&newest[i].version) >= zeima_core::addon::parse_version(&e.version) => {}
+            Some(i)
+                if zeima_core::addon::parse_version(&newest[i].version)
+                    >= zeima_core::addon::parse_version(&e.version) => {}
             Some(i) => newest[i] = e,
             None => newest.push(e),
         }
     }
     for e in newest {
-        let signer = e
+        let signer = e.key_id.as_ref().and_then(|k| {
+            trusted_keys(&index.publishers)
+                .into_iter()
+                .find(|t| &t.key_id == k)
+                .map(|t| t.name)
+        });
+        let vendor_key = e
             .key_id
             .as_ref()
-            .and_then(|k| trusted_keys(&index.publishers).into_iter().find(|t| &t.key_id == k).map(|t| t.name));
-        let vendor_key = e.key_id.as_ref().is_some_and(|k| builtin_publishers().iter().any(|p| &p.key_id == k));
+            .is_some_and(|k| builtin_publishers().iter().any(|p| &p.key_id == k));
         let claimed = SignatureCheck {
             status: match (signer.is_some(), vendor_key) {
                 (true, true) => SignatureStatus::Trusted,
@@ -326,12 +366,17 @@ pub async fn addon_registry(app: AppHandle, state: State<'_, AppState>, addons: 
             size: e.size.min(u64::from(u32::MAX)) as u32,
             installed_version: state.core.get_addon(&e.id).await.ok().map(|r| r.version),
             signer,
-            compatible: e.min_app_version.as_deref().is_none_or(|m| zeima_core::addon::parse_version(&version) >= zeima_core::addon::parse_version(m)),
+            compatible: e.min_app_version.as_deref().is_none_or(|m| {
+                zeima_core::addon::parse_version(&version) >= zeima_core::addon::parse_version(m)
+            }),
             blocked: addons.install_blocked(&e.id, &claimed),
         });
     }
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    Ok(RegistryView { addons: out, error: None })
+    Ok(RegistryView {
+        addons: out,
+        error: None,
+    })
 }
 
 /// Downloads an addon from the server's registry and installs it, after checking its hash and its
@@ -356,14 +401,23 @@ pub async fn addon_registry_install(
         .await
         .map_err(|e| err("io", e))?
         .map_err(|e| err("server", format!("could not download the addon: {e}")))?;
-    let digest: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+    let digest: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     if !digest.eq_ignore_ascii_case(&entry.sha256) {
-        return Err(err("validation", "the downloaded package does not match what the server announced"));
+        return Err(err(
+            "validation",
+            "the downloaded package does not match what the server announced",
+        ));
     }
     // From the bytes that were just checked: not through a file in a shared folder that another process could replace.
     let package = read_package_bytes(bytes)?;
     if package.manifest.id != entry.id || package.manifest.version != entry.version {
-        return Err(err("validation", "the package is not the addon the server announced"));
+        return Err(err(
+            "validation",
+            "the package is not the addon the server announced",
+        ));
     }
     install_package(&app, &state, &addons, package).await
 }
@@ -406,7 +460,13 @@ pub async fn refresh_rules(app: &AppHandle) -> Result<Vec<OrgRule>, CmdError> {
             continue;
         }
         let name: OrgName = get_json(&api, &format!("/v1/orgs/{}", org.id), &token).await?;
-        rules.push(OrgRule { org_id: org.id, org_name: name.name, mode: policy.mode, require_signed: policy.require_signed, allowed: policy.allowed });
+        rules.push(OrgRule {
+            org_id: org.id,
+            org_name: name.name,
+            mode: policy.mode,
+            require_signed: policy.require_signed,
+            allowed: policy.allowed,
+        });
     }
     let addons = app.state::<Addons>();
     addons.set_rules(rules.clone());
@@ -455,15 +515,27 @@ mod tests {
     use super::*;
 
     fn rule(mode: &str, signed: bool, allowed: &[&str]) -> OrgRule {
-        OrgRule { org_id: "o".into(), org_name: "Acme".into(), mode: mode.into(), require_signed: signed, allowed: allowed.iter().map(|s| (*s).into()).collect() }
+        OrgRule {
+            org_id: "o".into(),
+            org_name: "Acme".into(),
+            mode: mode.into(),
+            require_signed: signed,
+            allowed: allowed.iter().map(|s| (*s).into()).collect(),
+        }
     }
     fn trusted() -> SignatureCheck {
-        SignatureCheck { status: SignatureStatus::ServerTrusted, key_id: Some("k".into()), signer: Some("Pub".into()) }
+        SignatureCheck {
+            status: SignatureStatus::ServerTrusted,
+            key_id: Some("k".into()),
+            signer: Some("Pub".into()),
+        }
     }
 
     #[test]
     fn an_open_rule_allows_everything() {
-        assert!(rule("open", false, &[]).refuses("a.b", &SignatureCheck::unsigned()).is_none());
+        assert!(rule("open", false, &[])
+            .refuses("a.b", &SignatureCheck::unsigned())
+            .is_none());
     }
 
     #[test]
@@ -478,7 +550,11 @@ mod tests {
         let r = rule("open", true, &[]);
         assert!(r.refuses("a.b", &trusted()).is_none());
         assert!(r.refuses("a.b", &SignatureCheck::unsigned()).is_some());
-        let unknown = SignatureCheck { status: SignatureStatus::UnknownKey, key_id: Some("x".into()), signer: None };
+        let unknown = SignatureCheck {
+            status: SignatureStatus::UnknownKey,
+            key_id: Some("x".into()),
+            signer: None,
+        };
         assert!(r.refuses("a.b", &unknown).is_some());
     }
 
@@ -492,21 +568,37 @@ mod tests {
 
     #[test]
     fn publishers_with_a_bad_key_are_not_trusted() {
-        let keys = trusted_keys(&[Publisher { key_id: "k".into(), name: "n".into(), public_key: "not a key".into() }]);
+        let keys = trusted_keys(&[Publisher {
+            key_id: "k".into(),
+            name: "n".into(),
+            public_key: "not a key".into(),
+        }]);
         assert!(keys.is_empty());
     }
 
     #[test]
     fn vendor_keys_come_from_the_build_and_cannot_be_replaced_by_a_server() {
-        let v: serde_json::Value = serde_json::from_str(include_str!("../../packages/shared-fixtures/addons/vectors.json")).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(include_str!("../../packages/shared-fixtures/addons/vectors.json")).unwrap();
         let real_key = v["key"]["publicKey"].as_str().unwrap().to_string();
         let vendor = parse_builtin(&format!("acme-1=Acme={real_key}; broken ;x=y"));
         assert_eq!(vendor.len(), 1);
-        assert_eq!((vendor[0].key_id.as_str(), vendor[0].name.as_str()), ("acme-1", "Acme"));
+        assert_eq!(
+            (vendor[0].key_id.as_str(), vendor[0].name.as_str()),
+            ("acme-1", "Acme")
+        );
         assert!(parse_builtin("").is_empty());
         // A server that lists another key under the vendor's key id is ignored for that id; its own ids are kept.
-        let fake = Publisher { key_id: "acme-1".into(), name: "Evil".into(), public_key: real_key.clone() };
-        let local = Publisher { key_id: "local".into(), name: "Local".into(), public_key: real_key };
+        let fake = Publisher {
+            key_id: "acme-1".into(),
+            name: "Evil".into(),
+            public_key: real_key.clone(),
+        };
+        let local = Publisher {
+            key_id: "local".into(),
+            name: "Local".into(),
+            public_key: real_key,
+        };
         let keys = keys_of(&vendor, &[fake, local]);
         assert_eq!(keys.len(), 2);
         assert!(keys.iter().find(|k| k.key_id == "acme-1").unwrap().vendor);

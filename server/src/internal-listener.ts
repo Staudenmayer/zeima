@@ -45,7 +45,10 @@ export function guardInternalPaths(app: FastifyInstance, internalPort: number | 
   app.addHook('onRequest', async (request, reply) => {
     // By the route (already matched by the router, whatever the spelling) and by the normalised path.
     const internal = request.routeOptions?.config?.internal === true || isInternalPath(request.url)
-    if (internal && request.raw.socket.localPort !== internalPort) {
+    const onInternalPort = request.raw.socket.localPort === internalPort
+    // The internal port serves the internal routes only: published by mistake, it must not be a second way into the API.
+    const refused = onInternalPort ? request.routeOptions?.config?.internal !== true : internal
+    if (refused) {
       return reply.code(404).type('application/problem+json').send({ type: 'about:blank', title: 'Not Found', status: 404, code: 'not_found' })
     }
   })

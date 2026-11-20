@@ -101,8 +101,10 @@ pub struct HostServices {
     /// Called after an addon created an entry, so windows reload.
     pub entries_changed: Arc<dyn Fn() + Send + Sync>,
     pub secrets: Secrets,
-    /// HTTP for OAuth token requests.
+    /// HTTP for the account sign-in's token requests.
     pub post_form: PostForm,
+    /// HTTP for add-ons' OAuth token requests: public addresses only.
+    pub addon_post_form: PostForm,
     pub tokens: Arc<TokenCache>,
 }
 
@@ -114,6 +116,7 @@ impl HostServices {
             core: app.state::<AppState>().core.clone(),
             secrets: Arc::new(Keychain),
             post_form: crate::oauth::http_post_form(),
+            addon_post_form: crate::oauth::http_post_form_public(),
             tokens: app.state::<Addons>().tokens.clone(),
             notify: Arc::new(move |title, body| {
                 let _ = notify_app.notification().builder().title(title).body(body).show();
@@ -384,10 +387,16 @@ fn notification_allowed(addon_id: &str) -> bool {
     use std::sync::{Mutex, OnceLock};
     use std::time::Instant;
     static RECENT: OnceLock<Mutex<HashMap<String, VecDeque<Instant>>>> = OnceLock::new();
-    let mut all = RECENT.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    let mut all = RECENT
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let list = all.entry(addon_id.to_string()).or_default();
     let now = Instant::now();
-    while list.front().is_some_and(|t| now.duration_since(*t) > Duration::from_secs(60)) {
+    while list
+        .front()
+        .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(60))
+    {
         list.pop_front();
     }
     if list.len() >= NOTIFICATIONS_PER_MINUTE {
@@ -406,7 +415,9 @@ fn zeima_notify(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserData<Hos
         Some(Permission::Notify),
         |ctx, n: sdk::Notification| {
             if !notification_allowed(&ctx.addon_id) {
-                return Err(extism::Error::msg("too many notifications; try again in a minute"));
+                return Err(extism::Error::msg(
+                    "too many notifications; try again in a minute",
+                ));
             }
             // The addon's name in the title, so users know where it comes from.
             let title = format!("{} · {}", ctx.addon_name, n.title);
@@ -490,7 +501,7 @@ fn zeima_oauth_token(p: &mut CurrentPlugin, i: &[Val], o: &mut [Val], u: UserDat
                 &ctx.addon_id,
                 provider,
                 s.secrets.as_ref(),
-                &s.post_form,
+                &s.addon_post_form,
                 &s.tokens,
                 s.core.now_ms(),
             )
@@ -537,7 +548,11 @@ fn build_plugin(
     let typed: Vec<String> = manifest
         .host_settings
         .iter()
-        .filter_map(|key| settings.get(key).and_then(|v| zeima_core::addon::host_of_address(v)))
+        .filter_map(|key| {
+            settings
+                .get(key)
+                .and_then(|v| zeima_core::addon::host_of_address(v))
+        })
         .collect();
     let mut wasm_manifest = Manifest::new([Wasm::file(dir.join(&manifest.wasm))])
         .with_timeout(CALL_TIMEOUT)
@@ -644,7 +659,11 @@ fn build_plugin(
 }
 
 impl Addons {
-    pub fn set_trust(&self, publishers: Vec<crate::registry::Publisher>, rules: Vec<crate::registry::OrgRule>) {
+    pub fn set_trust(
+        &self,
+        publishers: Vec<crate::registry::Publisher>,
+        rules: Vec<crate::registry::OrgRule>,
+    ) {
         *self.publishers.lock().unwrap_or_else(|e| e.into_inner()) = publishers;
         *self.rules.lock().unwrap_or_else(|e| e.into_inner()) = rules;
     }
@@ -665,7 +684,10 @@ impl Addons {
     }
 
     /// Who signed this package, if the app trusts them.
-    pub fn signature_of(&self, package: &crate::commands_addons::Package) -> zeima_core::addon_sig::SignatureCheck {
+    pub fn signature_of(
+        &self,
+        package: &crate::commands_addons::Package,
+    ) -> zeima_core::addon_sig::SignatureCheck {
         let (publishers, _) = self.trust_snapshot();
         zeima_core::addon_sig::check(
             &package.manifest_src,
@@ -682,7 +704,11 @@ impl Addons {
     }
 
     /// Why this package may not be installed: a signature that does not match, or the rules.
-    pub fn install_blocked(&self, id: &str, signature: &zeima_core::addon_sig::SignatureCheck) -> Option<String> {
+    pub fn install_blocked(
+        &self,
+        id: &str,
+        signature: &zeima_core::addon_sig::SignatureCheck,
+    ) -> Option<String> {
         if signature.status == zeima_core::addon_sig::SignatureStatus::Invalid {
             return Some("The signature does not match the files: the addon was changed after it was signed, or it is damaged.".into());
         }
@@ -1097,7 +1123,8 @@ mod tests {
                 .unwrap(),
         );
         core.set_default_tz("UTC").unwrap();
-        let crate::commands_addons::Package { manifest, wasm, .. } = crate::commands_addons::read_package(&zip).unwrap();
+        let crate::commands_addons::Package { manifest, wasm, .. } =
+            crate::commands_addons::read_package(&zip).unwrap();
         static LOADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         // Tests run in parallel and may load the same addon: one folder each.
         let n = LOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1128,7 +1155,8 @@ mod tests {
             entries_changed: Arc::new(|| {}),
             secrets: secrets.clone(),
             // Every refresh succeeds.
-            post_form: Arc::new(|_, form| {
+            post_form: Arc::new(|_, _| Err("unused".into())),
+            addon_post_form: Arc::new(|_, form| {
                 assert!(form.contains(&("grant_type".into(), "refresh_token".into())));
                 Ok((200, r#"{"access_token":"at-1","expires_in":3600}"#.into()))
             }),

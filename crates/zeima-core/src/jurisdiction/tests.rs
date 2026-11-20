@@ -181,7 +181,11 @@ rule = { fixed = "01-01" }
             ("LU.toml".into(), SRC.into()),
             ("broken.toml".into(), "id = 1".into()),
             ("BAD.toml".into(), SRC.replace("id = \"LU\"", "id = \"lu\"")),
-            ("NOSRC.toml".into(), SRC.replace("id = \"LU\"", "id = \"XX\"").replace("sources = [\"https://example.com/law\"]", "sources = []")),
+            (
+                "NOSRC.toml".into(),
+                SRC.replace("id = \"LU\"", "id = \"XX\"")
+                    .replace("sources = [\"https://example.com/law\"]", "sources = []"),
+            ),
             ("LU2.toml".into(), SRC.into()),
         ]);
         assert_eq!(problems.len(), 4, "{problems:?}");

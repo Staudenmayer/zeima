@@ -162,7 +162,11 @@ pub async fn check(app: &AppHandle) {
                     .clone()
                     .or_else(|| running_entry.activity_id.clone()),
                 project_id: usable_project,
-                tag_ids: if hidden { Vec::new() } else { o.meeting.tag_ids.clone() },
+                tag_ids: if hidden {
+                    Vec::new()
+                } else {
+                    o.meeting.tag_ids.clone()
+                },
                 note: o.meeting.title.clone(),
                 billable: Some(o.meeting.billable),
             };

@@ -76,6 +76,8 @@ const FieldsSchema = Type.Record(Type.String(), Type.Object({ v: Type.Any(), h: 
 
 /** Personal workspaces one account may have (the app uses one). */
 export const MAX_PERSONAL_WORKSPACES = 5
+/** Advisory lock that keeps the commit order of pushes equal to the order of their sequence numbers. */
+const PUSH_ORDER_LOCK = 7_240_002
 const MAX_CHANGES = 500
 /** What one account may push in a minute: far more than a person produces, far less than it takes to fill a disk. */
 const PUSH_REQUESTS_PER_MINUTE = 120
@@ -276,6 +278,10 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
       return withUser(db(), callerOf(user), async (tx) => {
         const [ws] = await tx.select().from(schema.workspace).where(eq(schema.workspace.id, workspaceId))
         if (!ws) throw new HttpProblem(404, 'not_found', 'no such workspace')
+        // Pull pages by `seq`, which is taken when a row is written but only visible when its transaction commits. Pushes
+        // therefore commit one at a time in the order of their numbers; otherwise a device could pass a number whose row
+        // is not visible yet and never receive it. (One API process; a push is short.)
+        await tx.execute(sql`select pg_advisory_xact_lock(${PUSH_ORDER_LOCK})`)
         const actor = { manager: isManager(user, ws) }
         const orgActor = ws.kind === 'org' && ws.orgId ? { user, orgId: ws.orgId } : null
 

@@ -169,3 +169,20 @@ A full-scope white-box review with proofs of concept (the report is kept outside
 | PT5-08 | Keycloak token and registration endpoints on the public host | Open | Needs a live check; narrow the proxy paths and use a long `API_ADMIN_SECRET`. |
 | PT5-09 | Non-strict Ed25519 | Fixed | `verify_strict` for add-ons and licences; small-order publisher keys are refused. |
 | PT5-10 | Dependencies | Accepted | No vulnerabilities; ten unmaintained or unsound warnings upstream. |
+
+## Sixth penetration test of 20 November 2026 (PT6-01 to PT6-16)
+
+A white-box review (the report is kept outside the repository) found no critical or high issue, 2 medium, 6 low and 8 informational ones.
+
+| ID | Finding | Status | Where, and what to know |
+|---|---|---|---|
+| PT6-01 | Add-on OAuth requests were made by the app to any https address | Fixed | The manifest's `auth_url` and `token_url` must name public host names (`is_internal_host`, `crates/zeima-core/src/addon.rs`); the app resolves the token host before each add-on request and refuses non-public addresses (`http_post_form_public`, `src-tauri/src/oauth.rs`); token requests follow no redirects. The install question lists the account servers. The account sign-in keeps the plain client (the person's own server may be private). |
+| PT6-02 | An update from another publisher inherited the add-on's secrets and accounts | Fixed | `install_package` refuses an update whose signer differs from the installed add-on's, and one that changes the token endpoint host of an account type; uninstall first (that deletes the secrets). Unsigned add-ons installed unsigned can still be updated unsigned. |
+| PT6-03 | Pull could skip rows committed out of order | Fixed | Pushes take a global advisory lock (`PUSH_ORDER_LOCK`) so commit order equals sequence order. One API process is assumed, as before. |
+| PT6-04 | An owner could delete a decided absence | Fixed | `checkAbsence`; `server/test/orgsync.test.ts`. |
+| PT6-05 | Push amplification (locked-entry scan per pause) | Fixed (partly) | Looked up once per request. A global push budget is *open*. |
+| PT6-06 | Public Keycloak path space | Fixed (partly) | Caddy (also air-gapped) answers 404 for `/realms/zeima/clients-registrations` and adds HSTS, nosniff and a referrer policy on the sign-in host. A full path allow-list and the Helm ingress are *open* (needs a live test). |
+| PT6-07 | The internal port served the whole API | Fixed | It serves only routes marked `internal` (`server/test/internal-listener.test.ts`). Binding it to a private address is still the operator's (network policy, no published port). |
+| PT6-08 | Add-on id joined to a path without a check | Fixed | `addon_save_settings` refuses ids with `/`, `\`, `:` or `..`. |
+| PT6-09, PT6-10 | CSP lacked `object-src`, `base-uri`, `form-action`, `frame-ancestors`; profile file names | Fixed | `tauri.conf.json`; `is_profile_file` accepts plain names only. |
+| PT6-11 to PT6-16 | Checkout token without expiry, service-account breadth, owner-connection routes, long offline sessions, open egress in Compose, `MIN_CLIENT_VERSION` default | Accepted / noted | Set `MIN_CLIENT_VERSION` after security releases; keep `API_ADMIN_SECRET` in a secret manager and rotate it. |

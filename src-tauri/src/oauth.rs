@@ -38,6 +38,8 @@ pub fn http_post_form() -> PostForm {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(HTTP_TIMEOUT))
+        // A token endpoint answers; it never needs to send the code or the refresh token somewhere else.
+        .max_redirects(0)
         .build()
         .into();
     Arc::new(move |url, form| {
@@ -49,6 +51,63 @@ pub fn http_post_form() -> PostForm {
         let status = response.status().as_u16();
         let body = response.body_mut().read_to_string().map_err(|e| e.to_string())?;
         Ok((status, body))
+    })
+}
+
+/// Whether an address is on the public internet (not loopback, private, link-local, CGNAT, documentation, multicast ...).
+pub(crate) fn is_global(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_unspecified()
+                || v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                || o[0] == 0
+                || (o[0] == 100 && (o[1] & 0xc0) == 64)
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
+                || (o[0] == 198 && (o[1] & 0xfe) == 18)
+                || o[0] >= 240)
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_global(IpAddr::V4(v4));
+            }
+            let s = v6.segments();
+            !(v6.is_unspecified()
+                || v6.is_loopback()
+                || v6.is_multicast()
+                || (s[0] & 0xfe00) == 0xfc00
+                || (s[0] & 0xffc0) == 0xfe80
+                || (s[0] == 0x2001 && s[1] == 0x0db8)
+                || (s[0] == 0x0064 && s[1] == 0xff9b)
+                || s[0] == 0x2002)
+        }
+    }
+}
+
+/// `http_post_form` for add-ons: the host must resolve to public addresses only. (Checked just before the request;
+/// the account sign-in, which may be a private server of the person's own, uses the plain one.)
+pub fn http_post_form_public() -> PostForm {
+    let inner = http_post_form();
+    Arc::new(move |url, form| {
+        let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
+        if parsed.scheme() != "https" {
+            return Err("the token endpoint must be https".into());
+        }
+        let host = parsed.host_str().ok_or("the token endpoint has no host")?;
+        let port = parsed.port_or_known_default().unwrap_or(443);
+        let addrs: Vec<_> = std::net::ToSocketAddrs::to_socket_addrs(&(host, port))
+            .map_err(|e| format!("cannot resolve the token endpoint: {e}"))?
+            .collect();
+        if addrs.is_empty() || addrs.iter().any(|a| !is_global(a.ip())) {
+            return Err("the token endpoint is not on the public internet".into());
+        }
+        inner(url, form)
     })
 }
 
@@ -412,6 +471,29 @@ pub fn access_token(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_public_addresses_are_global() {
+        for bad in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "192.168.0.1",
+            "172.16.0.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "0.0.0.0",
+            "::1",
+            "fe80::1",
+            "fc00::1",
+            "::ffff:10.0.0.1",
+            "64:ff9b::a00:1",
+        ] {
+            assert!(!is_global(bad.parse().unwrap()), "{bad}");
+        }
+        for good in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
+            assert!(is_global(good.parse().unwrap()), "{good}");
+        }
+    }
+
     use super::*;
     use crate::secrets::MemorySecrets;
 

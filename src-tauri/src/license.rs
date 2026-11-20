@@ -64,8 +64,8 @@ fn belongs_to(groups: &[String], org: &str) -> bool {
 pub async fn store(app: &AppHandle, token: &str) -> Result<(), String> {
     let state = app.state::<AppState>();
     let now = state.core.now_ms() / 1000;
-    let verified =
-        entitlement::verify(token, &trusted_keys(), now).map_err(|e| format!("the server's entitlement: {e}"))?;
+    let verified = entitlement::verify(token, &trusted_keys(), now)
+        .map_err(|e| format!("the server's entitlement: {e}"))?;
     // A licence that names an organization is that organization's: it is kept only for a person who belongs to it
     // (a token copied from another organization's installation does not unlock this one).
     if let Some(org) = verified.claims.org_id.as_deref() {
@@ -140,7 +140,10 @@ mod tests {
 
     #[test]
     fn a_licence_for_an_organization_needs_membership() {
-        let groups = vec!["/orgs/o1/roles/member".to_string(), "/orgs/o1/groups/dev".to_string()];
+        let groups = vec![
+            "/orgs/o1/roles/member".to_string(),
+            "/orgs/o1/groups/dev".to_string(),
+        ];
         assert!(belongs_to(&groups, "o1"));
         assert!(!belongs_to(&groups, "o2"));
         assert!(!belongs_to(&groups, "o"));

@@ -256,6 +256,17 @@ pub fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
+/// Whether a lower-case host name is numeric, local or otherwise not a public name.
+pub fn is_internal_host(lower: &str) -> bool {
+    lower.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok()
+        || lower.split('.').all(|p| p.chars().all(|c| c.is_ascii_digit()))
+        || lower == "localhost"
+        || lower.ends_with(".localhost")
+        || lower.ends_with(".local")
+        || lower.ends_with(".internal")
+        || lower.ends_with(".lan")
+}
+
 /// Host name of an address a user typed into a setting: `https://`,
 /// `http://` and `webcal://` are accepted, a port or path is ignored.
 /// `None` if there is no usable host.
@@ -410,14 +421,7 @@ impl AddonManifest {
             }
             // An add-on connects to the internet, not to this machine or the network around it.
             let lower = bare.to_ascii_lowercase();
-            let internal = lower.parse::<std::net::IpAddr>().is_ok()
-                || lower.split('.').all(|p| p.chars().all(|c| c.is_ascii_digit()))
-                || lower == "localhost"
-                || lower.ends_with(".localhost")
-                || lower.ends_with(".local")
-                || lower.ends_with(".internal")
-                || lower.ends_with(".lan");
-            if internal {
+            if is_internal_host(&lower) {
                 return Err(Error::validation(
                     "allowed_hosts",
                     format!(
@@ -500,6 +504,20 @@ impl AddonManifest {
                     return Err(Error::validation(
                         "oauth",
                         format!("'{}': '{url}' is not an https:// URL", p.id),
+                    ));
+                }
+                // The app itself calls these addresses: they must be public host names, like allowed_hosts.
+                let name = host
+                    .and_then(|h| host_of_address(&format!("https://{h}")))
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if name.is_empty() || is_internal_host(&name) {
+                    return Err(Error::validation(
+                        "oauth",
+                        format!(
+                            "'{}': '{url}' must name a public host, not a local or numeric address",
+                            p.id
+                        ),
                     ));
                 }
             }
@@ -597,6 +615,26 @@ auth_params = { access_type = "offline", prompt = "consent" }
     }
 
     #[test]
+    fn oauth_endpoints_must_be_public_https_hosts() {
+        let base = |url: &str| {
+            format!(
+                "id = \"com.example.poc\"\nname = \"p\"\nversion = \"1.0.0\"\nauthor = \"x\"\nwasm = \"a.wasm\"\npermissions = [\"network\"]\nallowed_hosts = [\"api.example.com\"]\n[[oauth]]\nid = \"p\"\nname = \"P\"\nclient_id = \"c\"\nauth_url = \"https://accounts.example.com/auth\"\ntoken_url = \"{url}\"\n"
+            )
+        };
+        for bad in [
+            "https://127.0.0.1:8443/t",
+            "https://169.254.169.254/x",
+            "https://10.0.0.5/x",
+            "https://[::1]/x",
+            "https://intranet.corp.local/t",
+            "https://localhost/t",
+        ] {
+            assert!(AddonManifest::parse(&base(bad)).is_err(), "{bad}");
+        }
+        assert!(AddonManifest::parse(&base("https://oauth2.example.net/token")).is_ok());
+    }
+
+    #[test]
     fn host_of_address_reads_the_host() {
         assert_eq!(
             host_of_address("https://Cal.Example.com/a/b.ics?x=1").as_deref(),
@@ -655,7 +693,10 @@ auth_params = { access_type = "offline", prompt = "consent" }
             "id = \"com.example.csv-export\"\nwasm = \"../evil.wasm\"",
         );
         for evil in ["C:/Users/x/y.wasm", "a.txt:x.wasm", "./x.wasm", "a/./x.wasm"] {
-            bad("id = \"com.example.csv-export\"", &format!("id = \"com.example.csv-export\"\nwasm = \"{evil}\""));
+            bad(
+                "id = \"com.example.csv-export\"",
+                &format!("id = \"com.example.csv-export\"\nwasm = \"{evil}\""),
+            );
         }
         bad("author = \"Example\"", "author = \"Example\"\nunknown = 1");
         bad(

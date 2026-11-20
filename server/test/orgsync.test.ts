@@ -179,6 +179,8 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       // ... changing them as a new request is fine, and waits for a decision again.
       expect(await results(ANNA, [upsert('absence', A1, 450, { endDate: '2026-11-10', status: 'requested', decidedBy: null, decisionNote: '' })])).toEqual([{ status: 'applied' }])
       expect(await results(OWNER, [upsert('absence', A1, 460, { status: 'approved', decidedBy: OWNER, decisionNote: 'ok' })])).toEqual([{ status: 'applied' }])
+      // PT6-04: the owner cannot make a decided request vanish.
+      expect(await results(ANNA, [{ table: 'absence', rowId: A1, op: 'delete', hlc: hlc(470) }])).toEqual([{ status: 'rejected', reason: 'forbidden' }])
     })
   })
 

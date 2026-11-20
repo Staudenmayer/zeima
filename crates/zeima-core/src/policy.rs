@@ -198,7 +198,10 @@ mod tests {
     #[test]
     fn planning_off_in_any_policy_wins() {
         let on = PolicySettings::default();
-        let off = PolicySettings { planning_visibility: PlanningVisibility::Off, ..Default::default() };
+        let off = PolicySettings {
+            planning_visibility: PlanningVisibility::Off,
+            ..Default::default()
+        };
         assert_eq!(on.stricter(&off).planning_visibility, PlanningVisibility::Off);
         assert_eq!(on.stricter(&on).planning_visibility, PlanningVisibility::Org);
     }

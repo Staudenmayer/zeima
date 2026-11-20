@@ -15,8 +15,16 @@ id.{$DOMAIN} {
 	# Only what people's browsers and apps need of the sign-in service: the realm's pages and endpoints and their
 	# static files. Keycloak's admin console and the master realm (the bootstrap administrator's login) are NOT
 	# published; reach them from inside the network (docs/admin-guide.md, "Keycloak's admin console").
+	# Dynamic client registration is not used by the apps; nobody needs to be able to create clients here.
+	@noregistration path /realms/zeima/clients-registrations /realms/zeima/clients-registrations/*
+	respond @noregistration 404
 	@signin path /realms/zeima /realms/zeima/* /resources/* /robots.txt
 	handle @signin {
+		header {
+			Strict-Transport-Security "max-age=31536000"
+			X-Content-Type-Options nosniff
+			Referrer-Policy no-referrer
+		}
 		reverse_proxy keycloak:8080
 	}
 	handle {

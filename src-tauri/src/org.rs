@@ -55,7 +55,10 @@ pub fn allowed(method: &str, path: &str) -> bool {
 /// must not depend on the web view alone (script running in it could otherwise send it).
 pub fn needs_confirmation(method: &str, path: &str) -> bool {
     let path = path.split('?').next().unwrap_or("");
-    method == "DELETE" && path.strip_prefix("/v1/orgs/").is_some_and(|rest| !rest.is_empty() && !rest.contains('/'))
+    method == "DELETE"
+        && path
+            .strip_prefix("/v1/orgs/")
+            .is_some_and(|rest| !rest.is_empty() && !rest.contains('/'))
 }
 
 async fn confirm(app: &AppHandle, text: &str) -> bool {
@@ -65,7 +68,10 @@ async fn confirm(app: &AppHandle, text: &str) -> bool {
         .message(text)
         .title("Zeima")
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom("Delete / Löschen".into(), "Cancel / Abbrechen".into()))
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Delete / Löschen".into(),
+            "Cancel / Abbrechen".into(),
+        ))
         .show(move |yes| {
             let _ = tx.send(yes);
         });
@@ -73,7 +79,12 @@ async fn confirm(app: &AppHandle, text: &str) -> bool {
 }
 
 /// The answer: status and body text.
-pub(crate) fn call(method: &str, url: &str, token: &str, body: Option<&str>) -> Result<(u16, String), String> {
+pub(crate) fn call(
+    method: &str,
+    url: &str,
+    token: &str,
+    body: Option<&str>,
+) -> Result<(u16, String), String> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(HTTP_TIMEOUT))
