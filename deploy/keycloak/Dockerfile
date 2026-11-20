@@ -1,6 +1,6 @@
 # Keycloak with the Zeima event listener (keycloak/listener): the standard image plus one JAR in
 # providers/, plus the theme and the realm.
-FROM docker.io/library/maven:3.9-eclipse-temurin-21@sha256:80034909d9a9f0b89d3d2c583f07f3b7650309bc4e6b886ad5b860b9e1bfa439 AS listener
+FROM docker.io/library/maven:3.9-eclipse-temurin-26@sha256:b2c1ad85954592f9928e84327c65201f308ad9b5d8ed7d5b823717c97bf23fbb AS listener
 WORKDIR /build
 COPY listener/pom.xml .
 RUN mvn -q -B dependency:go-offline
