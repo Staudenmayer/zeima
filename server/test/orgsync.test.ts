@@ -336,7 +336,7 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
       const out = await results(ANNA, free)
       const took = performance.now() - began
       expect(out.every((r) => r.status === 'applied')).toBe(true)
-      expect(took).toBeLessThan(3000)
+      expect(took).toBeLessThan(1000)
       // Leave the shared workspace as it was for the tests that follow.
       const mine = [...daily.map((d) => d.rowId), id(6000), id(6001), ...free.map((c) => c.rowId), ROOM]
       await db.db.delete(schema.syncRow).where(and(eq(schema.syncRow.workspaceId, ws), inArray(schema.syncRow.rowId, mine)))
