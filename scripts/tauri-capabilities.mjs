@@ -72,12 +72,20 @@ export function reachableCommands(entries, names = bindingNames()) {
 /** What the quick switch and prompt windows load: the shared start-up code, the bare layout and their two pages. */
 export const BARE_ENTRIES = ['plugins/backend.ts', 'plugins/router.ts', 'plugins/i18n.ts', 'layouts/bare.vue', 'pages/quickswitch.vue', 'pages/prompt.vue']
 
+/**
+ * Commands the shared stores contain (so the import closure reaches them) but that the quick switch and prompt code
+ * never calls: deleting catalog entries, saving cost centers and writing settings. Checked against their entry code;
+ * a compromised small window must not get them (least privilege). Add a command here only after checking that no
+ * code the bare windows run calls it.
+ */
+export const BARE_DENIED = ['activity_delete', 'project_delete', 'tag_delete', 'cost_center_delete', 'cost_center_save', 'settings_set']
+
 const permissionOf = (command) => `allow-${command.replaceAll('_', '-')}`
 
 export function capabilities() {
   const all = appCommands()
   const known = new Set(all)
-  const bare = [...reachableCommands(BARE_ENTRIES)].sort()
+  const bare = [...reachableCommands(BARE_ENTRIES)].filter((c) => !BARE_DENIED.includes(c)).sort()
   for (const c of bare) if (!known.has(c)) throw new Error(`${c} is used by a small window but is not a registered command`)
   const header = (identifier, description, windows, permissions) => ({
     $schema: '../gen/schemas/desktop-schema.json',

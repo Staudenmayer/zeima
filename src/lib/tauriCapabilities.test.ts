@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error plain JS tool, shared with the command line
-import { appCommands, capabilities } from '../../scripts/tauri-capabilities.mjs'
+import { appCommands, BARE_DENIED, capabilities } from '../../scripts/tauri-capabilities.mjs'
 
 const dir = join(import.meta.dirname, '../../src-tauri/capabilities')
 const committed = (name: string) => JSON.parse(readFileSync(join(dir, name), 'utf8')) as { windows: string[]; permissions: string[] }
@@ -34,6 +34,14 @@ describe('what each window may call (docs/security.md, ZE-14)', () => {
     }
     // No plugin access (opening links) for the small windows.
     expect(bare.permissions.some((p) => p.startsWith('opener:'))).toBe(false)
+  })
+
+  it('keeps destructive catalog and settings commands out of the small windows (least privilege)', () => {
+    const bare = committed('bare.json')
+    expect(BARE_DENIED as string[]).toEqual(expect.arrayContaining(['activity_delete', 'project_delete', 'tag_delete', 'cost_center_delete', 'cost_center_save', 'settings_set']))
+    for (const c of BARE_DENIED as string[]) expect(bare.permissions, c).not.toContain(allow(c))
+    // The main window still has them.
+    for (const c of BARE_DENIED as string[]) expect(committed('main.json').permissions, c).toContain(allow(c))
   })
 
   it('has no window that is not described here', () => {
