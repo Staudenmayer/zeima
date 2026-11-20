@@ -8279,7 +8279,7 @@ dependencies = [
 name = "zeima"
 version = "1.0.0-alpha.5"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "chrono-tz",
  "extism",
@@ -8333,7 +8333,7 @@ dependencies = [
 name = "zeima-core"
 version = "1.0.0-alpha.5"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "chrono-tz",
  "ed25519-dalek",
