@@ -215,6 +215,9 @@ fn read_zip<R: Read + std::io::Seek>(reader: R) -> Result<Package, CmdError> {
     })
 }
 
+/// How many of a manifest's `allowed_hosts` the install question lists; the rest is summarized as "+N more".
+const MAX_HOSTS_SHOWN: usize = 5;
+
 /// The words of the native question: who made it, what it may do, and (for an update) what is new.
 fn consent_text(
     manifest: &AddonManifest,
@@ -273,7 +276,16 @@ fn consent_text(
         .into(),
         _ => (if de { "Nicht signiert" } else { "Not signed" }).into(),
     };
-    let mut hosts = manifest.allowed_hosts.clone();
+    let mut hosts: Vec<String> = manifest
+        .allowed_hosts
+        .iter()
+        .take(MAX_HOSTS_SHOWN)
+        .map(|h| safe(h))
+        .collect();
+    if manifest.allowed_hosts.len() > MAX_HOSTS_SHOWN {
+        let more = manifest.allowed_hosts.len() - MAX_HOSTS_SHOWN;
+        hosts.push(format!("+{more} more"));
+    }
     if !manifest.host_settings.is_empty() {
         hosts.push(if de {
             "(Adresse aus den Einstellungen)".into()
@@ -1085,6 +1097,20 @@ mod tests {
     }
 
     /// A manifest cannot add lines (or reorder them) in the question the person answers.
+    #[test]
+    fn a_long_host_list_is_cut_in_the_question() {
+        let hosts: Vec<String> = (0..40).map(|i| format!("\"h{i}.example.com\"")).collect();
+        let manifest = AddonManifest::parse(&format!(
+            "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"2.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\npermissions = [\"network\"]\nallowed_hosts = [{}]\n",
+            hosts.join(", ")
+        ))
+        .unwrap();
+        let text = consent_text(&manifest, &SignatureCheck::unsigned(), None, false);
+        assert!(text.contains("h0.example.com"));
+        assert!(!text.contains("h39.example.com"));
+        assert!(text.contains(&format!("+{} more", 40 - MAX_HOSTS_SHOWN)), "{text}");
+    }
+
     #[test]
     fn the_question_keeps_a_fixed_shape_whatever_the_manifest_says() {
         let mut manifest = manifest_with("\"entries:read\"");

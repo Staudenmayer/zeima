@@ -338,9 +338,21 @@ pub fn is_addon_id(id: &str) -> bool {
 }
 
 /// Characters that must not appear in text the app shows as its own: control characters, line and paragraph
-/// separators and bidirectional overrides/isolates.
+/// separators, bidirectional overrides/isolates and invisible format characters (soft hyphen, zero-width, BOM).
 pub fn is_unsafe_display_char(c: char) -> bool {
-    c.is_control() || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    c.is_control()
+        || matches!(
+            c,
+            '\u{AD}'
+                | '\u{61C}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+        )
 }
 
 /// `text` without the characters of [`is_unsafe_display_char`].
@@ -600,6 +612,17 @@ pub fn json_schema() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invisible_format_characters_are_not_displayable() {
+        for c in ['\u{AD}', '\u{61C}', '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}',
+            '\u{2060}', '\u{2062}', '\u{2064}', '\u{FEFF}', '\u{202E}', '\u{2066}', '\u{7}', '\n']
+        {
+            assert!(is_unsafe_display_char(c), "{:x}", c as u32);
+        }
+        assert!(!is_unsafe_display_char('a') && !is_unsafe_display_char('ä') && !is_unsafe_display_char(' '));
+        assert_eq!(display_safe("a\u{200B}b\u{FEFF}c\u{AD}"), "abc");
+    }
 
     const EXAMPLE: &str = r#"
 id = "com.example.csv-export"
