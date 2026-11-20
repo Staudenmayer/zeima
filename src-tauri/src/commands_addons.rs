@@ -655,10 +655,19 @@ fn find_provider(
     id: &str,
     provider_id: &str,
 ) -> Result<zeima_core::addon::OAuthProvider, CmdError> {
-    addons
+    let providers = addons
         .manifest(id)
         .ok_or_else(|| invalid("the addon is not enabled"))?
-        .oauth
+        .oauth;
+    provider_of(providers, provider_id)
+}
+
+/// The provider the manifest declares under `provider_id`.
+fn provider_of(
+    providers: Vec<zeima_core::addon::OAuthProvider>,
+    provider_id: &str,
+) -> Result<zeima_core::addon::OAuthProvider, CmdError> {
+    providers
         .into_iter()
         .find(|p| p.id == provider_id)
         .ok_or_else(|| invalid(format!("unknown account type '{provider_id}'")))
@@ -759,6 +768,7 @@ pub async fn addon_oauth_disconnect(
     provider_id: String,
 ) -> CmdResult<AddonInfo> {
     ensure_addon_id(&id)?;
+    find_provider(&addons, &id, &provider_id)?;
     let name = oauth::secret_name(&provider_id);
     let entry = entry_name(&id, &name);
     tauri::async_runtime::spawn_blocking(move || Keychain.delete(&entry))
@@ -1154,7 +1164,18 @@ mod tests {
 
 #[cfg(test)]
 mod id_tests {
-    use super::{ensure_addon_id, staging_dir};
+    use super::{ensure_addon_id, provider_of, staging_dir};
+
+    #[test]
+    fn only_providers_the_manifest_declares_are_accepted() {
+        let manifest = zeima_core::addon::AddonManifest::parse(
+            "id = \"com.example.poc\"\nname = \"p\"\nversion = \"1.0.0\"\nauthor = \"x\"\nwasm = \"a.wasm\"\npermissions = [\"network\"]\nallowed_hosts = [\"api.example.com\"]\n[[oauth]]\nid = \"p\"\nname = \"P\"\nclient_id = \"c\"\nauth_url = \"https://accounts.example.com/auth\"\ntoken_url = \"https://accounts.example.com/token\"\n",
+        )
+        .unwrap();
+        assert!(provider_of(manifest.oauth.clone(), "p").is_ok());
+        assert!(provider_of(manifest.oauth.clone(), "other").is_err());
+        assert!(provider_of(manifest.oauth, "").is_err());
+    }
 
     #[test]
     fn staging_folders_never_collide_with_a_valid_add_on_folder() {
