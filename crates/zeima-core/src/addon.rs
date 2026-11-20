@@ -323,6 +323,27 @@ const PUBLIC_SUFFIXES: &[&str] = &[
     "onrender.com",
 ];
 
+/// Characters that must not appear in text the app shows as its own: control characters, line and paragraph
+/// separators and bidirectional overrides/isolates.
+pub fn is_unsafe_display_char(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// `text` without the characters of [`is_unsafe_display_char`].
+pub fn display_safe(text: &str) -> String {
+    text.chars().filter(|c| !is_unsafe_display_char(*c)).collect()
+}
+
+fn check_display(field: &'static str, text: &str, max: usize) -> Result<()> {
+    if text.chars().count() > max {
+        return Err(Error::validation(field, format!("must be at most {max} characters")));
+    }
+    if text.chars().any(is_unsafe_display_char) {
+        return Err(Error::validation(field, "must not contain control or direction-changing characters"));
+    }
+    Ok(())
+}
+
 impl AddonManifest {
     /// Allowed hosts: the manifest's list plus the hosts of the user's
     /// `host_settings` values (`values` maps setting keys to their value).
@@ -363,6 +384,11 @@ impl AddonManifest {
         }
         if self.name.trim().is_empty() {
             return Err(Error::validation("name", "must not be empty"));
+        }
+        check_display("name", &self.name, 80)?;
+        check_display("author", &self.author, 80)?;
+        for p in &self.oauth {
+            check_display("oauth.name", &p.name, 60)?;
         }
         if parse_version(&self.version).is_none() {
             return Err(Error::validation("version", "must be MAJOR.MINOR.PATCH"));
@@ -667,6 +693,22 @@ auth_params = { access_type = "offline", prompt = "consent" }
         // Must point at a text setting.
         let bad = src.replace("host_settings = [\"feed\"]", "host_settings = [\"delimiter\"]");
         assert!(AddonManifest::parse(&bad).is_err());
+    }
+
+    #[test]
+    fn display_names_are_short_and_single_line() {
+        let with = |from: &str, to: &str| AddonManifest::parse(&EXAMPLE.replace(from, to));
+        assert!(with("name = \"CSV export\"", "name = \"CSV\\nSigned by X\"").is_err());
+        assert!(with("author = \"Example\"", "author = \"Ex\\u2028ample\"").is_err());
+        assert!(with("author = \"Example\"", "author = \"Ex\\u202Eample\"").is_err());
+        assert!(with("author = \"Example\"", "author = \"Ex\\u2066ample\"").is_err());
+        assert!(with("name = \"Google\"", "name = \"Goo\\rgle\"").is_err());
+        let long = "x".repeat(81);
+        assert!(with("name = \"CSV export\"", &format!("name = \"{long}\"")).is_err());
+        assert!(with("author = \"Example\"", &format!("author = \"{long}\"")).is_err());
+        assert!(with("name = \"Google\"", &format!("name = \"{}\"", "x".repeat(61))).is_err());
+        assert!(with("name = \"CSV export\"", &format!("name = \"{}\"", "x".repeat(80))).is_ok());
+        assert!(with("name = \"Google\"", &format!("name = \"{}\"", "x".repeat(60))).is_ok());
     }
 
     #[test]

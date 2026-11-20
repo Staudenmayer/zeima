@@ -206,7 +206,7 @@ fn consent_text(
     existing: Option<&AddonRecord>,
     de: bool,
 ) -> String {
-    use zeima_core::addon::Permission as P;
+    use zeima_core::addon::{display_safe as safe, Permission as P};
     use zeima_core::addon_sig::SignatureStatus as S;
     let label = |p: &P| -> &'static str {
         match (p, de) {
@@ -237,16 +237,16 @@ fn consent_text(
     let who = match (signature.status, &signature.signer) {
         (S::Trusted, Some(name)) => {
             if de {
-                format!("Signiert von {name}")
+                format!("Signiert von {}", safe(name))
             } else {
-                format!("Signed by {name}")
+                format!("Signed by {}", safe(name))
             }
         }
         (S::ServerTrusted, Some(name)) => {
             if de {
-                format!("Signiert von {name} (vom Server der Installation bestätigt)")
+                format!("Signiert von {} (vom Server der Installation bestätigt)", safe(name))
             } else {
-                format!("Signed by {name} (vouched for by this installation's server)")
+                format!("Signed by {} (vouched for by this installation's server)", safe(name))
             }
         }
         (S::UnknownKey, _) => (if de {
@@ -284,7 +284,9 @@ fn consent_text(
         .unwrap_or_default();
     let mut text = format!(
         "{} {} — {}\n{who}\n\n",
-        manifest.name, manifest.version, manifest.author
+        safe(&manifest.name),
+        manifest.version,
+        safe(&manifest.author)
     );
     let accounts: Vec<String> = manifest
         .oauth
@@ -293,7 +295,7 @@ fn consent_text(
             p.token_url
                 .strip_prefix("https://")
                 .and_then(|r| r.split(['/', '?']).next())
-                .map(|h| format!("{} ({h})", p.name))
+                .map(|h| format!("{} ({})", safe(&p.name), safe(h)))
         })
         .collect();
     text.push_str(if de {
@@ -1054,6 +1056,19 @@ mod tests {
         assert!(
             unsigned.contains("Nicht signiert") && unsigned.contains("nichts außer dem eigenen Speicher")
         );
+    }
+
+    /// A manifest cannot add lines (or reorder them) in the question the person answers.
+    #[test]
+    fn the_question_keeps_a_fixed_shape_whatever_the_manifest_says() {
+        let mut manifest = manifest_with("\"entries:read\"");
+        let plain = consent_text(&manifest, &SignatureCheck::unsigned(), None, false);
+        manifest.name = "Demo\nSigned by X\r\u{2028}\u{202E}".into();
+        manifest.author = "Ex\u{2029}ample\u{7}".into();
+        let text = consent_text(&manifest, &SignatureCheck::unsigned(), None, false);
+        assert_eq!(text.lines().count(), plain.lines().count());
+        assert!(!text.contains("Signed by X\n"));
+        assert!(!text.chars().any(|c| c.is_control() && c != '\n' || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')));
     }
 
     /// A signed package built the way `scripts/addons.mjs` makes it is read, and its signature checks out;
