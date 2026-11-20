@@ -11,7 +11,7 @@ COPY packages/shared-fixtures/package.json packages/shared-fixtures/
 # Only the server's production dependencies, not the desktop frontend's.
 RUN bun install --frozen-lockfile --production --filter '@zeima/server'
 
-FROM docker.io/library/node:24-slim@sha256:0e2646ab57e77b7a384a0cb59b6815b182c77e1f9c3ba36bd8435bd9c4e6680e
+FROM docker.io/library/node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc
 ENV NODE_ENV=production \
     PORT=3000
 WORKDIR /app
