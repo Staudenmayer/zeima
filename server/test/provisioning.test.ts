@@ -136,6 +136,37 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
     })
   })
 
+  describe('many checks of one organization at once', () => {
+    it('finish, however small the connection pool is, and share their reads of Keycloak', async () => {
+      const org = id(951)
+      await db.db.insert(schema.organization).values({ id: org, name: 'Burst', createdAt: 1 })
+      await db.db.insert(schema.kcUser).values({ id: id(30), email: '30@burst.example', displayName: 'u30' }).onConflictDoNothing()
+      await db.db.insert(schema.kcOrgMember).values({ orgId: org, userId: id(30), role: 'owner' })
+      const burst = new FakeKeycloak()
+      burst.members = [{ id: id(30), email: '30@burst.example', name: 'u30', enabled: true }, { id: id(31), email: '31@burst.example', name: 'u31', enabled: true }]
+      burst.roles = { owner: [id(30)], admin: [], manager: [], member: [id(31)] }
+      let reads = 0
+      const list = burst.listMembers.bind(burst)
+      burst.listMembers = async (orgId: string) => {
+        reads++
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        return list(orgId)
+      }
+      // Like the licensing lookup, the seat limit needs a connection of its own from the same pool.
+      const seatLimit = async () => {
+        await db.db.select({ id: schema.organization.id }).from(schema.organization).limit(1)
+        return 5
+      }
+      const all = Promise.all(Array.from({ length: 14 }, () => reconcileOrganization(db.db, burst, org, { seatLimit })))
+      const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('the checks did not finish')), 15_000))
+      const results = await Promise.race([all, timeout])
+      expect(results.every((r) => r.members === 2)).toBe(true)
+      expect(reads).toBeLessThan(14)
+      const members = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, org))
+      expect(members.map((m) => m.userId).sort()).toEqual([id(30), id(31)])
+    }, 30_000)
+  })
+
   describe('a disabled account', () => {
     it('is signed out when Keycloak says it was disabled, and refused at once', async () => {
       kc.members = kc.members.map((m) => (m.id === id(10) ? { ...m, enabled: false } : m))

@@ -35,11 +35,29 @@ function roleOf(userId: string, roles: Record<RoleKey, string[]>): RoleKey | nul
   return Object.entries(roles).find(([, ids]) => ids.includes(userId))?.[0] ?? null
 }
 
-export async function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: string, opts: ReconcileOptions = {}): Promise<ReconcileResult> {
+// One check per organization at a time: events arrive faster than a check finishes, and every check holds a pooled
+// connection while it waits for the organization lock. A call made while one is running waits for it and then shares
+// one more run (which reads Keycloak after all of them asked).
+const flights = new Map<string, { done: Promise<void>; queued?: Promise<ReconcileResult> }>()
+
+export function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: string, opts: ReconcileOptions = {}): Promise<ReconcileResult> {
+  const flight = flights.get(orgId)
+  if (flight) {
+    flight.queued ??= flight.done.then(() => reconcileOrganization(db, kc, orgId, opts))
+    return flight.queued
+  }
+  const result = reconcileOnce(db, kc, orgId, opts)
+  flights.set(orgId, { done: result.then(() => {}, () => {}).then(() => void flights.delete(orgId)) })
+  return result
+}
+
+async function reconcileOnce(db: Db, kc: KeycloakAdmin, orgId: string, opts: ReconcileOptions): Promise<ReconcileResult> {
   // Keycloak announces a new organization before the API has stored it (it is still being created):
   // there is nothing to compare yet, and the creation fills the copy itself.
   const [known] = await db.select({ id: schema.organization.id }).from(schema.organization).where(eq(schema.organization.id, orgId))
   if (!known) return { members: 0, addedMembers: 0, removedMembers: 0, groups: 0, rejectedMembers: 0, signedOut: 0 }
+  // Asked before the lock is taken: nothing inside it may need a second connection from the pool.
+  const limit = opts.seatLimit ? await opts.seatLimit(orgId) : null
   // Keycloak is read and the mirror written under the organization lock that the routes changing members and roles
   // take, so a change made in between is not undone by a list read before it. The lock is held for those two steps only.
   const done = await withOwnerLock(db, orgId, async (tx) => {
@@ -54,7 +72,7 @@ export async function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: st
     const wasActive = new Set(before.filter((b) => b.active).map((b) => b.userId))
 
     // People who joined without an invitation (single sign-on, SCIM) may only take seats that are free.
-    const rejected = await turnAwayBeyondSeats(tx, kc, orgId, listed.filter((u) => !knownBefore.has(u.id)), memberCount, opts)
+    const rejected = await turnAwayBeyondSeats(tx, kc, orgId, listed.filter((u) => !knownBefore.has(u.id)), memberCount, limit)
     const users = listed.filter((u) => !rejected.has(u.id))
     // Members Keycloak does not know of a role for are plain members.
     const rows = users.map((u) => ({ user: u, role: roleOf(u.id, roles) ?? 'member' }))
@@ -131,11 +149,10 @@ async function turnAwayBeyondSeats(
   orgId: string,
   newcomers: { id: string; email: string | null }[],
   members: number,
-  opts: ReconcileOptions,
+  limit: number | null,
 ): Promise<Set<string>> {
   const out = new Set<string>()
-  const limit = newcomers.length && opts.seatLimit ? await opts.seatLimit(orgId) : null
-  if (limit === null) return out
+  if (limit === null || newcomers.length === 0) return out
   const pending = await db
     .select({ email: schema.orgInvitation.email })
     .from(schema.orgInvitation)
