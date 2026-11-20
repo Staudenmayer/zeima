@@ -540,6 +540,7 @@ pub(crate) async fn install_package(
     std::fs::write(&wasm_path, &wasm).map_err(io_err)?;
     std::fs::write(staging.join(MANIFEST_FILE), manifest_toml(&manifest)?).map_err(io_err)?;
     crate::registry::write_signature(&staging, &signature).map_err(io_err)?;
+    let old_manifest = read_manifest(&target).ok();
     addons.unload(&manifest.id);
     let _ = std::fs::remove_dir_all(&target);
     std::fs::rename(&staging, &target).map_err(io_err)?;
@@ -548,7 +549,15 @@ pub(crate) async fn install_package(
         .core
         .save_addon(&manifest.id, &manifest.version, &manifest.permissions)
         .await?;
-    let record = state.core.set_addon_enabled(&manifest.id, true).await?;
+    let mut record = state.core.set_addon_enabled(&manifest.id, true).await?;
+    // Values that were only the previous version's defaults are not the person's choice (they could name a private
+    // host once the default changes).
+    if let Some(old) = &old_manifest {
+        let kept = crate::addons::without_old_defaults(old, &manifest, &record.settings);
+        if kept != record.settings {
+            record = state.core.set_addon_settings(&manifest.id, &kept).await?;
+        }
+    }
     addons.reload(app, &record);
     Ok(info(app, addons, record).await)
 }
