@@ -52,6 +52,7 @@
     "maplibre-gl": "^6.19.0",
     "@vue/server-renderer": "^3.5.42",
     "minimatch": "^11.0.1",
-    "glob": "^14.0.2"
+    "glob": "^14.0.2",
+    "js-yaml": "^4.3.2"
   }
 }
