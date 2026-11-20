@@ -300,6 +300,38 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       await db.db.delete(schema.workspace)
     })
 
+    it('is not put back by a check against Keycloak that read the list before SCIM removed them', async () => {
+      const person = id(68)
+      await db.db.insert(schema.kcUser).values({ id: person, email: 'p68@acme.example', displayName: 'P' }).onConflictDoNothing()
+      await db.db.insert(schema.kcOrgMember).values({ orgId: ORG, userId: person, role: 'member' })
+      const saved = { members: kc.members, roles: kc.roles, listMembers: kc.listMembers }
+      const rows = await db.db
+        .select({ id: schema.kcUser.id, email: schema.kcUser.email, name: schema.kcUser.displayName, role: schema.kcOrgMember.role })
+        .from(schema.kcOrgMember)
+        .innerJoin(schema.kcUser, eq(schema.kcUser.id, schema.kcOrgMember.userId))
+        .where(eq(schema.kcOrgMember.orgId, ORG))
+      kc.members = rows.map((r) => ({ id: r.id, email: r.email, name: r.name ?? '', enabled: true }))
+      kc.roles = { owner: [], admin: [], manager: [], member: [] }
+      for (const r of rows) (kc.roles[r.role as keyof typeof kc.roles] ??= []).push(r.id)
+      // SCIM removes the person while the list (which still has them) is being read.
+      let removal: Promise<{ statusCode: number }> | undefined
+      kc.listMembers = async () => {
+        const stale = [...kc.members]
+        removal ??= scim('DELETE', `/Users/${person}`)
+        // Answered at once if nothing holds the organization lock; otherwise it waits for the comparison to finish.
+        await Promise.race([removal, new Promise((resolve) => setTimeout(resolve, 300))])
+        return stale
+      }
+      try {
+        await reconcileOrganization(db.db, kc, ORG)
+        expect((await removal)?.statusCode).toBe(204)
+      } finally {
+        Object.assign(kc, saved)
+      }
+      const members = await db.db.select().from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, ORG), eq(schema.kcOrgMember.userId, person)))
+      expect(members).toEqual([])
+    })
+
     /** What stays in the organization's workspace when a person goes: their rows other than entries and pauses. */
     const RETAINED = ['absence', 'work_schedule', 'work_settings', 'balance_adjustment', 'work_location', 'meeting', 'meeting_response']
     const seedRetained = async (ws: string, userId: string, k: number) => {

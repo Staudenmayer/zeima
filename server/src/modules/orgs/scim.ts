@@ -22,7 +22,7 @@ import { SECURITY } from '../../plugins/auth.ts'
 import { authorize } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
 import { forgetMembership } from './roles.ts'
-import { audit, listMembers, type MemberRow, purgeMemberOrgData, requireSeat, seatUsage } from './service.ts'
+import { audit, listMembers, type MemberRow, purgeMemberOrgData, requireSeat, seatUsage, withOwnerLock } from './service.ts'
 
 const OrgParams = Type.Object({ orgId: Type.String({ format: 'uuid' }) })
 const USER = 'urn:ietf:params:scim:schemas:core:2.0:User'
@@ -321,6 +321,18 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         return rows.some((r) => r.orgId !== orgId)
       }
 
+      /**
+       * Takes the person out of Keycloak and the mirror under the organization lock (then the push lock), like the route
+       * that removes a member, so a check against Keycloak that read the list before the removal cannot put them back.
+       */
+      const removeFromOrganization = (orgId: string, userId: string) =>
+        withOwnerLock(database(), orgId, async (tx) => {
+          await keycloak().removeMember(orgId, userId)
+          await lockPushOrder(tx)
+          await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
+          await purgeMemberOrgData(tx, orgId, userId)
+        })
+
       const apply = async (orgId: string, m: MemberRow, changes: Changes, key: string | undefined): Promise<'removed' | 'changed'> => {
         const db = database()
         const kc = keycloak()
@@ -334,12 +346,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         if (changes.active === false && m.active && (await belongsElsewhere(orgId, m.id))) {
           // The account is also somebody else's (another organization, or the person's own); switching it off
           // would lock them out of those too. Taking them out of this organization ends this organization's access.
-          await kc.removeMember(orgId, m.id)
-          await db.transaction(async (tx) => {
-            await lockPushOrder(tx)
-            await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
-            await purgeMemberOrgData(tx, orgId, m.id)
-          })
+          await removeFromOrganization(orgId, m.id)
           forgetMembership(m.id)
           await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim', key, reason: 'deactivated, account belongs to other organizations' } })
           return 'removed' as const
@@ -481,12 +488,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         const m = await member(orgId, request.params.id)
         await changeable(orgId, m)
         const db = database()
-        await keycloak().removeMember(orgId, m.id)
-        await db.transaction(async (tx) => {
-          await lockPushOrder(tx)
-          await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
-          await purgeMemberOrgData(tx, orgId, m.id)
-        })
+        await removeFromOrganization(orgId, m.id)
         forgetMembership(m.id)
         await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim', key: request.scimKey } })
         return reply.code(204).send(null)
