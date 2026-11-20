@@ -12,7 +12,7 @@ use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::{
     self, ExtIdleNotificationV1,
 };
 use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
-use zbus::blocking::{Connection as Bus, Proxy};
+use zbus::{block_on, Connection as Bus, Proxy};
 
 use super::{ActivityProbe, Snapshot};
 
@@ -41,36 +41,34 @@ fn now_ms() -> i64 {
 }
 
 fn mutter_idle(bus: &Bus) -> Option<i64> {
-    let reply = bus
-        .call_method(
-            Some("org.gnome.Mutter.IdleMonitor"),
-            "/org/gnome/Mutter/IdleMonitor/Core",
-            Some("org.gnome.Mutter.IdleMonitor"),
-            "GetIdletime",
-            &(),
-        )
-        .ok()?;
+    let reply = block_on(bus.call_method(
+        Some("org.gnome.Mutter.IdleMonitor"),
+        "/org/gnome/Mutter/IdleMonitor/Core",
+        Some("org.gnome.Mutter.IdleMonitor"),
+        "GetIdletime",
+        &(),
+    ))
+    .ok()?;
     reply.body().deserialize::<u64>().ok().map(|ms| ms as i64)
 }
 
 fn screensaver_idle(bus: &Bus) -> Option<i64> {
-    let reply = bus
-        .call_method(
-            Some("org.freedesktop.ScreenSaver"),
-            "/org/freedesktop/ScreenSaver",
-            Some("org.freedesktop.ScreenSaver"),
-            "GetSessionIdleTime",
-            &(),
-        )
-        .ok()?;
+    let reply = block_on(bus.call_method(
+        Some("org.freedesktop.ScreenSaver"),
+        "/org/freedesktop/ScreenSaver",
+        Some("org.freedesktop.ScreenSaver"),
+        "GetSessionIdleTime",
+        &(),
+    ))
+    .ok()?;
     // Seconds.
     reply.body().deserialize::<u32>().ok().map(|s| s as i64 * 1000)
 }
 
 impl LinuxProbe {
     pub fn new() -> Self {
-        let session = Bus::session().ok();
-        let system = Bus::system().ok();
+        let session = block_on(Bus::session()).ok();
+        let system = block_on(Bus::system()).ok();
         let idle = Self::pick_idle_source(session.as_ref());
         Self {
             idle,
@@ -82,7 +80,7 @@ impl LinuxProbe {
     fn pick_idle_source(session: Option<&Bus>) -> IdleSource {
         if let Some(bus) = session {
             if mutter_idle(bus).is_some() {
-                if let Ok(bus) = Bus::session() {
+                if let Ok(bus) = block_on(Bus::session()) {
                     return IdleSource::Mutter(bus);
                 }
             }
@@ -95,7 +93,7 @@ impl LinuxProbe {
         }
         if let Some(bus) = session {
             if screensaver_idle(bus).is_some() {
-                if let Ok(bus) = Bus::session() {
+                if let Ok(bus) = block_on(Bus::session()) {
                     return IdleSource::ScreenSaver(bus);
                 }
             }
@@ -105,33 +103,42 @@ impl LinuxProbe {
 
     fn locked(&self) -> Option<bool> {
         let logind = self.system.as_ref().and_then(|bus| {
-            Proxy::new(
-                bus,
-                "org.freedesktop.login1",
-                "/org/freedesktop/login1/session/auto",
-                "org.freedesktop.login1.Session",
-            )
-            .ok()?
-            .get_property::<bool>("LockedHint")
-            .ok()
+            block_on(async {
+                Proxy::new(
+                    bus,
+                    "org.freedesktop.login1",
+                    "/org/freedesktop/login1/session/auto",
+                    "org.freedesktop.login1.Session",
+                )
+                .await
+                .ok()?
+                .get_property::<bool>("LockedHint")
+                .await
+                .ok()
+            })
         });
         let screensaver = self.session.as_ref().and_then(|bus| {
-            bus.call_method(
+            block_on(bus.call_method(
                 Some("org.freedesktop.ScreenSaver"),
                 "/ScreenSaver",
                 Some("org.freedesktop.ScreenSaver"),
                 "GetActive",
                 &(),
-            )
+            ))
             .ok()?
             .body()
             .deserialize::<bool>()
             .ok()
         });
-        match (logind, screensaver) {
-            (None, None) => None,
-            (a, b) => Some(a.unwrap_or(false) || b.unwrap_or(false)),
-        }
+        combine_lock(logind, screensaver)
+    }
+}
+
+/// Locked if either source says so; unknown only when both are unavailable.
+fn combine_lock(logind: Option<bool>, screensaver: Option<bool>) -> Option<bool> {
+    match (logind, screensaver) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(false) || b.unwrap_or(false)),
     }
 }
 
@@ -255,5 +262,19 @@ mod wayland {
             })
             .map_err(|e| e.to_string())?;
         Ok(idle_since)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::combine_lock;
+
+    #[test]
+    fn lock_sources_combine() {
+        assert_eq!(combine_lock(None, None), None);
+        assert_eq!(combine_lock(Some(false), None), Some(false));
+        assert_eq!(combine_lock(None, Some(true)), Some(true));
+        assert_eq!(combine_lock(Some(true), Some(false)), Some(true));
+        assert_eq!(combine_lock(Some(false), Some(false)), Some(false));
     }
 }
