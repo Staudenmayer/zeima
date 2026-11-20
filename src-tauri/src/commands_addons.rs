@@ -71,6 +71,12 @@ fn ensure_addon_id(id: &str) -> CmdResult<()> {
     }
 }
 
+/// Where an install is assembled before it replaces the add-on folder. The name starts with '.', which no add-on
+/// id does, so it can never be the folder of an installed add-on.
+fn staging_dir(root: &std::path::Path, id: &str) -> std::path::PathBuf {
+    root.join(format!(".staging-{id}"))
+}
+
 fn invalid(message: impl ToString) -> CmdError {
     CmdError {
         code: "validation".into(),
@@ -508,7 +514,7 @@ pub(crate) async fn install_package(
     }
     let root = addons_dir(app).map_err(io_err)?;
     let target = root.join(&manifest.id);
-    let staging = root.join(format!("{}.installing", manifest.id));
+    let staging = staging_dir(&root, &manifest.id);
     let _ = std::fs::remove_dir_all(&staging);
     let wasm_path = staging.join(&manifest.wasm);
     std::fs::create_dir_all(wasm_path.parent().unwrap_or(&staging)).map_err(io_err)?;
@@ -1148,7 +1154,18 @@ mod tests {
 
 #[cfg(test)]
 mod id_tests {
-    use super::ensure_addon_id;
+    use super::{ensure_addon_id, staging_dir};
+
+    #[test]
+    fn staging_folders_never_collide_with_a_valid_add_on_folder() {
+        let root = std::path::Path::new("/addons");
+        let staging = staging_dir(root, "com.example.demo");
+        let name = staging.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(!zeima_core::addon::is_addon_id(&name), "{name}");
+        // Installing `a.b` must not stage into the folder of the valid id `a.b.installing`.
+        assert_ne!(staging_dir(root, "a.b"), root.join("a.b.installing"));
+        assert!(zeima_core::addon::is_addon_id("a.b.installing"));
+    }
 
     #[test]
     fn ids_that_could_leave_the_add_on_folder_are_refused() {
