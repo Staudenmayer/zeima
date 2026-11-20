@@ -177,6 +177,14 @@ pub fn with_portable(settings: &AppSettings, synced: &serde_json::Value) -> AppS
     if let (Some(target), Some(source)) = (all.as_object_mut(), synced.as_object()) {
         for key in PORTABLE {
             if let Some(value) = source.get(*key) {
+                // The same check as `settings_set`: a zone this build does not know keeps the current one.
+                if *key == "timezone"
+                    && value
+                        .as_str()
+                        .is_some_and(|tz| zeima_core::model::validate_tz(tz).is_err())
+                {
+                    continue;
+                }
                 target.insert((*key).to_string(), value.clone());
             }
         }
@@ -228,6 +236,20 @@ mod portable_tests {
         assert_eq!(merged.shortcut_quick_switch, "Alt+Q");
         // Nothing to change: the same settings come back.
         assert_eq!(with_portable(&mine, &portable(&mine)), mine);
+    }
+
+    #[test]
+    fn an_invalid_synced_time_zone_keeps_the_current_one() {
+        let mine = AppSettings {
+            timezone: Some("Europe/Berlin".into()),
+            ..AppSettings::default()
+        };
+        let bad = serde_json::json!({"timezone": "Not/AZone"});
+        assert_eq!(with_portable(&mine, &bad), mine);
+        let good = serde_json::json!({"timezone": "Asia/Tokyo"});
+        assert_eq!(with_portable(&mine, &good).timezone.as_deref(), Some("Asia/Tokyo"));
+        let none = AppSettings::default();
+        assert_eq!(with_portable(&none, &bad), none);
     }
 
     #[test]

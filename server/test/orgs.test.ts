@@ -269,6 +269,17 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect((await call('PUT', `/v1/orgs/${ORG}/groups/${dev.id}/members/${OWNER}`, OWNER, 'owner')).statusCode).toBe(204)
     })
 
+    it('keeps administrators from changing the departments of people who outrank them', async () => {
+      await reset()
+      const dev = (await call('POST', `/v1/orgs/${ORG}/groups`, ADMIN, 'admin', { name: 'dev' })).json()
+      const url = (uid: string) => `/v1/orgs/${ORG}/groups/${dev.id}/members/${uid}`
+      expect((await call('PUT', url(OWNER), ADMIN, 'admin')).statusCode).toBe(403)
+      expect((await call('PUT', url(MEMBER), ADMIN, 'admin')).statusCode).toBe(204)
+      expect((await call('PUT', url(OWNER), OWNER, 'owner')).statusCode).toBe(204)
+      expect((await call('DELETE', url(OWNER), ADMIN, 'admin')).statusCode).toBe(403)
+      expect((await call('DELETE', url(MEMBER), ADMIN, 'admin')).statusCode).toBe(204)
+    })
+
     it('invites with a role, but only one whose permissions the inviter holds', async () => {
       await reset()
       const ok = await call('POST', `/v1/orgs/${ORG}/invitations`, ADMIN, 'admin', { email: 'New@Example.com' })

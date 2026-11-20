@@ -71,6 +71,9 @@ describe.skipIf(!haveHelm)('the Helm chart', () => {
     expect(idRule).toContain('path: /resources')
     expect(idRule).not.toMatch(/path: \/\n/)
     expect(idRule).not.toContain('/admin')
+    // Dynamic client registration is blocked as in the Caddyfile: a longer prefix that goes to the API (which answers 404).
+    const reg = idRule.slice(idRule.indexOf('path: /realms/zeima/clients-registrations'))
+    expect(reg).toMatch(/^path: \/realms\/zeima\/clients-registrations\n\s+pathType: Prefix\n\s+backend:.*zeima-api/)
     // The API host: nothing for the internal port (3001), which the ingress never routes to.
     expect(ingress).not.toContain('3001')
     expect(render(['exposeKeycloakAdmin=true']).split('\n---\n').find((d) => d.includes('kind: Ingress'))!).toMatch(/host: "id.zeima.example.com"[\s\S]*path: \//)

@@ -690,7 +690,11 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         const db = database()
         const [group] = await db.select().from(schema.kcGroup).where(and(eq(schema.kcGroup.id, groupId), eq(schema.kcGroup.orgId, orgId)))
         if (!group) throw new HttpProblem(404, 'not_found', 'department not found')
-        if (!(await memberOf(db, orgId, userId))) throw new HttpProblem(404, 'not_found', 'not a member of this organization')
+        const target = await memberOf(db, orgId, userId)
+        if (!target) throw new HttpProblem(404, 'not_found', 'not a member of this organization')
+        if (userId !== actor.user.id && !(await outranks(db, actor, orgId, target.role))) {
+          throw new HttpProblem(403, 'forbidden', 'this person has the same or more permissions than you; only an owner changes their departments')
+        }
         // Departments decide what a role's department-scoped rights reach: nobody but an owner puts themselves into one.
         if (userId === actor.user.id && actor.user.orgs[orgId]!.role !== 'owner') {
           throw new HttpProblem(403, 'forbidden', 'only an owner changes their own departments; ask another administrator')

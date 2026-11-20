@@ -54,19 +54,41 @@ pub struct SignatureCheck {
     pub key_id: Option<String>,
     /// The publisher's name, for a trusted key.
     pub signer: Option<String>,
+    /// SHA-256 (hex) of the public key that verified the signature. Set only when the signature verified; `key_id`
+    /// is a label copied from the package and proves nothing by itself.
+    #[serde(default)]
+    pub fingerprint: Option<String>,
 }
 
 impl SignatureCheck {
-    fn of(status: SignatureStatus, key_id: Option<String>, signer: Option<String>) -> Self {
+    fn of(
+        status: SignatureStatus,
+        key_id: Option<String>,
+        signer: Option<String>,
+        fingerprint: Option<String>,
+    ) -> Self {
         Self {
             status,
             key_id,
             signer,
+            fingerprint,
         }
     }
 
     pub fn unsigned() -> Self {
-        Self::of(SignatureStatus::Unsigned, None, None)
+        Self::of(SignatureStatus::Unsigned, None, None, None)
+    }
+
+    /// Whether `self` (a package being installed) may replace an installed add-on whose recorded signature is
+    /// `installed`. The publisher is identified by the verified key, not by the key id string. An installed
+    /// add-on without a verified signature has no publisher to continue; one recorded before fingerprints
+    /// existed needs a verified signature with the same key id.
+    pub fn continues(&self, installed: &SignatureCheck) -> bool {
+        match (&installed.fingerprint, installed.is_trusted()) {
+            (Some(old), _) => self.is_trusted() && self.fingerprint.as_ref() == Some(old),
+            (None, true) => self.is_trusted() && self.key_id.is_some() && self.key_id == installed.key_id,
+            (None, false) => true,
+        }
     }
 
     /// Whether the signature is good: a publisher the app or its server trusts made exactly these files.
@@ -120,10 +142,10 @@ pub fn check(
         return SignatureCheck::unsigned();
     };
     let Ok(file) = serde_json::from_str::<SignatureFile>(raw) else {
-        return SignatureCheck::of(SignatureStatus::Invalid, None, None);
+        return SignatureCheck::of(SignatureStatus::Invalid, None, None, None);
     };
     let Some(key) = trusted.iter().find(|k| k.key_id == file.key_id) else {
-        return SignatureCheck::of(SignatureStatus::UnknownKey, Some(file.key_id), None);
+        return SignatureCheck::of(SignatureStatus::UnknownKey, Some(file.key_id), None, None);
     };
     let good = URL_SAFE_NO_PAD
         .decode(file.signature.trim())
@@ -135,7 +157,12 @@ pub fn check(
         (true, false) => SignatureStatus::ServerTrusted,
         (false, _) => SignatureStatus::Invalid,
     };
-    SignatureCheck::of(status, Some(key.key_id.clone()), good.then(|| key.name.clone()))
+    SignatureCheck::of(
+        status,
+        Some(key.key_id.clone()),
+        good.then(|| key.name.clone()),
+        good.then(|| hex(&Sha256::digest(key.key.as_bytes()))),
+    )
 }
 
 #[cfg(test)]
@@ -213,5 +240,57 @@ mod tests {
             SignatureStatus::Invalid
         );
         assert_eq!(check(b"m", b"w", None, &[]).status, SignatureStatus::Unsigned);
+    }
+
+    fn signed_by(seed: u8, key_id: &str, vendor: bool, claim: &str) -> SignatureCheck {
+        use ed25519_dalek::{Signer, SigningKey};
+        let sk = SigningKey::from_bytes(&[seed; 32]);
+        let sig = URL_SAFE_NO_PAD.encode(sk.sign(&message(b"m", b"w")).to_bytes());
+        let file = format!("{{\"keyId\":\"{claim}\",\"signature\":\"{sig}\"}}");
+        let trusted = [TrustedKey {
+            key_id: key_id.into(),
+            name: "P".into(),
+            key: sk.verifying_key(),
+            vendor,
+        }];
+        check(b"m", b"w", Some(&file), &trusted)
+    }
+
+    #[test]
+    fn publisher_continuity_is_bound_to_the_verified_key() {
+        let installed = signed_by(1, "pub", true, "pub");
+        assert!(installed.fingerprint.is_some());
+        // Same key: passes, also when the server (not the vendor) vouches for it now.
+        assert!(signed_by(1, "pub", true, "pub").continues(&installed));
+        assert!(signed_by(1, "pub", false, "pub").continues(&installed));
+        // (a) The key is not known: only the claimed id matches.
+        let unknown = check(
+            b"m",
+            b"w",
+            Some(r#"{"keyId":"pub","signature":"AAAA"}"#),
+            &[],
+        );
+        assert_eq!(unknown.status, SignatureStatus::UnknownKey);
+        assert!(!unknown.continues(&installed));
+        // (b) The id now belongs to a different, server-published key.
+        assert!(!signed_by(2, "pub", false, "pub").continues(&installed));
+        // (c) Signed by a different key under another id.
+        assert!(!signed_by(3, "other", true, "other").continues(&installed));
+        assert!(!SignatureCheck::unsigned().continues(&installed));
+    }
+
+    #[test]
+    fn continuity_for_records_without_a_fingerprint() {
+        let mut legacy = signed_by(1, "pub", true, "pub");
+        legacy.fingerprint = None;
+        let mut same_id = signed_by(2, "pub", true, "pub");
+        assert!(same_id.continues(&legacy));
+        same_id.key_id = Some("x".into());
+        assert!(!same_id.continues(&legacy));
+        let unknown = SignatureCheck::of(SignatureStatus::UnknownKey, Some("pub".into()), None, None);
+        assert!(!unknown.continues(&legacy));
+        // An installed unknown-key or unsigned record has no verified publisher to continue.
+        assert!(signed_by(1, "pub", true, "pub").continues(&unknown));
+        assert!(signed_by(1, "pub", true, "pub").continues(&SignatureCheck::unsigned()));
     }
 }

@@ -323,6 +323,53 @@ const PUBLIC_SUFFIXES: &[&str] = &[
     "onrender.com",
 ];
 
+/// Whether `id` is a valid add-on id (reverse-DNS, lowercase letters, digits and '-'). Anything that takes an id
+/// from outside and uses it as a folder name must check this first.
+pub fn is_addon_id(id: &str) -> bool {
+    id.len() <= 100
+        && id.contains('.')
+        && id.split('.').all(|part| {
+            !part.is_empty()
+                && part.starts_with(|c: char| c.is_ascii_lowercase())
+                && part
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        })
+}
+
+/// Characters that must not appear in text the app shows as its own: control characters, line and paragraph
+/// separators, bidirectional overrides/isolates and invisible format characters (soft hyphen, zero-width, BOM).
+pub fn is_unsafe_display_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{AD}'
+                | '\u{61C}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+        )
+}
+
+/// `text` without the characters of [`is_unsafe_display_char`].
+pub fn display_safe(text: &str) -> String {
+    text.chars().filter(|c| !is_unsafe_display_char(*c)).collect()
+}
+
+fn check_display(field: &'static str, text: &str, max: usize) -> Result<()> {
+    if text.chars().count() > max {
+        return Err(Error::validation(field, format!("must be at most {max} characters")));
+    }
+    if text.chars().any(is_unsafe_display_char) {
+        return Err(Error::validation(field, "must not contain control or direction-changing characters"));
+    }
+    Ok(())
+}
+
 impl AddonManifest {
     /// Allowed hosts: the manifest's list plus the hosts of the user's
     /// `host_settings` values (`values` maps setting keys to their value).
@@ -346,16 +393,7 @@ impl AddonManifest {
     }
 
     pub fn validate(&self) -> Result<()> {
-        let id_ok = self.id.len() <= 100
-            && self.id.contains('.')
-            && self.id.split('.').all(|part| {
-                !part.is_empty()
-                    && part.starts_with(|c: char| c.is_ascii_lowercase())
-                    && part
-                        .chars()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-            });
-        if !id_ok {
+        if !is_addon_id(&self.id) {
             return Err(Error::validation(
                 "id",
                 "reverse-DNS id with lowercase letters, digits and '-', e.g. com.example.my-addon",
@@ -363,6 +401,11 @@ impl AddonManifest {
         }
         if self.name.trim().is_empty() {
             return Err(Error::validation("name", "must not be empty"));
+        }
+        check_display("name", &self.name, 80)?;
+        check_display("author", &self.author, 80)?;
+        for p in &self.oauth {
+            check_display("oauth.name", &p.name, 60)?;
         }
         if parse_version(&self.version).is_none() {
             return Err(Error::validation("version", "must be MAJOR.MINOR.PATCH"));
@@ -570,6 +613,17 @@ pub fn json_schema() -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn invisible_format_characters_are_not_displayable() {
+        for c in ['\u{AD}', '\u{61C}', '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}',
+            '\u{2060}', '\u{2062}', '\u{2064}', '\u{FEFF}', '\u{202E}', '\u{2066}', '\u{7}', '\n']
+        {
+            assert!(is_unsafe_display_char(c), "{:x}", c as u32);
+        }
+        assert!(!is_unsafe_display_char('a') && !is_unsafe_display_char('ä') && !is_unsafe_display_char(' '));
+        assert_eq!(display_safe("a\u{200B}b\u{FEFF}c\u{AD}"), "abc");
+    }
+
     const EXAMPLE: &str = r#"
 id = "com.example.csv-export"
 name = "CSV export"
@@ -667,6 +721,32 @@ auth_params = { access_type = "offline", prompt = "consent" }
         // Must point at a text setting.
         let bad = src.replace("host_settings = [\"feed\"]", "host_settings = [\"delimiter\"]");
         assert!(AddonManifest::parse(&bad).is_err());
+    }
+
+    #[test]
+    fn only_reverse_dns_ids_are_add_on_ids() {
+        for ok in ["com.example.csv-export", "a.b", "zeima.meetings"] {
+            assert!(is_addon_id(ok), "{ok}");
+        }
+        for bad in ["C:", ".", "a/b", "..", "x:y", "", "a", "a..b", "a.b\\c", "C:.a", "A.b", "a.b.", "a.1b"] {
+            assert!(!is_addon_id(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn display_names_are_short_and_single_line() {
+        let with = |from: &str, to: &str| AddonManifest::parse(&EXAMPLE.replace(from, to));
+        assert!(with("name = \"CSV export\"", "name = \"CSV\\nSigned by X\"").is_err());
+        assert!(with("author = \"Example\"", "author = \"Ex\\u2028ample\"").is_err());
+        assert!(with("author = \"Example\"", "author = \"Ex\\u202Eample\"").is_err());
+        assert!(with("author = \"Example\"", "author = \"Ex\\u2066ample\"").is_err());
+        assert!(with("name = \"Google\"", "name = \"Goo\\rgle\"").is_err());
+        let long = "x".repeat(81);
+        assert!(with("name = \"CSV export\"", &format!("name = \"{long}\"")).is_err());
+        assert!(with("author = \"Example\"", &format!("author = \"{long}\"")).is_err());
+        assert!(with("name = \"Google\"", &format!("name = \"{}\"", "x".repeat(61))).is_err());
+        assert!(with("name = \"CSV export\"", &format!("name = \"{}\"", "x".repeat(80))).is_ok());
+        assert!(with("name = \"Google\"", &format!("name = \"{}\"", "x".repeat(60))).is_ok());
     }
 
     #[test]

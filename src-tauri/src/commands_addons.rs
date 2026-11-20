@@ -61,6 +61,22 @@ fn io_err(e: impl ToString) -> CmdError {
     CmdError::other("io", e)
 }
 
+/// The first thing every command that takes an add-on id does: the id becomes a folder name and a keychain entry,
+/// so only what the manifest rule allows gets any further.
+fn ensure_addon_id(id: &str) -> CmdResult<()> {
+    if zeima_core::addon::is_addon_id(id) {
+        Ok(())
+    } else {
+        Err(invalid("not an add-on id"))
+    }
+}
+
+/// Where an install is assembled before it replaces the add-on folder. The name starts with '.', which no add-on
+/// id does, so it can never be the folder of an installed add-on.
+fn staging_dir(root: &std::path::Path, id: &str) -> std::path::PathBuf {
+    root.join(format!(".staging-{id}"))
+}
+
 fn invalid(message: impl ToString) -> CmdError {
     CmdError {
         code: "validation".into(),
@@ -199,6 +215,9 @@ fn read_zip<R: Read + std::io::Seek>(reader: R) -> Result<Package, CmdError> {
     })
 }
 
+/// How many of a manifest's `allowed_hosts` the install question lists; the rest is summarized as "+N more".
+const MAX_HOSTS_SHOWN: usize = 5;
+
 /// The words of the native question: who made it, what it may do, and (for an update) what is new.
 fn consent_text(
     manifest: &AddonManifest,
@@ -206,7 +225,7 @@ fn consent_text(
     existing: Option<&AddonRecord>,
     de: bool,
 ) -> String {
-    use zeima_core::addon::Permission as P;
+    use zeima_core::addon::{display_safe as safe, Permission as P};
     use zeima_core::addon_sig::SignatureStatus as S;
     let label = |p: &P| -> &'static str {
         match (p, de) {
@@ -237,16 +256,16 @@ fn consent_text(
     let who = match (signature.status, &signature.signer) {
         (S::Trusted, Some(name)) => {
             if de {
-                format!("Signiert von {name}")
+                format!("Signiert von {}", safe(name))
             } else {
-                format!("Signed by {name}")
+                format!("Signed by {}", safe(name))
             }
         }
         (S::ServerTrusted, Some(name)) => {
             if de {
-                format!("Signiert von {name} (vom Server der Installation bestätigt)")
+                format!("Signiert von {} (vom Server der Installation bestätigt)", safe(name))
             } else {
-                format!("Signed by {name} (vouched for by this installation's server)")
+                format!("Signed by {} (vouched for by this installation's server)", safe(name))
             }
         }
         (S::UnknownKey, _) => (if de {
@@ -257,7 +276,16 @@ fn consent_text(
         .into(),
         _ => (if de { "Nicht signiert" } else { "Not signed" }).into(),
     };
-    let mut hosts = manifest.allowed_hosts.clone();
+    let mut hosts: Vec<String> = manifest
+        .allowed_hosts
+        .iter()
+        .take(MAX_HOSTS_SHOWN)
+        .map(|h| safe(h))
+        .collect();
+    if manifest.allowed_hosts.len() > MAX_HOSTS_SHOWN {
+        let more = manifest.allowed_hosts.len() - MAX_HOSTS_SHOWN;
+        hosts.push(format!("+{more} more"));
+    }
     if !manifest.host_settings.is_empty() {
         hosts.push(if de {
             "(Adresse aus den Einstellungen)".into()
@@ -284,7 +312,9 @@ fn consent_text(
         .unwrap_or_default();
     let mut text = format!(
         "{} {} — {}\n{who}\n\n",
-        manifest.name, manifest.version, manifest.author
+        safe(&manifest.name),
+        manifest.version,
+        safe(&manifest.author)
     );
     let accounts: Vec<String> = manifest
         .oauth
@@ -293,7 +323,7 @@ fn consent_text(
             p.token_url
                 .strip_prefix("https://")
                 .and_then(|r| r.split(['/', '?']).next())
-                .map(|h| format!("{} ({h})", p.name))
+                .map(|h| format!("{} ({})", safe(&p.name), safe(h)))
         })
         .collect();
     text.push_str(if de {
@@ -455,12 +485,10 @@ pub(crate) async fn install_package(
         .filter(|d| d.exists())
     {
         let installed = crate::registry::installed_signature(&dir);
-        if let Some(old_key) = installed.key_id.as_deref() {
-            if signature.key_id.as_deref() != Some(old_key) {
-                return Err(invalid(
-                    "this package is not from the publisher of the installed add-on; uninstall the add-on first (that also deletes its saved secrets and connected accounts)",
-                ));
-            }
+        if !signature.continues(&installed) {
+            return Err(invalid(
+                "this package is not from the publisher of the installed add-on; uninstall the add-on first (that also deletes its saved secrets and connected accounts)",
+            ));
         }
         // A connected account's token goes to the provider's token endpoint: that host may not change in an update.
         if let Ok(old) = read_manifest(&dir) {
@@ -498,7 +526,7 @@ pub(crate) async fn install_package(
     }
     let root = addons_dir(app).map_err(io_err)?;
     let target = root.join(&manifest.id);
-    let staging = root.join(format!("{}.installing", manifest.id));
+    let staging = staging_dir(&root, &manifest.id);
     let _ = std::fs::remove_dir_all(&staging);
     let wasm_path = staging.join(&manifest.wasm);
     std::fs::create_dir_all(wasm_path.parent().unwrap_or(&staging)).map_err(io_err)?;
@@ -541,6 +569,7 @@ pub async fn addon_set_enabled(
     id: String,
     enabled: bool,
 ) -> CmdResult<AddonInfo> {
+    ensure_addon_id(&id)?;
     let record = state.core.set_addon_enabled(&id, enabled).await?;
     addons.reload(&app, &record);
     Ok(info(&app, &addons, record).await)
@@ -556,9 +585,7 @@ pub async fn addon_save_settings(
     id: String,
     settings: BTreeMap<String, String>,
 ) -> CmdResult<AddonInfo> {
-    if id.is_empty() || id.contains(['/', '\\', ':']) || id.contains("..") {
-        return Err(invalid("not an add-on id"));
-    }
+    ensure_addon_id(&id)?;
     let dir = addons_dir(&app).map_err(io_err)?.join(&id);
     let manifest = read_manifest(&dir).map_err(invalid)?;
     let mut clean = BTreeMap::new();
@@ -606,6 +633,7 @@ pub async fn addon_uninstall(
     addons: State<'_, Addons>,
     id: String,
 ) -> CmdResult<()> {
+    ensure_addon_id(&id)?;
     addons.unload(&id);
     addons.cancel_sign_in(&id);
     addons.tokens.forget(&id, None);
@@ -626,10 +654,7 @@ pub async fn addon_uninstall(
     .await
     .map_err(io_err)?;
     state.core.delete_addon(&id).await?;
-    // The id is validated at install, but never let it escape the folder.
-    if !id.is_empty() && !id.contains(['/', '\\']) && id != "." && id != ".." {
-        let _ = std::fs::remove_dir_all(addons_dir(&app).map_err(io_err)?.join(&id));
-    }
+    let _ = std::fs::remove_dir_all(addons_dir(&app).map_err(io_err)?.join(&id));
     Ok(())
 }
 
@@ -642,10 +667,19 @@ fn find_provider(
     id: &str,
     provider_id: &str,
 ) -> Result<zeima_core::addon::OAuthProvider, CmdError> {
-    addons
+    let providers = addons
         .manifest(id)
         .ok_or_else(|| invalid("the addon is not enabled"))?
-        .oauth
+        .oauth;
+    provider_of(providers, provider_id)
+}
+
+/// The provider the manifest declares under `provider_id`.
+fn provider_of(
+    providers: Vec<zeima_core::addon::OAuthProvider>,
+    provider_id: &str,
+) -> Result<zeima_core::addon::OAuthProvider, CmdError> {
+    providers
         .into_iter()
         .find(|p| p.id == provider_id)
         .ok_or_else(|| invalid(format!("unknown account type '{provider_id}'")))
@@ -691,6 +725,7 @@ pub async fn addon_oauth_connect(
     id: String,
     provider_id: String,
 ) -> CmdResult<AddonInfo> {
+    ensure_addon_id(&id)?;
     let provider = find_provider(&addons, &id, &provider_id)?;
     let services = HostServices::for_app(&app);
     let cancel = addons.begin_sign_in(&id);
@@ -728,6 +763,7 @@ pub async fn addon_oauth_connect(
 #[tauri::command]
 #[specta::specta]
 pub async fn addon_oauth_cancel(addons: State<'_, Addons>, id: String) -> CmdResult<()> {
+    ensure_addon_id(&id)?;
     addons.cancel_sign_in(&id);
     Ok(())
 }
@@ -743,6 +779,8 @@ pub async fn addon_oauth_disconnect(
     id: String,
     provider_id: String,
 ) -> CmdResult<AddonInfo> {
+    ensure_addon_id(&id)?;
+    find_provider(&addons, &id, &provider_id)?;
     let name = oauth::secret_name(&provider_id);
     let entry = entry_name(&id, &name);
     tauri::async_runtime::spawn_blocking(move || Keychain.delete(&entry))
@@ -1017,6 +1055,7 @@ mod tests {
             status: SignatureStatus::ServerTrusted,
             key_id: Some("k".into()),
             signer: Some("Acme IT".into()),
+            fingerprint: None,
         };
         let manifest = manifest_with("\"entries:read\", \"network\"");
         let fresh = consent_text(&manifest, &signature, None, false);
@@ -1055,6 +1094,33 @@ mod tests {
         assert!(
             unsigned.contains("Nicht signiert") && unsigned.contains("nichts außer dem eigenen Speicher")
         );
+    }
+
+    /// A manifest cannot add lines (or reorder them) in the question the person answers.
+    #[test]
+    fn a_long_host_list_is_cut_in_the_question() {
+        let hosts: Vec<String> = (0..40).map(|i| format!("\"h{i}.example.com\"")).collect();
+        let manifest = AddonManifest::parse(&format!(
+            "id = \"dev.example.demo\"\nname = \"Demo\"\nversion = \"2.0.0\"\nauthor = \"Example\"\nwasm = \"demo.wasm\"\npermissions = [\"network\"]\nallowed_hosts = [{}]\n",
+            hosts.join(", ")
+        ))
+        .unwrap();
+        let text = consent_text(&manifest, &SignatureCheck::unsigned(), None, false);
+        assert!(text.contains("h0.example.com"));
+        assert!(!text.contains("h39.example.com"));
+        assert!(text.contains(&format!("+{} more", 40 - MAX_HOSTS_SHOWN)), "{text}");
+    }
+
+    #[test]
+    fn the_question_keeps_a_fixed_shape_whatever_the_manifest_says() {
+        let mut manifest = manifest_with("\"entries:read\"");
+        let plain = consent_text(&manifest, &SignatureCheck::unsigned(), None, false);
+        manifest.name = "Demo\nSigned by X\r\u{2028}\u{202E}".into();
+        manifest.author = "Ex\u{2029}ample\u{7}".into();
+        let text = consent_text(&manifest, &SignatureCheck::unsigned(), None, false);
+        assert_eq!(text.lines().count(), plain.lines().count());
+        assert!(!text.contains("Signed by X\n"));
+        assert!(!text.chars().any(|c| c.is_control() && c != '\n' || matches!(c, '\u{2028}' | '\u{2029}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')));
     }
 
     /// A signed package built the way `scripts/addons.mjs` makes it is read, and its signature checks out;
@@ -1119,6 +1185,41 @@ mod tests {
         for f in [path, path2, path3] {
             let _ = std::fs::remove_file(f);
         }
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::{ensure_addon_id, provider_of, staging_dir};
+
+    #[test]
+    fn only_providers_the_manifest_declares_are_accepted() {
+        let manifest = zeima_core::addon::AddonManifest::parse(
+            "id = \"com.example.poc\"\nname = \"p\"\nversion = \"1.0.0\"\nauthor = \"x\"\nwasm = \"a.wasm\"\npermissions = [\"network\"]\nallowed_hosts = [\"api.example.com\"]\n[[oauth]]\nid = \"p\"\nname = \"P\"\nclient_id = \"c\"\nauth_url = \"https://accounts.example.com/auth\"\ntoken_url = \"https://accounts.example.com/token\"\n",
+        )
+        .unwrap();
+        assert!(provider_of(manifest.oauth.clone(), "p").is_ok());
+        assert!(provider_of(manifest.oauth.clone(), "other").is_err());
+        assert!(provider_of(manifest.oauth, "").is_err());
+    }
+
+    #[test]
+    fn staging_folders_never_collide_with_a_valid_add_on_folder() {
+        let root = std::path::Path::new("/addons");
+        let staging = staging_dir(root, "com.example.demo");
+        let name = staging.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(!zeima_core::addon::is_addon_id(&name), "{name}");
+        // Installing `a.b` must not stage into the folder of the valid id `a.b.installing`.
+        assert_ne!(staging_dir(root, "a.b"), root.join("a.b.installing"));
+        assert!(zeima_core::addon::is_addon_id("a.b.installing"));
+    }
+
+    #[test]
+    fn ids_that_could_leave_the_add_on_folder_are_refused() {
+        for bad in ["C:", ".", "a/b", "..", "x:y", "", "a\\b", "a.b/../c"] {
+            assert!(ensure_addon_id(bad).is_err(), "{bad}");
+        }
+        assert!(ensure_addon_id("com.example.demo").is_ok());
     }
 }
 

@@ -35,6 +35,10 @@ spec:
           {{- else }}
           # Only what browsers and apps need of the sign-in service. Keycloak's administration console and the master
           # realm are not published (exposeKeycloakAdmin).
+          # Dynamic client registration is not used: the longer prefix goes to the API, which answers 404 (as the Caddyfile does).
+          - path: /realms/zeima/clients-registrations
+            pathType: Prefix
+            backend: { service: { name: {{ .Release.Name }}-api, port: { name: http } } }
           {{- range $path := list "/realms/zeima" "/resources" }}
           - path: {{ $path }}
             pathType: Prefix
