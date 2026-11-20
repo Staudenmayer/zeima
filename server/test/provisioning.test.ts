@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
 import { schema } from '../src/db/index.ts'
-import { ensureOrgWorkspace } from '../src/modules/orgs/service.ts'
+import { ensureOrgWorkspace, withOwnerLock } from '../src/modules/orgs/service.ts'
 import { reconcileOrganization } from '../src/modules/orgs/reconcile.ts'
 import { changesOf, emailFromFilter, hashToken } from '../src/modules/orgs/scim.ts'
 import { checkFilter, checkLdapUrl } from '../src/modules/directory/routes.ts'
@@ -101,6 +101,38 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       const result = await reconcileOrganization(db.db, kc, ORG, { seatLimit: async () => null })
       expect(result.rejectedMembers).toBe(0)
       expect((await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, ORG))).length).toBe(7)
+    })
+  })
+
+  describe('a change made while the organization is being compared with Keycloak', () => {
+    it('is not undone by the older list', async () => {
+      const org = id(950)
+      const u = (n: number) => ({ id: id(n), email: `${n}@race.example`, name: `u${n}`, enabled: true })
+      await db.db.insert(schema.organization).values({ id: org, name: 'Race', createdAt: 1 })
+      for (const n of [20, 21]) {
+        await db.db.insert(schema.kcUser).values({ id: id(n), email: `${n}@race.example`, displayName: `u${n}` }).onConflictDoNothing()
+        await db.db.insert(schema.kcOrgMember).values({ orgId: org, userId: id(n), role: n === 20 ? 'owner' : 'member' })
+      }
+      const racing = new FakeKeycloak()
+      racing.members = [u(20), u(21)]
+      racing.roles = { owner: [id(20)], admin: [], manager: [], member: [id(21)] }
+      // The removal lands while the list is being read: it takes the organization lock like the removal route.
+      const list = racing.listMembers.bind(racing)
+      let removal: Promise<void> | undefined
+      racing.listMembers = async (orgId: string) => {
+        const stale = await list(orgId)
+        removal ??= withOwnerLock(db.db, org, async (tx) => {
+          racing.members = racing.members.filter((m) => m.id !== id(21))
+          await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, org), eq(schema.kcOrgMember.userId, id(21))))
+        })
+        // Done at once if nothing holds the lock; otherwise it waits for the comparison to finish.
+        await Promise.race([removal, new Promise((resolve) => setTimeout(resolve, 300))])
+        return stale
+      }
+      await reconcileOrganization(db.db, racing, org)
+      await removal
+      const members = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, org))
+      expect(members.map((m) => m.userId)).toEqual([id(20)])
     })
   })
 

@@ -10,7 +10,7 @@ import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { ORG_ROLES, type RoleKey } from '../../plugins/permissions.ts'
 import { lockPushOrder } from '../../db/locks.ts'
 import { forgetMembership } from './roles.ts'
-import { purgeMemberOrgData } from './service.ts'
+import { purgeMemberOrgData, withOwnerLock } from './service.ts'
 
 export interface ReconcileResult {
   members: number
@@ -40,59 +40,65 @@ export async function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: st
   // there is nothing to compare yet, and the creation fills the copy itself.
   const [known] = await db.select({ id: schema.organization.id }).from(schema.organization).where(eq(schema.organization.id, orgId))
   if (!known) return { members: 0, addedMembers: 0, removedMembers: 0, groups: 0, rejectedMembers: 0, signedOut: 0 }
-  const [listed, roles, departments] = await Promise.all([kc.listMembers(orgId), kc.listRoleMembers(orgId), kc.listDepartments(orgId)])
-  const before = await db
-    .select({ userId: schema.kcOrgMember.userId, active: schema.kcUser.active })
-    .from(schema.kcOrgMember)
-    .innerJoin(schema.kcUser, eq(schema.kcUser.id, schema.kcOrgMember.userId))
-    .where(eq(schema.kcOrgMember.orgId, orgId))
-  const memberCount = await db.$count(schema.kcOrgMember, eq(schema.kcOrgMember.orgId, orgId))
-  const knownBefore = new Set(before.map((b) => b.userId))
-  const wasActive = new Set(before.filter((b) => b.active).map((b) => b.userId))
+  // Keycloak is read and the mirror written under the organization lock that the routes changing members and roles
+  // take, so a change made in between is not undone by a list read before it. The lock is held for those two steps only.
+  const done = await withOwnerLock(db, orgId, async (tx) => {
+    const [listed, roles, departments] = await Promise.all([kc.listMembers(orgId), kc.listRoleMembers(orgId), kc.listDepartments(orgId)])
+    const before = await tx
+      .select({ userId: schema.kcOrgMember.userId, active: schema.kcUser.active })
+      .from(schema.kcOrgMember)
+      .innerJoin(schema.kcUser, eq(schema.kcUser.id, schema.kcOrgMember.userId))
+      .where(eq(schema.kcOrgMember.orgId, orgId))
+    const memberCount = await tx.$count(schema.kcOrgMember, eq(schema.kcOrgMember.orgId, orgId))
+    const knownBefore = new Set(before.map((b) => b.userId))
+    const wasActive = new Set(before.filter((b) => b.active).map((b) => b.userId))
 
-  // People who joined without an invitation (single sign-on, SCIM) may only take seats that are free.
-  const rejected = await turnAwayBeyondSeats(db, kc, orgId, listed.filter((u) => !knownBefore.has(u.id)), memberCount, opts)
-  const users = listed.filter((u) => !rejected.has(u.id))
-  // Members Keycloak does not know of a role for are plain members.
-  const rows = users.map((u) => ({ user: u, role: roleOf(u.id, roles) ?? 'member' }))
+    // People who joined without an invitation (single sign-on, SCIM) may only take seats that are free.
+    const rejected = await turnAwayBeyondSeats(tx, kc, orgId, listed.filter((u) => !knownBefore.has(u.id)), memberCount, opts)
+    const users = listed.filter((u) => !rejected.has(u.id))
+    // Members Keycloak does not know of a role for are plain members.
+    const rows = users.map((u) => ({ user: u, role: roleOf(u.id, roles) ?? 'member' }))
 
-  const ids = users.map((u) => u.id)
-  const gone = [...knownBefore].filter((id) => !ids.includes(id))
-  await db.transaction(async (tx) => {
-    // Pushes finish first or see the memberships gone (only taken when somebody leaves).
-    if (gone.length > 0) await lockPushOrder(tx)
-    for (const { user, role } of rows) {
+    const ids = users.map((u) => u.id)
+    const gone = [...knownBefore].filter((id) => !ids.includes(id))
+    await tx.transaction(async (tx) => {
+      // Pushes finish first or see the memberships gone (only taken when somebody leaves).
+      if (gone.length > 0) await lockPushOrder(tx)
+      for (const { user, role } of rows) {
+        await tx
+          .insert(schema.kcUser)
+          .values({ id: user.id, email: user.email, displayName: user.name, active: user.enabled })
+          .onConflictDoUpdate({
+            target: schema.kcUser.id,
+            // A name from a token is better than none; do not blank it.
+            set: { email: user.email, active: user.enabled, ...(user.name ? { displayName: user.name } : {}) },
+          })
+        await tx
+          .insert(schema.kcOrgMember)
+          .values({ orgId, userId: user.id, role })
+          .onConflictDoUpdate({ target: [schema.kcOrgMember.orgId, schema.kcOrgMember.userId], set: { role } })
+      }
       await tx
-        .insert(schema.kcUser)
-        .values({ id: user.id, email: user.email, displayName: user.name, active: user.enabled })
-        .onConflictDoUpdate({
-          target: schema.kcUser.id,
-          // A name from a token is better than none; do not blank it.
-          set: { email: user.email, active: user.enabled, ...(user.name ? { displayName: user.name } : {}) },
-        })
-      await tx
-        .insert(schema.kcOrgMember)
-        .values({ orgId, userId: user.id, role })
-        .onConflictDoUpdate({ target: [schema.kcOrgMember.orgId, schema.kcOrgMember.userId], set: { role } })
-    }
-    await tx
-      .delete(schema.kcOrgMember)
-      .where(and(eq(schema.kcOrgMember.orgId, orgId), ids.length ? notInArray(schema.kcOrgMember.userId, ids) : undefined))
-    for (const userId of gone) await purgeMemberOrgData(tx, orgId, userId)
+        .delete(schema.kcOrgMember)
+        .where(and(eq(schema.kcOrgMember.orgId, orgId), ids.length ? notInArray(schema.kcOrgMember.userId, ids) : undefined))
+      for (const userId of gone) await purgeMemberOrgData(tx, orgId, userId)
 
-    // Departments: the same ids and paths as Keycloak, with their members.
-    const groupIds = departments.map((d) => d.id)
-    await tx.delete(schema.kcGroup).where(and(eq(schema.kcGroup.orgId, orgId), groupIds.length ? notInArray(schema.kcGroup.id, groupIds) : undefined))
-    for (const d of departments) {
-      await tx
-        .insert(schema.kcGroup)
-        .values({ id: d.id, orgId, path: d.path })
-        .onConflictDoUpdate({ target: schema.kcGroup.id, set: { path: d.path } })
-      await tx.delete(schema.kcGroupMember).where(eq(schema.kcGroupMember.groupId, d.id))
-      const members = d.memberIds.filter((m) => users.some((u) => u.id === m))
-      if (members.length) await tx.insert(schema.kcGroupMember).values(members.map((userId) => ({ groupId: d.id, userId })))
-    }
+      // Departments: the same ids and paths as Keycloak, with their members.
+      const groupIds = departments.map((d) => d.id)
+      await tx.delete(schema.kcGroup).where(and(eq(schema.kcGroup.orgId, orgId), groupIds.length ? notInArray(schema.kcGroup.id, groupIds) : undefined))
+      for (const d of departments) {
+        await tx
+          .insert(schema.kcGroup)
+          .values({ id: d.id, orgId, path: d.path })
+          .onConflictDoUpdate({ target: schema.kcGroup.id, set: { path: d.path } })
+        await tx.delete(schema.kcGroupMember).where(eq(schema.kcGroupMember.groupId, d.id))
+        const members = d.memberIds.filter((m) => users.some((u) => u.id === m))
+        if (members.length) await tx.insert(schema.kcGroupMember).values(members.map((userId) => ({ groupId: d.id, userId })))
+      }
+    })
+    return { users, rejected, ids, gone, knownBefore, wasActive, departments }
   })
+  const { users, rejected, ids, gone, knownBefore, wasActive, departments } = done
   for (const id of new Set([...ids, ...gone])) forgetMembership(id)
   // A disabled account stops working now, not when its token runs out.
   let signedOut = 0
