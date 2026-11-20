@@ -4,7 +4,7 @@
 // Mirrors the check of the desktop app (crates/zeima-core/src/repo/meetings.rs),
 // which only knows the meetings its person was asked to.
 
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { type Db, schema } from '../db/index.ts'
 import { occurrences } from './occurrences.ts'
 
@@ -28,11 +28,16 @@ interface Held {
   rrule: string | null
 }
 
-async function heldRooms(db: Db, workspaceId: string): Promise<Held[]> {
+/**
+ * The meetings that hold a room (of `roomId` only, when given). The database narrows to live meetings that name a room;
+ * the checks below stay as the exact rule, so the narrowing may only ever be wider than it.
+ */
+async function heldRooms(db: Db, workspaceId: string, roomId?: string): Promise<Held[]> {
+  const named = roomId === undefined ? sql`${schema.syncRow.fields} ? 'roomId'` : sql`(${schema.syncRow.fields} -> 'roomId' ->> 'v' = ${roomId} or ${schema.syncRow.fields} ->> 'roomId' = ${roomId})`
   const rows = await db
     .select({ rowId: schema.syncRow.rowId, fields: schema.syncRow.fields, deleted: schema.syncRow.deleted, table: schema.syncRow.tableName })
     .from(schema.syncRow)
-    .where(and(eq(schema.syncRow.workspaceId, workspaceId), eq(schema.syncRow.tableName, 'meeting')))
+    .where(and(eq(schema.syncRow.workspaceId, workspaceId), eq(schema.syncRow.tableName, 'meeting'), isNull(schema.syncRow.deleted), named))
   const out: Held[] = []
   for (const r of rows) {
     if (r.table !== 'meeting' || r.deleted !== null) continue
@@ -56,6 +61,7 @@ export async function roomBookings(db: Db, workspaceId: string, from: number, to
   const out: Record<string, Booking[]> = {}
   for (const m of await heldRooms(db, workspaceId)) {
     if (m.id === exclude) continue
+    if (!m.rrule && (m.startAt >= to || m.startAt + Math.max(0, m.endAt - m.startAt) <= from)) continue
     const list = out[m.roomId] ?? []
     out[m.roomId] = list
     for (const [s, e] of occurrences(m.startAt, m.endAt, m.tz, m.rrule, from, to)) list.push({ from: s, to: e })
@@ -76,10 +82,28 @@ export async function roomIsTaken(db: Db, workspaceId: string, meetingId: string
   if (!Number.isFinite(startAt) || !Number.isFinite(endAt)) return false
   const horizon = startAt + ROOM_HORIZON_MS
   const mine = occurrences(startAt, endAt, String(plain(merged.tz) ?? 'UTC'), (plain(merged.rrule) as string | null) ?? null, startAt, horizon)
-  for (const other of await heldRooms(db, workspaceId)) {
+  if (mine.length === 0) return false
+  // Only what falls inside the span of this meeting's own times can collide with it.
+  const spanFrom = mine[0]![0]
+  const spanTo = mine[mine.length - 1]![1]
+  for (const other of await heldRooms(db, workspaceId, room)) {
     if (other.roomId !== room || other.id === meetingId) continue
-    const theirs = occurrences(other.startAt, other.endAt, other.tz, other.rrule, startAt, horizon)
-    if (mine.some(([a, b]) => theirs.some(([c, d]) => a < d && c < b))) return true
+    if (!other.rrule && (other.startAt >= spanTo || other.startAt + Math.max(0, other.endAt - other.startAt) <= spanFrom)) continue
+    if (anyOverlap(mine, occurrences(other.startAt, other.endAt, other.tz, other.rrule, spanFrom, spanTo))) return true
+  }
+  return false
+}
+
+/** Whether any interval of `a` overlaps one of `b`; both are sorted by start with equal lengths each, so a sweep of O(a + b) is enough. */
+export function anyOverlap(a: readonly (readonly [number, number])[], b: readonly (readonly [number, number])[]): boolean {
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    const [s, e] = a[i]!
+    const [c, d] = b[j]!
+    if (e <= c) i++
+    else if (d <= s) j++
+    else return true
   }
   return false
 }
