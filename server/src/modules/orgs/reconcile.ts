@@ -8,6 +8,7 @@ import type { Db } from '../../db/index.ts'
 import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { ORG_ROLES, type RoleKey } from '../../plugins/permissions.ts'
+import { purgeMemberOrgData } from './service.ts'
 
 export interface ReconcileResult {
   members: number
@@ -69,9 +70,11 @@ export async function reconcileOrganization(db: Db, kc: KeycloakAdmin, orgId: st
         .onConflictDoUpdate({ target: [schema.kcOrgMember.orgId, schema.kcOrgMember.userId], set: { role } })
     }
     const ids = users.map((u) => u.id)
+    const gone = [...knownBefore].filter((id) => !ids.includes(id))
     await tx
       .delete(schema.kcOrgMember)
       .where(and(eq(schema.kcOrgMember.orgId, orgId), ids.length ? notInArray(schema.kcOrgMember.userId, ids) : undefined))
+    for (const userId of gone) await purgeMemberOrgData(tx, orgId, userId)
 
     // Departments: the same ids and paths as Keycloak, with their members.
     const groupIds = departments.map((d) => d.id)

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
 import { schema } from '../src/db/index.ts'
+import { ensureOrgWorkspace } from '../src/modules/orgs/service.ts'
 import { reconcileOrganization } from '../src/modules/orgs/reconcile.ts'
 import { changesOf, emailFromFilter, hashToken } from '../src/modules/orgs/scim.ts'
 import { checkFilter, checkLdapUrl } from '../src/modules/directory/routes.ts'
@@ -195,6 +196,45 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       expect((await scim('DELETE', `/Users/${found.id}`)).statusCode).toBe(204)
       expect((await scim('GET', `/Users/${found.id}`)).statusCode).toBe(404)
       expect(kc.calls).toContain(`removeMember ${ORG} ${found.id}`)
+    })
+
+
+    /** An org workspace and a personal one for `userId`, each with an entry and a pause of that user; the org one also holds `ORG`'s entry of `keeper`. */
+    const seedData = async (userId: string, keeper: string) => {
+      const n = Math.floor(Math.random() * 1e9)
+      const base = { createdAt: 1, updatedAt: 1, hlc: 'h', originDevice: id(800) }
+      const orgWs = await ensureOrgWorkspace(db.db, ORG, 'Acme')
+      const [personal] = await db.db.insert(schema.workspace).values({ id: id(n % 1e6 + 1000), kind: 'personal', ownerId: userId, name: 'Mine', ...base }).returning()
+      const put = async (ws: string, who: string, k: number) => {
+        const entry = id(n % 1e6 * 10 + k + 2000000)
+        await db.db.insert(schema.timeEntry).values({ id: entry, workspaceId: ws, userId: who, startAt: 1 + k, endAt: 2 + k, tz: 'UTC', source: 'manual', ...base })
+        await db.db.insert(schema.pause).values({ id: id(n % 1e6 * 10 + k + 5000000), workspaceId: ws, userId: who, startAt: 1 + k, endAt: 2 + k, kind: 'manual', ...base })
+        await db.db.insert(schema.syncRow).values({ workspaceId: ws, tableName: 'time_entry', rowId: entry, fields: { userId: { v: who, h: 'h' } } })
+      }
+      await put(orgWs, userId, 1)
+      await put(orgWs, keeper, 2)
+      await put(personal!.id, userId, 3)
+      return { orgWs, personalWs: personal!.id }
+    }
+    const rowsOf = async (ws: string) => ({
+      entries: (await db.db.select().from(schema.timeEntry).where(eq(schema.timeEntry.workspaceId, ws))).map((r) => r.userId).sort(),
+      pauses: (await db.db.select().from(schema.pause).where(eq(schema.pause.workspaceId, ws))).map((r) => r.userId).sort(),
+      sync: (await db.db.select().from(schema.syncRow).where(eq(schema.syncRow.workspaceId, ws))).map((r) => (r.fields as { userId: { v: string } }).userId.v).sort(),
+    })
+
+    it('deletes a person\'s data in the organization when SCIM removes them', async () => {
+      const person = id(66)
+      await db.db.insert(schema.kcUser).values({ id: person, email: 'p66@acme.example', displayName: 'P' }).onConflictDoNothing()
+      await db.db.insert(schema.kcOrgMember).values({ orgId: ORG, userId: person, role: 'member' })
+      const { orgWs, personalWs } = await seedData(person, ADMIN)
+      expect((await scim('DELETE', `/Users/${person}`)).statusCode).toBe(204)
+      const org = await rowsOf(orgWs)
+      expect(org.entries).toEqual([ADMIN])
+      expect(org.pauses).toEqual([ADMIN])
+      expect(org.sync).toEqual([ADMIN])
+      expect((await rowsOf(personalWs)).entries).toEqual([person])
+      for (const t of [schema.pause, schema.timeEntry, schema.syncRow]) await db.db.delete(t)
+      await db.db.delete(schema.workspace)
     })
 
     it('never changes an owner, or someone outside the domains', async () => {

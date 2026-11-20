@@ -19,7 +19,7 @@ import { reconcileOrganization } from './reconcile.ts'
 import { forgetRoles, loadRoles, roleOf } from './roles.ts'
 import { freeBusy } from '../../meetings/freebusy.ts'
 import { roomBookings } from '../../meetings/rooms.ts'
-import { audit, auditEntries, avatarsOf, createOrganization, deleteOrganization, memberOf, ownerCount, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers, withOwnerLock } from './service.ts'
+import { audit, auditEntries, avatarsOf, createOrganization, deleteOrganization, memberOf, ownerCount, purgeMemberOrgData, pendingInvitations, requireSeat, seatUsage, sharingGroups, listMembers, withOwnerLock } from './service.ts'
 
 /** A role: a built-in one's name (`admin`) or the id of one the organization made. */
 const Role = Type.String({ minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9-]+$' })
@@ -310,7 +310,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     {
       schema: {
         tags: ['organizations'],
-        summary: 'Removes a member from the organization (their account and their own data stay)',
+        summary: 'Removes a member from the organization (their account and personal workspace stay; their data in this organization is deleted)',
         security: SECURITY,
         params: MemberParams,
         response: { 204: Type.Null(), ...problems(401, 403, 404, 409, 502, 503) },
@@ -340,6 +340,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         await keycloak().removeMember(orgId, userId)
         await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
         await tx.execute(sql`delete from kc_group_member where user_id = ${userId} and group_id in (select id from kc_group where org_id = ${orgId})`)
+        await purgeMemberOrgData(tx, orgId, userId)
       })
       await audit(db, { orgId, actorId: actor.user.id, action: userId === actor.user.id ? 'member.leave' : 'member.remove', target: userId })
       return reply.code(204).send(null)

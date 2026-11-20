@@ -150,7 +150,7 @@ pub async fn workspace_switch(app: AppHandle, state: State<'_, AppState>, id: St
 }
 
 /// Everything on screen belongs to another workspace now.
-async fn workspace_changed(app: &AppHandle) {
+pub async fn workspace_changed(app: &AppHandle) {
     changed(
         app,
         &[

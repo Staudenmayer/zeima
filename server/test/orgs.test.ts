@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
 import { schema } from '../src/db/index.ts'
+import { ensureOrgWorkspace } from '../src/modules/orgs/service.ts'
 import { sign } from '../src/modules/internal/routes.ts'
 import { FakeKeycloak } from './fake-keycloak.ts'
 import { keys, token } from './helpers.ts'
@@ -52,7 +53,10 @@ describe.skipIf(!(await reachable()))('organizations', () => {
 
   const reset = async () => {
     kc.calls = []
-    await db.db.delete(schema.workspace).where(eq(schema.workspace.kind, 'org'))
+    await db.db.delete(schema.pause)
+    await db.db.delete(schema.timeEntry)
+    await db.db.delete(schema.syncRow)
+    await db.db.delete(schema.workspace)
     await db.db.delete(schema.organization)
     await db.db.delete(schema.orgInvitation)
     await db.db.delete(schema.entitlement)
@@ -71,6 +75,48 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     }
     await db.db.insert(schema.kcUser).values({ id: OTHER, email: 'other@example.com', displayName: 'Otto' }).onConflictDoNothing()
   }
+
+
+    /** An org workspace and a personal one for `userId`, each with an entry and a pause of that user; the org one also holds `ORG`'s entry of `keeper`. */
+    const seedData = async (userId: string, keeper: string) => {
+      const n = Math.floor(Math.random() * 1e9)
+      const base = { createdAt: 1, updatedAt: 1, hlc: 'h', originDevice: id(800) }
+      const orgWs = await ensureOrgWorkspace(db.db, ORG, 'Acme')
+      const [personal] = await db.db.insert(schema.workspace).values({ id: id(n % 1e6 + 1000), kind: 'personal', ownerId: userId, name: 'Mine', ...base }).returning()
+      const put = async (ws: string, who: string, k: number) => {
+        const entry = id(n % 1e6 * 10 + k + 2000000)
+        await db.db.insert(schema.timeEntry).values({ id: entry, workspaceId: ws, userId: who, startAt: 1 + k, endAt: 2 + k, tz: 'UTC', source: 'manual', ...base })
+        await db.db.insert(schema.pause).values({ id: id(n % 1e6 * 10 + k + 5000000), workspaceId: ws, userId: who, startAt: 1 + k, endAt: 2 + k, kind: 'manual', ...base })
+        await db.db.insert(schema.syncRow).values({ workspaceId: ws, tableName: 'time_entry', rowId: entry, fields: { userId: { v: who, h: 'h' } } })
+      }
+      await put(orgWs, userId, 1)
+      await put(orgWs, keeper, 2)
+      await put(personal!.id, userId, 3)
+      return { orgWs, personalWs: personal!.id }
+    }
+    const rowsOf = async (ws: string) => ({
+      entries: (await db.db.select().from(schema.timeEntry).where(eq(schema.timeEntry.workspaceId, ws))).map((r) => r.userId).sort(),
+      pauses: (await db.db.select().from(schema.pause).where(eq(schema.pause.workspaceId, ws))).map((r) => r.userId).sort(),
+      sync: (await db.db.select().from(schema.syncRow).where(eq(schema.syncRow.workspaceId, ws))).map((r) => (r.fields as { userId: { v: string } }).userId.v).sort(),
+    })
+
+  it('deletes a leaver\'s and a removed member\'s data in the organization, and nothing else', async () => {
+    await reset()
+    const mine = await seedData(MEMBER, OWNER)
+    // A second person, removed by an admin, has data in the same workspace.
+    const [other] = [MANAGER]
+    const extra = await seedData(other, OWNER)
+    expect(extra.orgWs).toBe(mine.orgWs)
+    expect((await call('DELETE', `/v1/orgs/${ORG}/members/${MEMBER}`, MEMBER, 'member')).statusCode).toBe(204)
+    expect(await rowsOf(mine.orgWs)).toEqual({ entries: [OWNER, OWNER, MANAGER].sort(), pauses: [OWNER, OWNER, MANAGER].sort(), sync: [OWNER, OWNER, MANAGER].sort() })
+    expect((await call('DELETE', `/v1/orgs/${ORG}/members/${MANAGER}`, ADMIN, 'admin')).statusCode).toBe(204)
+    const org = await rowsOf(mine.orgWs)
+    expect(org.entries).toEqual([OWNER, OWNER])
+    expect(org.pauses).toEqual([OWNER, OWNER])
+    expect(org.sync).toEqual([OWNER, OWNER])
+    expect((await rowsOf(mine.personalWs)).entries).toEqual([MEMBER])
+    expect((await rowsOf(extra.personalWs)).entries).toEqual([MANAGER])
+  })
 
   it('never leaves an organization without an owner when two owners step down at the same moment', async () => {
     await reset()
