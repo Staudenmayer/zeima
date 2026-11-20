@@ -9,8 +9,9 @@ data:
     #!/bin/sh
     # Second database for Keycloak next to the API's. Runs once, when the data directory is created.
     set -e
-    psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres <<SQL
-    CREATE USER {{ .Values.externalDatabase.keycloak.user }} WITH PASSWORD '$KEYCLOAK_DB_PASSWORD';
+    # The password goes in as a psql variable and is quoted by psql (:'pw'), not by the shell.
+    psql -v ON_ERROR_STOP=1 -v pw="$KEYCLOAK_DB_PASSWORD" -U "$POSTGRES_USER" -d postgres <<'SQL'
+    CREATE USER {{ .Values.externalDatabase.keycloak.user }} WITH PASSWORD :'pw';
     CREATE DATABASE {{ .Values.externalDatabase.keycloak.database }} OWNER {{ .Values.externalDatabase.keycloak.user }};
     SQL
 ---
