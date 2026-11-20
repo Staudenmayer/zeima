@@ -184,6 +184,7 @@ fn zeima_public(ip: std::net::IpAddr) -> bool {
                 || o[0] >= 240
                 || (o[0] == 100 && (64..=127).contains(&o[1]))
                 || (o[0] == 192 && o[1] == 0 && (o[2] == 0 || o[2] == 2))
+                || (o[0] == 192 && o[1] == 88 && o[2] == 99)
                 || (o[0] == 198 && (o[1] == 18 || o[1] == 19))
                 || (o[0] == 198 && o[1] == 51 && o[2] == 100)
                 || (o[0] == 203 && o[1] == 0 && o[2] == 113))
@@ -193,8 +194,12 @@ fn zeima_public(ip: std::net::IpAddr) -> bool {
                 return zeima_public(IpAddr::V4(v4));
             }
             let s = v6.segments();
-            // Global unicast only, minus documentation, 6to4, Teredo and the other IETF special blocks (2001::/23).
-            (s[0] & 0xe000) == 0x2000 && s[0] != 0x2002 && !(s[0] == 0x2001 && (s[1] < 0x0200 || s[1] == 0x0db8))
+            // Global unicast only, minus documentation (2001:db8::/32 and 3fff::/20), 6to4, Teredo and the other IETF
+            // special blocks (2001::/23).
+            (s[0] & 0xe000) == 0x2000
+                && s[0] != 0x2002
+                && !(s[0] == 0x2001 && (s[1] < 0x0200 || s[1] == 0x0db8))
+                && !(s[0] == 0x3fff && s[1] & 0xf000 == 0)
         }
     }
 }
@@ -231,7 +236,11 @@ impl ureq::unversioned::resolver::Resolver for ZeimaResolver {
 /// No redirects and no proxy: a proxy (from the environment, which ureq reads by default) would resolve the
 /// target itself and skip `ZeimaResolver`.
 fn zeima_config() -> ureq::config::Config {
-    ureq::Agent::config_builder()
+    zeima_config_from(ureq::Agent::config_builder())
+}
+
+fn zeima_config_from(builder: ureq::config::ConfigBuilder<ureq::typestate::AgentScope>) -> ureq::config::Config {
+    builder
         .max_redirects(0)
         .http_status_as_error(false)
         .proxy(None)
@@ -602,11 +611,16 @@ mod zeima_tests {
     use super::*;
 
     #[test]
-    fn config_ignores_proxy_environment() {
-        std::env::set_var("HTTP_PROXY", "http://127.0.0.1:9");
-        std::env::set_var("HTTPS_PROXY", "http://127.0.0.1:9");
-        std::env::set_var("ALL_PROXY", "http://127.0.0.1:9");
-        assert!(zeima_config().proxy().is_none());
+    fn config_ignores_a_configured_proxy() {
+        // Without touching the process environment (which other tests read): the builder starts with a proxy, as
+        // it would from HTTP_PROXY, and the Zeima config must remove it.
+        let proxy = ureq::Proxy::new("http://127.0.0.1:9").unwrap();
+        let builder = ureq::Agent::config_builder().proxy(Some(proxy));
+        assert!(builder.build().proxy().is_some());
+        let builder = ureq::Agent::config_builder().proxy(Some(ureq::Proxy::new("http://127.0.0.1:9").unwrap()));
+        let config = zeima_config_from(builder);
+        assert!(config.proxy().is_none());
+        assert_eq!(config.max_redirects(), 0);
     }
 
     #[test]
@@ -623,11 +637,11 @@ mod zeima_tests {
         for ip in [
             "127.0.0.1", "0.1.2.3", "10.0.0.1", "100.64.0.1", "169.254.169.254", "192.168.0.1",
             "::1", "::", "::ffff:127.0.0.1", "::127.0.0.1", "::a9fe:a9fe", "fc00::1", "fd00::1", "fe80::1",
-            "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "2001:1::1",
+            "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "2001:1::1", "3fff::1", "3fff:fff:ffff::1", "192.88.99.1",
         ] {
             assert!(!zeima_public(ip.parse().unwrap()), "{ip}");
         }
-        for ip in ["8.8.8.8", "2606:4700:4700::1111"] {
+        for ip in ["8.8.8.8", "2606:4700:4700::1111", "3fff:1000::1", "192.88.98.1", "192.88.100.1"] {
             assert!(zeima_public(ip.parse().unwrap()), "{ip}");
         }
     }
