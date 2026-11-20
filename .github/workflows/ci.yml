@@ -83,9 +83,9 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           git fetch --depth=1 origin "$GITHUB_BASE_REF"
-          if git show "origin/$GITHUB_BASE_REF:packages/api-contract/openapi.json" > /tmp/base-openapi.json 2>/dev/null; then
-            docker run --rm -v "$PWD:/w" -v /tmp:/t docker.io/tufin/oasdiff breaking \
-              /t/base-openapi.json /w/packages/api-contract/openapi.json --fail-on ERR
+          if git show "origin/$GITHUB_BASE_REF:packages/api-contract/openapi.json" > .base-openapi.json 2>/dev/null; then
+            docker run --rm -v "$PWD:/w:ro" docker.io/tufin/oasdiff:v1.11.0 breaking \
+              /w/.base-openapi.json /w/packages/api-contract/openapi.json --fail-on ERR
           else
             echo "the base branch has no committed contract yet"
           fi
