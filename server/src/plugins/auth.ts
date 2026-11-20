@@ -61,12 +61,14 @@ export const OrgIdHeader = Type.Object({
 })
 
 /** Org memberships from the token's group paths. */
+const ORG_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export function orgsFromGroups(groups: readonly string[]): Record<string, OrgMembership> {
-  const orgs: Record<string, OrgMembership> = {}
+  const orgs: Record<string, OrgMembership> = Object.create(null)
   const rank = (r: OrgRole) => (isBuiltinRole(r) ? ORG_ROLES.indexOf(r) : ORG_ROLES.length)
   for (const path of groups) {
     const [, root, orgId, kind, ...rest] = path.split('/')
-    if (root !== 'orgs' || !orgId || !kind) continue
+    if (root !== 'orgs' || !orgId || !ORG_ID.test(orgId) || !kind) continue
     let org = orgs[orgId]
     if (!org) {
       org = { role: '', permissions: {}, groups: [] }
@@ -161,7 +163,7 @@ export const authPlugin = fp(
 
       const orgId = request.headers['x-org-id']
       if (typeof orgId === 'string' && orgId !== '') {
-        if (!user.orgs[orgId]) throw new HttpProblem(403, 'org_forbidden', 'you are not a member of this organization')
+        if (!Object.hasOwn(user.orgs, orgId)) throw new HttpProblem(403, 'org_forbidden', 'you are not a member of this organization')
         request.orgId = orgId
       }
     })
