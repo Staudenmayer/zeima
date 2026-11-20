@@ -230,5 +230,50 @@
     1791187200000
    ]
   ]
+ },
+ {
+  "name": "oversized daily interval is a single meeting",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=DAILY;INTERVAL=1000000000",
+  "from": 1790805600000,
+  "to": 1793401200000,
+  "expected": [
+   [
+    1791183600000,
+    1791187200000
+   ]
+  ]
+ },
+ {
+  "name": "oversized weekly interval is a single meeting",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=WEEKLY;INTERVAL=1000000000",
+  "from": 1790805600000,
+  "to": 1793401200000,
+  "expected": [
+   [
+    1791183600000,
+    1791187200000
+   ]
+  ]
+ },
+ {
+  "name": "oversized monthly interval is a single meeting",
+  "startAt": 1791183600000,
+  "endAt": 1791187200000,
+  "tz": "Europe/Vienna",
+  "rrule": "FREQ=MONTHLY;INTERVAL=1000000000",
+  "from": 1790805600000,
+  "to": 1793401200000,
+  "expected": [
+   [
+    1791183600000,
+    1791187200000
+   ]
+  ]
  }
 ]

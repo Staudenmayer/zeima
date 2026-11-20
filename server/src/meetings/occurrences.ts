@@ -17,6 +17,9 @@ interface Rule {
 /** Monday = 0 … Sunday = 6. */
 const DAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
 
+/** Largest INTERVAL a rule may name; larger ones are not a rule (keeps date arithmetic in range). */
+export const MAX_INTERVAL = 1000
+
 function parse(text: string): Rule | null {
   const rule: Rule = { freq: 'DAILY', interval: 1, count: null, until: null, byDay: [] }
   let have = false
@@ -33,6 +36,7 @@ function parse(text: string): Rule | null {
       }
       case 'INTERVAL':
         rule.interval = Math.max(1, Number.parseInt(v, 10) || 1)
+        if (rule.interval > MAX_INTERVAL) return null
         break
       case 'COUNT': {
         const n = Number.parseInt(v, 10)
@@ -193,6 +197,7 @@ export function occurrences(startAt: number, endAt: number, tz: string, rrule: s
   for (let p = first0; p < 5000; p++) {
     for (const [y, m, d] of datesOf(p)) {
       const day = Date.UTC(y, m - 1, d)
+      if (!Number.isFinite(day)) continue // outside the range of dates
       if (day < firstDay) continue
       if ((rule.until !== null && dateKey(y, m, d) > rule.until) || (rule.count !== null && produced >= rule.count)) return out
       // Far before the window: counted, but not worth the zone arithmetic (a day's wall time is within a day of UTC's).
