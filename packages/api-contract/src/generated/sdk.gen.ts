@@ -109,7 +109,7 @@ export const getV1OrgsByOrgIdMembers = <ThrowOnError extends boolean = true>(opt
 });
 
 /**
- * Removes a member from the organization (their account and personal workspace stay; their data in this organization is deleted)
+ * Removes a member from the organization (their account and personal workspace stay; they lose access and their local copy of the organization data is deleted; the organization keeps its records on the server, except the time entries and pauses of that person, which are deleted)
  */
 export const deleteV1OrgsByOrgIdMembersByUserId = <ThrowOnError extends boolean = true>(options: Options<DeleteV1OrgsByOrgIdMembersByUserIdData, ThrowOnError>): RequestResult<DeleteV1OrgsByOrgIdMembersByUserIdResponses, DeleteV1OrgsByOrgIdMembersByUserIdErrors, ThrowOnError> => (options.client ?? client).delete<DeleteV1OrgsByOrgIdMembersByUserIdResponses, DeleteV1OrgsByOrgIdMembersByUserIdErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],

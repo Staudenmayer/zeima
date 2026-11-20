@@ -313,7 +313,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     {
       schema: {
         tags: ['organizations'],
-        summary: 'Removes a member from the organization (their account and personal workspace stay; their data in this organization is deleted)',
+        summary: 'Removes a member from the organization (their account and personal workspace stay; they lose access and their local copy of the organization data is deleted; the organization keeps its records on the server, except the time entries and pauses of that person, which are deleted)',
         security: SECURITY,
         params: MemberParams,
         response: { 204: Type.Null(), ...problems(401, 403, 404, 409, 502, 503) },

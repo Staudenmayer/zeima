@@ -1030,7 +1030,7 @@ const de: typeof en = {
     reactivate: 'Konto reaktivieren',
     remove: 'Aus der Organisation entfernen',
     removeConfirm: '{name} aus der Organisation entfernen?',
-    removeHint: 'Konto und eigene Daten bleiben; der Zugriff auf die Organisation endet.',
+    removeHint: 'Konto und persönliche Daten bleiben. Der Zugriff endet, und die Kopie der Organisationsdaten wird von den Geräten gelöscht. Die Organisation behält ihre Datensätze auf dem Server, außer Zeiteinträgen und Pausen der Person, die gelöscht werden.',
     noInvitations: 'Keine offenen Einladungen.',
     withdraw: 'Einladung zurückziehen',
     invitationHint: 'Die Rolle gilt, sobald sich die Person mit der eingeladenen Adresse anmeldet. Eine offene Einladung belegt einen Platz.',

@@ -122,6 +122,36 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     expect((await rowsOf(extra.personalWs)).entries).toEqual([MANAGER])
   })
 
+  /** What stays in the organization's workspace when a person goes: their rows other than entries and pauses. */
+  const RETAINED = ['absence', 'work_schedule', 'work_settings', 'balance_adjustment', 'work_location', 'meeting', 'meeting_response']
+  const seedRetained = async (ws: string, userId: string, k: number) => {
+    for (const [i, table] of RETAINED.entries()) {
+      await db.db.insert(schema.syncRow).values({ workspaceId: ws, tableName: table, rowId: id(k * 100 + i + 3000000), fields: { userId: { v: userId, h: 'h' } } })
+    }
+  }
+  const retainedOf = async (ws: string) =>
+    (await db.db.select().from(schema.syncRow).where(and(eq(schema.syncRow.workspaceId, ws), inArray(schema.syncRow.tableName, RETAINED)))).map((r) => r.tableName).sort()
+  /** With the token the person still holds: pulling returns nothing of the workspace and pushing is refused. */
+  const lockedOut = async (userId: string, orgWs: string, headers: { authorization: string }) => {
+    const pulled = (await app.inject({ url: '/v1/sync/pull', headers })).json().rows as { workspaceId: string }[]
+    expect(pulled.filter((r) => r.workspaceId === orgWs)).toEqual([])
+    const pushed = await app.inject({ method: 'POST', url: '/v1/sync/push', headers, payload: { workspaceId: orgWs, deviceId: id(801), changes: [] } })
+    expect([403, 404], `push as ${userId}: ${pushed.statusCode}`).toContain(pushed.statusCode)
+  }
+
+  it('keeps the organization\'s other records of a leaver and a removed member, who lose access to the workspace', async () => {
+    await reset()
+    const { orgWs } = await seedData(MEMBER, OWNER)
+    await seedRetained(orgWs, MEMBER, 1)
+    await seedRetained(orgWs, MANAGER, 2)
+    const stale = { member: await as(MEMBER, 'member'), manager: await as(MANAGER, 'manager') }
+    expect((await call('DELETE', `/v1/orgs/${ORG}/members/${MEMBER}`, MEMBER, 'member')).statusCode).toBe(204)
+    expect((await call('DELETE', `/v1/orgs/${ORG}/members/${MANAGER}`, ADMIN, 'admin')).statusCode).toBe(204)
+    expect(await retainedOf(orgWs)).toEqual([...RETAINED, ...RETAINED].sort())
+    await lockedOut(MEMBER, orgWs, stale.member)
+    await lockedOut(MANAGER, orgWs, stale.manager)
+  })
+
   it('never leaves an organization without an owner when two owners step down at the same moment', async () => {
     await reset()
     // Admin Adam becomes the second owner; then the two owners demote each other at once, many times over.
