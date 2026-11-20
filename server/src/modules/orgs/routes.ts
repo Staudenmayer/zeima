@@ -16,7 +16,7 @@ import { Quota } from '../../plugins/quota.ts'
 import { PRESENCE_STATES, type PresenceState } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { reconcileOrganization } from './reconcile.ts'
-import { forgetMembership, forgetRoles, loadRoles, roleOf } from './roles.ts'
+import { forgetMembership, forgetOrganizationMemberships, forgetRoles, loadRoles, roleOf } from './roles.ts'
 import { lockPushOrder } from '../../db/locks.ts'
 import { freeBusy } from '../../meetings/freebusy.ts'
 import { roomBookings } from '../../meetings/rooms.ts'
@@ -198,6 +198,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       // The database first (in one transaction), then Keycloak: a failure at Keycloak leaves a stray identity-provider
       // organization that deleting again (or the operator) removes, and never members of an organization that has no data.
       await deleteOrganization(db, orgId)
+      forgetOrganizationMemberships(orgId)
       try {
         await kc.deleteOrganization(orgId)
       } catch (err) {
@@ -645,6 +646,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         .update(schema.kcGroup)
         .set({ path: sql`${`${prefix(orgId)}${newPath}`} || substr(${schema.kcGroup.path}, ${group.path.length + 1})` })
         .where(and(eq(schema.kcGroup.orgId, orgId), sql`(${schema.kcGroup.path} = ${group.path} or ${schema.kcGroup.path} like ${like})`))
+      forgetOrganizationMemberships(orgId)
       await audit(db, { orgId, actorId: actor.user.id, action: 'group.rename', target: newPath, detail: { from: oldPath } })
       return (await loadGroups(orgId)).find((g) => g.id === groupId)!
     },
@@ -673,6 +675,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       await db
         .delete(schema.kcGroup)
         .where(and(eq(schema.kcGroup.orgId, orgId), sql`(${schema.kcGroup.path} = ${group.path} or ${schema.kcGroup.path} like ${`${group.path.replace(/[\\%_]/g, '\\$&')}/%`})`))
+      forgetOrganizationMemberships(orgId)
       await audit(db, { orgId, actorId: actor.user.id, action: 'group.delete', target: group.path.slice(prefix(orgId).length) })
       return reply.code(204).send(null)
     },
@@ -713,6 +716,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
           await kc.removeFromGroup(userId, groupId)
           await db.delete(schema.kcGroupMember).where(and(eq(schema.kcGroupMember.groupId, groupId), eq(schema.kcGroupMember.userId, userId)))
         }
+        forgetMembership(userId)
         await audit(db, {
           orgId,
           actorId: actor.user.id,

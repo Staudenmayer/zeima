@@ -101,4 +101,51 @@ describe.skipIf(!(await reachable()))('membership is taken from the database, no
     // Nothing of the removed member's pushes after the removal (or of those before it) is left.
     expect(rows.filter((r) => [id(20), id(21), id(23)].includes(r.rowId))).toEqual([])
   })
+
+  it('sees department changes and the end of a deleted department or organization at once, not after the cache expires', async () => {
+    const GROUP_MATE = id(4), ORG2 = id(950)
+    await member(OWNER, 'owner')
+    await member(GROUP_MATE, 'member')
+    const { forgetMembership } = await import('../src/modules/orgs/roles.ts')
+    forgetMembership(GROUP_MATE)
+    const groupsOf = async () => ((await app.inject({ url: '/v1/me', headers: await as(GROUP_MATE, 'member') })).json().orgs as { id: string; groups: string[] }[]).find((o) => o.id === ORG)?.groups
+    const owner = async () => await as(OWNER, 'owner')
+    expect(await groupsOf()).toEqual([]) // now cached
+    const g = (await app.inject({ method: 'POST', url: `/v1/orgs/${ORG}/groups`, headers: await owner(), payload: { name: 'ops' } })).json()
+    const call = async (method: 'PUT' | 'DELETE' | 'PATCH', url: string, payload?: object) => app.inject({ method, url, headers: await owner(), payload })
+    expect((await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${GROUP_MATE}`)).statusCode).toBe(204)
+    expect(await groupsOf()).toEqual([`/orgs/${ORG}/groups/ops`])
+    expect((await call('DELETE', `/v1/orgs/${ORG}/groups/${g.id}/members/${GROUP_MATE}`)).statusCode).toBe(204)
+    expect(await groupsOf()).toEqual([])
+    expect((await call('PUT', `/v1/orgs/${ORG}/groups/${g.id}/members/${GROUP_MATE}`)).statusCode).toBe(204)
+    expect(await groupsOf()).toEqual([`/orgs/${ORG}/groups/ops`])
+    expect((await call('PATCH', `/v1/orgs/${ORG}/groups/${g.id}`, { name: 'ops2' })).statusCode).toBe(200)
+    expect(await groupsOf()).toEqual([`/orgs/${ORG}/groups/ops2`])
+    expect((await call('DELETE', `/v1/orgs/${ORG}/groups/${g.id}`)).statusCode).toBe(204)
+    expect(await groupsOf()).toEqual([])
+
+    // Deleting the organization: a cached membership does not outlive it.
+    await db.db.insert(schema.organization).values({ id: ORG2, name: 'Gone', createdAt: 1 })
+    await db.db.insert(schema.kcOrgMember).values({ orgId: ORG2, userId: OWNER, role: 'owner' })
+    const in2 = async () => ({ authorization: `Bearer ${await token({ sub: OWNER, groups: [`/orgs/${ORG2}/roles/owner`] })}` })
+    forgetMembership(OWNER)
+    expect((await app.inject({ url: `/v1/orgs/${ORG2}/members`, headers: await in2() })).statusCode).toBe(200) // now cached
+    expect((await app.inject({ method: 'DELETE', url: `/v1/orgs/${ORG2}`, headers: await in2() })).statusCode).toBe(204)
+    expect((await app.inject({ url: `/v1/orgs/${ORG2}/members`, headers: await in2() })).statusCode).toBe(403)
+  })
+
+  it('keeps the cache of memberships bounded: expired entries go first, then the oldest', async () => {
+    const { remember } = await import('../src/modules/orgs/roles.ts')
+    const map = new Map<string, { at: number }>()
+    const now = Date.now()
+    remember(map, 'old', { at: now - 10_000 }, 3, 1000)
+    remember(map, 'a', { at: now }, 3, 1000)
+    remember(map, 'b', { at: now }, 3, 1000)
+    remember(map, 'c', { at: now }, 3, 1000) // full: the expired one makes room
+    expect([...map.keys()]).toEqual(['a', 'b', 'c'])
+    remember(map, 'd', { at: now }, 3, 1000) // nothing expired: the oldest goes
+    expect([...map.keys()]).toEqual(['b', 'c', 'd'])
+    remember(map, 'c', { at: now }, 3, 1000) // a refresh does not grow it
+    expect([...map.keys()]).toEqual(['b', 'd', 'c'])
+  })
 })

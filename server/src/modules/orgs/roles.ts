@@ -81,10 +81,32 @@ interface Mirrored {
   groups: string[]
 }
 const memberships = new Map<string, { at: number; orgs: Map<string, Mirrored> }>()
+/** People remembered at most; a bigger crowd than this is served from the database. */
+export const MEMBERSHIP_CACHE_MAX = 10_000
 
 /** Call after a person joined, left, or changed role or department, so this process sees it at once (others within seconds). */
 export function forgetMembership(userId: string) {
   memberships.delete(userId)
+}
+
+/** Call after the departments or the members of a whole organization changed (a department renamed or deleted, the organization deleted). */
+export function forgetOrganizationMemberships(orgId: string) {
+  for (const [userId, known] of memberships) if (known.orgs.has(orgId)) memberships.delete(userId)
+}
+
+/** Stores an entry and keeps the map bounded: expired entries go first, then the oldest. */
+export function remember<V extends { at: number }>(map: Map<string, V>, key: string, value: V, max: number, ttlMs: number) {
+  map.delete(key) // a refreshed entry counts as the newest
+  if (map.size >= max) {
+    const now = Date.now()
+    for (const [k, v] of map) if (now - v.at > ttlMs) map.delete(k)
+    // Insertion order is age order, so the first keys are the oldest.
+    for (const k of map.keys()) {
+      if (map.size < max) break
+      map.delete(k)
+    }
+  }
+  map.set(key, value)
 }
 
 async function mirroredOrgs(db: Db, userId: string, ttlMs: number): Promise<Map<string, Mirrored>> {
@@ -100,7 +122,7 @@ async function mirroredOrgs(db: Db, userId: string, ttlMs: number): Promise<Map<
     .where(eq(schema.kcGroupMember.userId, userId))
   for (const g of groups) orgs.get(g.orgId)?.groups.push(g.path)
   for (const o of orgs.values()) o.groups.sort()
-  memberships.set(userId, { at: Date.now(), orgs })
+  remember(memberships, userId, { at: Date.now(), orgs }, MEMBERSHIP_CACHE_MAX, ttlMs)
   return orgs
 }
 
