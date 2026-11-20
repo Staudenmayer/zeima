@@ -312,7 +312,10 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
         .where(eq(schema.kcOrgMember.orgId, ORG))
       kc.members = rows.map((r) => ({ id: r.id, email: r.email, name: r.name ?? '', enabled: true }))
       kc.roles = { owner: [], admin: [], manager: [], member: [] }
-      for (const r of rows) (kc.roles[r.role as keyof typeof kc.roles] ??= []).push(r.id)
+      for (const r of rows) {
+        const key = r.role as keyof typeof kc.roles
+        kc.roles[key] = [...(kc.roles[key] ?? []), r.id]
+      }
       // SCIM removes the person while the list (which still has them) is being read.
       let removal: Promise<{ statusCode: number }> | undefined
       kc.listMembers = async () => {
