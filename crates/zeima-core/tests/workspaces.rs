@@ -188,8 +188,12 @@ async fn removing_an_org_workspace_deletes_its_data_and_leaves_the_personal_one(
         .remove_org_workspace(&personal.ctx().workspace_id)
         .await
         .unwrap());
+    let owner_key = format!("org_owner:{ORG_WS}");
+    personal.set_meta(&owner_key, "api|user").await.unwrap();
     assert!(personal.remove_org_workspace(ORG_WS).await.unwrap());
     assert!(!personal.remove_org_workspace(ORG_WS).await.unwrap());
+    // The record of which server it was synced with is gone too.
+    assert_eq!(personal.get_meta(&owner_key).await.unwrap(), None);
 
     let all = personal.workspaces().await.unwrap();
     assert_eq!(all.len(), 1);

@@ -352,6 +352,11 @@ impl Core {
             .bind(workspace_id)
             .execute(&mut *tx)
             .await?;
+        // The record of which server and account the workspace was synced with goes with it.
+        sqlx::query("DELETE FROM local_meta WHERE key = ?")
+            .bind(format!("org_owner:{workspace_id}"))
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(true)
     }

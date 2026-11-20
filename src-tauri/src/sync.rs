@@ -408,10 +408,15 @@ fn org_owner_value(api: &str, user_id: &str) -> String {
 }
 
 /// Whether a workspace's unsent changes may be pushed to this server with this account's token: only when it was
-/// recorded as belonging to exactly this server and account. Anything else (unknown, other server, other account)
-/// must never be sent anywhere.
-fn may_push_pending(recorded: Option<&str>, api: &str, user_id: &str) -> bool {
-    recorded == Some(org_owner_value(api, user_id).as_str())
+/// recorded as belonging to exactly this server and account. A workspace without a record (adopted before records
+/// existed) counts as this account's when the account this device last synced as is the same one; the server it
+/// belongs to was not recorded then. Anything else (other server, other account, nobody known) must never be
+/// sent anywhere.
+fn may_push_pending(recorded: Option<&str>, previous_user: Option<&str>, api: &str, user_id: &str) -> bool {
+    match recorded {
+        Some(r) => r == org_owner_value(api, user_id),
+        None => previous_user == Some(user_id),
+    }
 }
 
 /// Whether a workspace missing from the server's list may be dropped: nothing waits to be pushed, or the push
@@ -429,6 +434,7 @@ async fn drop_gone_workspaces(
     api: &str,
     token: &str,
     user_id: &str,
+    previous_user: Option<&str>,
     listed: &[ServerWorkspace],
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
@@ -446,7 +452,14 @@ async fn drop_gone_workspaces(
             .await
             .map_err(|e| e.to_string())?;
         // Unsent changes of a workspace that belongs to another server or account are dropped, never sent here.
-        if had_pending && may_push_pending(recorded.as_deref(), api, user_id) {
+        if had_pending && may_push_pending(recorded.as_deref(), previous_user, api, user_id) {
+            if recorded.is_none() {
+                state
+                    .core
+                    .set_meta(&org_owner_key(&w.id), &org_owner_value(api, user_id))
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
             let push = push_all(&scope, api, token, &w.id).await;
             if !may_drop(true, &push) {
                 continue;
@@ -483,6 +496,11 @@ async fn adopt_shared_workspaces(
         .await
         .map_err(|e| e.to_string())??;
     let core = &app.state::<AppState>().core;
+    // Which account the shared workspaces belonged to until now: read before it is overwritten below.
+    let previous_user = core
+        .get_meta(crate::workspaces::ACCOUNT_USER_KEY)
+        .await
+        .map_err(|e| e.to_string())?;
     // Which account the shared workspaces belong to, for switching offline.
     core.set_meta(crate::workspaces::ACCOUNT_USER_KEY, &user.id)
         .await
@@ -495,7 +513,7 @@ async fn adopt_shared_workspaces(
     let listed = serde_json::from_value::<Vec<ServerWorkspace>>(list)
         .map_err(|e| format!("the server's answer: {e}"))?;
     // Only after a good answer: organizations the person left, or was removed from, vanish with their data.
-    drop_gone_workspaces(app, api, token, &user.id, &listed).await?;
+    drop_gone_workspaces(app, api, token, &user.id, previous_user.as_deref(), &listed).await?;
     let mut shared = Vec::new();
     for w in listed.into_iter().filter(|w| w.kind == "org") {
         let Some(org_id) = w.org_id.as_deref() else {
@@ -1025,11 +1043,26 @@ mod tests {
     #[test]
     fn unsent_changes_are_pushed_only_to_the_server_and_account_they_belong_to() {
         let owner = org_owner_value("https://a.example/api", "user-1");
-        assert!(may_push_pending(Some(&owner), "https://a.example/api", "user-1"));
-        // Another server, another account, or no record: never pushed.
-        assert!(!may_push_pending(Some(&owner), "https://b.example/api", "user-1"));
-        assert!(!may_push_pending(Some(&owner), "https://a.example/api", "user-2"));
-        assert!(!may_push_pending(None, "https://a.example/api", "user-1"));
+        let a = "https://a.example/api";
+        assert!(may_push_pending(Some(&owner), None, a, "user-1"));
+        // Another server or another account: never pushed, whatever the last account was.
+        assert!(!may_push_pending(
+            Some(&owner),
+            Some("user-1"),
+            "https://b.example/api",
+            "user-1"
+        ));
+        assert!(!may_push_pending(Some(&owner), Some("user-1"), a, "user-2"));
+        // No record and no known previous account: never pushed.
+        assert!(!may_push_pending(None, None, a, "user-1"));
+    }
+
+    #[test]
+    fn a_workspace_adopted_before_records_existed_is_pushed_for_the_same_account_only() {
+        let a = "https://a.example/api";
+        assert!(may_push_pending(None, Some("user-1"), a, "user-1"));
+        assert!(!may_push_pending(None, Some("user-2"), a, "user-1"));
+        assert!(!may_push_pending(None, None, a, "user-1"));
     }
 
     #[test]
