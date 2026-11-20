@@ -8,7 +8,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
-import { api, ok, type Reply } from '@/lib/api'
+import { deleteV1AdminLdap, getV1AdminLdap, ok, postV1AdminLdapSync, postV1AdminLdapTest, putV1AdminLdap } from '@/lib/api'
+import type { GetV1AdminLdapResponses } from '@zeima/api-contract/client'
 import { errorMessage } from '@/lib/ipc'
 
 // A company directory (LDAP / Active Directory) people can sign in with. Only the people who run
@@ -16,7 +17,7 @@ import { errorMessage } from '@/lib/ipc'
 // only when the server lets this person read it.
 const { t } = useI18n()
 
-type Ldap = Reply<'/v1/admin/ldap', 'get'>
+type Ldap = GetV1AdminLdapResponses[200]
 const available = ref(false)
 const current = ref<Ldap | null>(null)
 const busy = ref(false)
@@ -45,7 +46,7 @@ function fill(l: Ldap) {
 
 onMounted(async () => {
   try {
-    current.value = ok(await api.GET('/v1/admin/ldap'))
+    current.value = ok(await getV1AdminLdap())
     available.value = true
     fill(current.value)
   } catch {
@@ -77,26 +78,26 @@ async function run(job: () => Promise<void>) {
 
 const test = () =>
   run(async () => {
-    ok(await api.POST('/v1/admin/ldap/test', { body: body() }))
+    ok(await postV1AdminLdapTest({ body: body() }))
     toast.success(t('org.directory.testOk'))
   })
 
 const save = () =>
   run(async () => {
-    current.value = ok(await api.PUT('/v1/admin/ldap', { body: body() }))
+    current.value = ok(await putV1AdminLdap({ body: body() }))
     fill(current.value)
     toast.success(t('org.directory.saved'))
   })
 
 const sync = () =>
   run(async () => {
-    const r = ok(await api.POST('/v1/admin/ldap/sync'))
+    const r = ok(await postV1AdminLdapSync())
     toast.success(t('org.directory.synced', { added: r.added, updated: r.updated }))
   })
 
 const remove = () =>
   run(async () => {
-    ok(await api.DELETE('/v1/admin/ldap'))
+    ok(await deleteV1AdminLdap())
     current.value = { configured: false, enabled: false }
     url.value = bindDn.value = bindPassword.value = usersDn.value = userFilter.value = ''
     toast.success(t('org.directory.removed'))

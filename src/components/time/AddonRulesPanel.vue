@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { api, ok } from '@/lib/api'
+import { getV1OrgsByOrgIdAddons, ok, putV1OrgsByOrgIdAddons } from '@/lib/api'
 import { errorMessage } from '@/lib/ipc'
 import { useOrgStore } from '@/stores/org'
 
@@ -26,7 +26,7 @@ const orgId = () => org.activeId as string
 async function load() {
   if (!org.activeId) return
   try {
-    const p = ok(await api.GET('/v1/orgs/{orgId}/addons', { params: { path: { orgId: orgId() } } }))
+    const p = ok(await getV1OrgsByOrgIdAddons({ path: { orgId: orgId() } }))
     mode.value = p.mode
     requireSigned.value = p.requireSigned
     allowed.value = p.allowed.join('\n')
@@ -41,9 +41,7 @@ async function save() {
   saving.value = true
   try {
     const p = ok(
-      await api.PUT('/v1/orgs/{orgId}/addons', {
-        params: { path: { orgId: orgId() } },
-        body: { mode: mode.value, requireSigned: requireSigned.value, allowed: allowed.value.split(/[\s,;]+/).filter(Boolean) },
+      await putV1OrgsByOrgIdAddons({ path: { orgId: orgId() }, body: { mode: mode.value, requireSigned: requireSigned.value, allowed: allowed.value.split(/[\s,;]+/).filter(Boolean) },
       }),
     )
     allowed.value = p.allowed.join('\n')

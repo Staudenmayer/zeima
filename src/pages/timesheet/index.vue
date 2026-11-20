@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { api, ok } from '@/lib/api'
+import { ok, postV1OrgsByOrgIdFreebusy } from '@/lib/api'
 import { computed, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -350,7 +350,7 @@ async function loadOthers() {
   let busy: Record<string, Busy[]> = {}
   if (ids.length && orgId) {
     try {
-      busy = ok(await api.POST('/v1/orgs/{orgId}/freebusy', { params: { path: { orgId } }, body: { userIds: ids, from: range.value.from, to: range.value.to, timezone: getTimeZone() } })) ?? {}
+      busy = ok(await postV1OrgsByOrgIdFreebusy({ path: { orgId }, body: { userIds: ids, from: range.value.from, to: range.value.to, timezone: getTimeZone() } })) ?? {}
     } catch {
       busy = {}
     }
