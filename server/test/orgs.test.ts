@@ -6,7 +6,7 @@ import { schema } from '../src/db/index.ts'
 import { ensureOrgWorkspace } from '../src/modules/orgs/service.ts'
 import { sign } from '../src/modules/internal/routes.ts'
 import { FakeKeycloak } from './fake-keycloak.ts'
-import { keys, token } from './helpers.ts'
+import { keys, syncMirror, token } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -29,15 +29,19 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     })
 
   /** Calls the API as `userId` with `role` in the test organization. */
-  const as = async (userId: string, role: string | null, extra: { email?: string; verified?: boolean; groups?: string[] } = {}) => ({
-    authorization: `Bearer ${await token({
-      sub: userId,
-      name: NAMES[userId] ?? 'Someone',
-      email: extra.email ?? `${userId.slice(-1)}@example.com`,
-      email_verified: extra.verified ?? true,
-      groups: [...(role ? [`/orgs/${ORG}/roles/${role}`] : []), ...(extra.groups ?? [])],
-    })}`,
-  })
+  const as = async (userId: string, role: string | null, extra: { email?: string; verified?: boolean; groups?: string[] } = {}) => {
+    const groups = [...(role ? [`/orgs/${ORG}/roles/${role}`] : []), ...(extra.groups ?? [])]
+    await syncMirror(db.db, userId, groups)
+    return {
+      authorization: `Bearer ${await token({
+        sub: userId,
+        name: NAMES[userId] ?? 'Someone',
+        email: extra.email ?? `${userId.slice(-1)}@example.com`,
+        email_verified: extra.verified ?? true,
+        groups,
+      })}`,
+    }
+  }
   const call = async (method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', url: string, userId: string, role: string | null, payload?: object) =>
     app.inject({ method, url, headers: await as(userId, role), payload })
 
@@ -196,7 +200,8 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       { groupId: g!.id, userId: MEMBER },
     ])
     expect(await names(MANAGER, 'manager', [group])).toEqual(['Max', 'Mia'])
-    expect(await names(MANAGER, 'manager')).toEqual(['Mia'])
+    // Departments come from the mirror, not from the token.
+    expect(await names(MANAGER, 'manager')).toEqual(['Max', 'Mia'])
   })
 
   describe('keeping the mirror in line with Keycloak', () => {
@@ -532,7 +537,7 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       // Others see only their own departments.
       const mine = await app.inject({ url: `/v1/orgs/${ORG}/groups`, headers: await as(MEMBER, 'member', { groups: [`/orgs/${ORG}/groups/dev/backend`] }) })
       expect(mine.json().map((g: { path: string }) => g.path)).toEqual(['dev/backend'])
-      expect((await call('GET', `/v1/orgs/${ORG}/groups`, MEMBER, 'member')).json()).toEqual([])
+      expect((await call('GET', `/v1/orgs/${ORG}/groups`, MEMBER, 'member')).json().map((g: { path: string }) => g.path)).toEqual(['dev/backend'])
 
       expect((await call('DELETE', `/v1/orgs/${ORG}/groups/${gid}/members/${MEMBER}`, ADMIN, 'admin')).statusCode).toBe(204)
       expect(await db.db.select().from(schema.kcGroupMember)).toEqual([])
@@ -753,9 +758,9 @@ describe.skipIf(!(await reachable()))('organizations', () => {
     it('are deleted by those who may; the built-in ones stay and the people fall back to member', async () => {
       await reset()
       const key = (await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', permissions: { 'project.write': 'org' } })).json().key as string
-      await db.db.update(schema.kcOrgMember).set({ role: key }).where(eq(schema.kcOrgMember.userId, MEMBER))
       expect((await call('DELETE', `/v1/orgs/${ORG}/roles/${key}`, MEMBER, 'member')).statusCode).toBe(403)
       expect((await call('DELETE', `/v1/orgs/${ORG}/roles/admin`, OWNER, 'owner')).statusCode).toBe(409)
+      await db.db.update(schema.kcOrgMember).set({ role: key }).where(eq(schema.kcOrgMember.userId, MEMBER))
       kc.calls = []
       expect((await call('DELETE', `/v1/orgs/${ORG}/roles/${key}`, ADMIN, 'admin')).statusCode).toBe(204)
       expect(kc.calls).toEqual([`setRole ${ORG} ${MEMBER} member`, `deleteRole ${ORG} ${key}`])

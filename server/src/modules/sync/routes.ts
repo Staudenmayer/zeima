@@ -13,6 +13,7 @@ import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { Type } from 'typebox'
 import { callerOf, type Db, schema, withUser } from '../../db/index.ts'
+import { lockPushOrder } from '../../db/locks.ts'
 import type { AuthUser } from '../../plugins/auth.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
@@ -76,8 +77,6 @@ const FieldsSchema = Type.Record(Type.String(), Type.Object({ v: Type.Any(), h: 
 
 /** Personal workspaces one account may have (the app uses one). */
 export const MAX_PERSONAL_WORKSPACES = 5
-/** Advisory lock that keeps the commit order of pushes equal to the order of their sequence numbers. */
-const PUSH_ORDER_LOCK = 7_240_002
 const MAX_CHANGES = 500
 /** What one account may push in a minute: far more than a person produces, far less than it takes to fill a disk. */
 const PUSH_REQUESTS_PER_MINUTE = 120
@@ -281,7 +280,12 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
         // Pull pages by `seq`, which is taken when a row is written but only visible when its transaction commits. Pushes
         // therefore commit one at a time in the order of their numbers; otherwise a device could pass a number whose row
         // is not visible yet and never receive it. (One API process; a push is short.)
-        await tx.execute(sql`select pg_advisory_xact_lock(${PUSH_ORDER_LOCK})`)
+        await lockPushOrder(tx)
+        // Membership is read again under the lock: a person removed a moment ago must not write rows that stay behind.
+        if (ws.kind === 'org' && ws.orgId) {
+          const member = await tx.execute(sql`select 1 from kc_org_member where org_id = ${ws.orgId} and user_id = ${user.id}`)
+          if (member.length === 0) throw new HttpProblem(403, 'forbidden', 'you are not a member of this organization')
+        }
         const actor = { manager: isManager(user, ws) }
         const orgActor = ws.kind === 'org' && ws.orgId ? { user, orgId: ws.orgId } : null
 

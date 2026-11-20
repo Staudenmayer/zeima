@@ -3,7 +3,7 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { schema } from '../src/db/index.ts'
-import { testApp, token } from './helpers.ts'
+import { syncMirror, testApp, token } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -20,9 +20,11 @@ describe.skipIf(!(await reachable()))('organization workspace', () => {
   let app: Awaited<ReturnType<typeof testApp>>
   let ws: string
 
-  const headers = async (sub: string) => ({
-    authorization: `Bearer ${await token({ sub, email: `${sub.slice(-1)}@example.com`, groups: ROLES[sub] ? [`/orgs/${ORG}/roles/${ROLES[sub]}`, ...(GROUPS[sub] ?? [])] : [] })}`,
-  })
+  const headers = async (sub: string) => {
+    const groups = ROLES[sub] ? [`/orgs/${ORG}/roles/${ROLES[sub]}`, ...(GROUPS[sub] ?? [])] : []
+    await syncMirror(db.db, sub, groups)
+    return { authorization: `Bearer ${await token({ sub, email: `${sub.slice(-1)}@example.com`, groups })}` }
+  }
   const push = async (sub: string, changes: unknown[]) =>
     app.inject({ method: 'POST', url: '/v1/sync/push', headers: await headers(sub), payload: { workspaceId: ws, deviceId: DEVICE, changes } })
   const upsert = (table: string, rowId: string, h: number, fields: Record<string, unknown>) => ({ table, rowId, op: 'upsert', hlc: hlc(h), fields })

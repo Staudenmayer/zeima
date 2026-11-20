@@ -5,7 +5,7 @@ import { buildApp } from '../src/app.ts'
 import { schema } from '../src/db/index.ts'
 import { ConfigError, loadConfig } from '../src/config.ts'
 import { checkoutToken, checkoutUrl, parseEvent, signatureValid, uuidFor } from '../src/modules/billing/lemonsqueezy.ts'
-import { keys, token } from './helpers.ts'
+import { keys, syncMirror, token } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
 
 const PLANS = [
@@ -147,7 +147,10 @@ describe.skipIf(!(await reachable()))('billing routes', () => {
       payload: raw,
     })
   }
-  const authed = async (sub = ADA, groups: string[] = []) => ({ authorization: `Bearer ${await token({ sub, groups })}` })
+  const authed = async (sub = ADA, groups: string[] = []) => {
+    await syncMirror(db.db, sub, groups)
+    return { authorization: `Bearer ${await token({ sub, groups })}` }
+  }
 
   it('attaches a new subscription only for the organization\'s owner, and shows the portal link to owners only', async () => {
     const BOB = '2c8f1f5e-0000-4000-8000-000000000002'

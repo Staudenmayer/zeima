@@ -7,7 +7,7 @@ import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
 import { schema } from '../src/db/index.ts'
 import { FakeKeycloak } from './fake-keycloak.ts'
-import { keys, token } from './helpers.ts'
+import { keys, token, syncMirror } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
@@ -41,9 +41,11 @@ describe.skipIf(!(await reachable()))('addons: the registry and the organization
 
   const make = (env: Record<string, string>) =>
     buildApp(loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'silent', METRICS_ENABLED: 'false', ...env }), { logger: false, keys, readiness: {}, db: db.db, keycloakAdmin: new FakeKeycloak() })
-  const as = async (userId: string, role: string | null) => ({
-    authorization: `Bearer ${await token({ sub: userId, email: `${userId.slice(-1)}@example.com`, groups: role ? [`/orgs/${ORG}/roles/${role}`] : [] })}`,
-  })
+  const as = async (userId: string, role: string | null) => {
+    const groups = role ? [`/orgs/${ORG}/roles/${role}`] : []
+    await syncMirror(db.db, userId, groups)
+    return { authorization: `Bearer ${await token({ sub: userId, email: `${userId.slice(-1)}@example.com`, groups })}` }
+  }
 
   beforeAll(async () => {
     db = await createTestDatabase()
