@@ -1125,15 +1125,31 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       if (!role) throw new HttpProblem(404, 'not_found', 'no such role')
       if (isBuiltinRole(roleKey)) throw new HttpProblem(409, 'builtin', 'the built-in roles cannot be deleted')
       if (actor.user.orgs[orgId]!.role === roleKey) throw new HttpProblem(403, 'forbidden', 'you cannot delete the role you have yourself')
-      const holders = await db
-        .select({ userId: schema.kcOrgMember.userId })
-        .from(schema.kcOrgMember)
-        .where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.role, roleKey)))
+      // Deleting takes the role away from everyone who has it: the deleter must cover what it allowed, as when changing it.
+      if (!covers(actor.user.orgs[orgId]!.permissions, role.permissions)) {
+        throw new HttpProblem(403, 'forbidden', 'this role has permissions you do not have yourself')
+      }
+      if (actor.user.orgs[orgId]!.role !== 'owner' && administers(role.permissions)) {
+        throw new HttpProblem(403, 'forbidden', 'only an owner deletes a role that manages roles')
+      }
       const kc = keycloak()
-      for (const h of holders) await kc.setRole(orgId, h.userId, 'member')
-      await db.update(schema.kcOrgMember).set({ role: 'member' }).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.role, roleKey)))
-      await kc.deleteRole(orgId, roleKey)
-      await db.delete(schema.orgRole).where(and(eq(schema.orgRole.id, roleKey), eq(schema.orgRole.orgId, orgId)))
+      // The database first, in one transaction, then Keycloak: a failure at Keycloak rolls the database back and leaves the role.
+      try {
+        await db.transaction(async (tx) => {
+          const holders = await tx
+            .update(schema.kcOrgMember)
+            .set({ role: 'member' })
+            .where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.role, roleKey)))
+            .returning({ userId: schema.kcOrgMember.userId })
+          await tx.delete(schema.orgRole).where(and(eq(schema.orgRole.id, roleKey), eq(schema.orgRole.orgId, orgId)))
+          for (const h of holders) await kc.setRole(orgId, h.userId, 'member')
+          await kc.deleteRole(orgId, roleKey)
+        })
+      } catch (err) {
+        if (err instanceof HttpProblem) throw err
+        request.log.error({ err, orgId }, 'Keycloak could not apply the role deletion')
+        throw new HttpProblem(502, 'keycloak_failed', 'Keycloak could not delete the role')
+      }
       forgetRoles(orgId)
       await audit(db, { orgId, actorId: actor.user.id, action: 'role.delete', target: role.name })
       return reply.code(204).send(null)

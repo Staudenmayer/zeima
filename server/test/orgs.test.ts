@@ -704,6 +704,26 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect((await call('GET', '/v1/me', MEMBER, key)).json().orgs[0].permissions).toEqual({ 'role.view': 'org' })
     })
 
+    it('are deleted only by someone who holds what they allow, and a Keycloak failure leaves them', async () => {
+      await reset()
+      const big = (await roles(OWNER, 'owner', 'POST', { name: 'Billing', permissions: { 'billing.manage': 'org' } })).json().key as string
+      await call('PATCH', `/v1/orgs/${ORG}/members/${MEMBER}`, OWNER, 'owner', { role: big })
+      const del = (uid: string, role: string, key: string) => call('DELETE', `/v1/orgs/${ORG}/roles/${key}`, uid, role)
+      expect((await del(ADMIN, 'admin', big)).statusCode).toBe(403)
+      const holder = () => db.db.select().from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, ORG), eq(schema.kcOrgMember.userId, MEMBER)))
+      expect(await holder()).toMatchObject([{ role: big }])
+      // A role that manages roles is only deleted by an owner.
+      const lead = (await roles(OWNER, 'owner', 'POST', { name: 'Role keeper', permissions: { 'role.edit': 'org' } })).json().key as string
+      expect((await del(ADMIN, 'admin', lead)).statusCode).toBe(403)
+      // A Keycloak failure leaves the role and its holders.
+      kc.failNext = 'deleteRole'
+      expect((await del(OWNER, 'owner', big)).statusCode).toBe(502)
+      expect(await holder()).toMatchObject([{ role: big }])
+      expect((await call('GET', `/v1/orgs/${ORG}/roles`, OWNER, 'owner')).json().roles.map((r: { key: string }) => r.key)).toContain(big)
+      expect((await del(OWNER, 'owner', big)).statusCode).toBe(204)
+      expect(await holder()).toMatchObject([{ role: 'member' }])
+    })
+
     it('are given out under the same rule, and the built-in ones can be changed except the owner', async () => {
       await reset()
       const key = (await roles(ADMIN, 'admin', 'POST', { name: 'Project lead', permissions: { 'project.write': 'org' } })).json().key as string
