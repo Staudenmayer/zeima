@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
-import { api, ok, type Reply } from '@/lib/api'
+import { deleteV1OrgsByOrgIdScimTokensById, getV1OrgsByOrgIdScim, ok, postV1OrgsByOrgIdScimTokens } from '@/lib/api'
+import type { GetV1OrgsByOrgIdScimResponses } from '@zeima/api-contract/client'
 import { errorMessage } from '@/lib/ipc'
 import { useOrgStore } from '@/stores/org'
 
@@ -16,7 +17,7 @@ import { useOrgStore } from '@/stores/org'
 const { t } = useI18n()
 const org = useOrgStore()
 
-type Scim = Reply<'/v1/orgs/{orgId}/scim', 'get'>
+type Scim = GetV1OrgsByOrgIdScimResponses[200]
 const current = ref<Scim | null>(null)
 const name = ref('')
 const fresh = ref('')
@@ -30,7 +31,7 @@ const orgId = () => org.activeId as string
 async function load() {
   if (!org.activeId) return
   try {
-    current.value = ok(await api.GET('/v1/orgs/{orgId}/scim', { params: { path: { orgId: orgId() } } }))
+    current.value = ok(await getV1OrgsByOrgIdScim({ path: { orgId: orgId() } }))
   } catch (err) {
     toast.error(errorMessage(err))
   }
@@ -41,7 +42,7 @@ watch(() => org.activeId, load)
 async function create() {
   busy.value = true
   try {
-    const made = ok(await api.POST('/v1/orgs/{orgId}/scim/tokens', { params: { path: { orgId: orgId() } }, body: { name: name.value.trim() } }))
+    const made = ok(await postV1OrgsByOrgIdScimTokens({ path: { orgId: orgId() }, body: { name: name.value.trim() } }))
     fresh.value = made.token
     name.value = ''
     await load()
@@ -55,7 +56,7 @@ async function create() {
 async function remove() {
   if (!removing.value) return
   try {
-    await api.DELETE('/v1/orgs/{orgId}/scim/tokens/{id}', { params: { path: { orgId: orgId(), id: removing.value } } })
+    await deleteV1OrgsByOrgIdScimTokensById({ path: { orgId: orgId(), id: removing.value } })
     removing.value = null
     fresh.value = ''
     await load()

@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import ConfirmDialog from '@/components/time/ConfirmDialog.vue'
-import { api, ok, type Reply } from '@/lib/api'
+import { deleteV1OrgsByOrgIdSso, getV1OrgsByOrgIdSso, ok, putV1OrgsByOrgIdSso } from '@/lib/api'
+import type { GetV1OrgsByOrgIdSsoResponses } from '@zeima/api-contract/client'
 import { errorMessage } from '@/lib/ipc'
 import { useOrgStore } from '@/stores/org'
 
@@ -20,7 +21,7 @@ import { useOrgStore } from '@/stores/org'
 const { t } = useI18n()
 const org = useOrgStore()
 
-type Sso = Reply<'/v1/orgs/{orgId}/sso', 'get'>
+type Sso = GetV1OrgsByOrgIdSsoResponses[200]
 type Preset = 'entra' | 'google' | 'oidc' | 'saml'
 const PRESETS: Preset[] = ['entra', 'google', 'oidc', 'saml']
 const ENTRA = 'https://login.microsoftonline.com/'
@@ -70,7 +71,7 @@ async function load() {
   if (!org.activeId) return
   loading.value = true
   try {
-    current.value = ok(await api.GET('/v1/orgs/{orgId}/sso', { params: { path: { orgId: orgId() } } }))
+    current.value = ok(await getV1OrgsByOrgIdSso({ path: { orgId: orgId() } }))
     if (current.value?.configured) fill(current.value)
   } catch (err) {
     toast.error(errorMessage(err))
@@ -98,9 +99,7 @@ async function save() {
   saving.value = true
   try {
     current.value = ok(
-      await api.PUT('/v1/orgs/{orgId}/sso', {
-        params: { path: { orgId: orgId() } },
-        body: {
+      await putV1OrgsByOrgIdSso({ path: { orgId: orgId() }, body: {
           protocol: isSaml.value ? 'saml' : 'oidc',
           name: name.value.trim(),
           sourceUrl: sourceUrl.value,
@@ -121,7 +120,7 @@ async function save() {
 
 async function remove() {
   try {
-    await api.DELETE('/v1/orgs/{orgId}/sso', { params: { path: { orgId: orgId() } } })
+    await deleteV1OrgsByOrgIdSso({ path: { orgId: orgId() } })
     toast.success(t('org.sso.removed'))
     name.value = clientId.value = clientSecret.value = domains.value = tenant.value = issuer.value = metadataUrl.value = ''
     await load()

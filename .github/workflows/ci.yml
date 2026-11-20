@@ -77,7 +77,8 @@ jobs:
       - name: TypeScript API types are current
         run: |
           bun run --cwd packages/api-contract generate
-          git diff --exit-code -- packages/api-contract/schema.d.ts \
+          git diff --exit-code -- packages/api-contract/src/generated \
+            && test -z "$(git ls-files --others --exclude-standard packages/api-contract/src/generated)" \
             || { echo "run: bun run --cwd packages/api-contract generate"; exit 1; }
       # A pull request may not break clients of the current API version
       # (SPEC §7: breaking changes need a new /v<n>).

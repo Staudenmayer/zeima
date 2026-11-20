@@ -134,7 +134,7 @@ time/
 │  └─ zeima-addon-sdk/        Rust SDK for WASM addons
 ├─ server/                   (Phase 5) Fastify API (cloud + self-hosted, one image)
 ├─ packages/
-│  ├─ api-contract/          openapi.json (generated, committed) + openapi-typescript types
+│  ├─ api-contract/          openapi.json (generated, committed) + generated TypeScript client (`@hey-api/openapi-ts`)
 │  └─ shared-fixtures/       JSON test vectors shared by Rust and TS (sync merge, permissions)
 ├─ deploy/
 │  ├─ docker-compose.yml     api + keycloak + postgres + caddy
@@ -489,11 +489,11 @@ server/
 - Pagination is cursor-based (`?cursor=&limit=`); IDs are UUIDv7.
 - **Code generation from `openapi.json`**:
   - Desktop Rust client: `progenitor` → `crates/zeima-api-client`.
-  - Vue: `openapi-typescript` + `openapi-fetch`.
+  - Vue: `@hey-api/openapi-ts` (types, SDK functions and the fetch client).
 
 **How the desktop talks to the API**
 - **Sync and presence** run in Rust (in the background, even when the window is hidden).
-- **Online-only org screens** (admin, team views, meetings) call the API from Vue with `openapi-fetch`, using `@tauri-apps/plugin-http` as the fetch implementation. That avoids CSP/CORS issues with a configurable server URL.
+- **Online-only org screens** (admin, team views, meetings) call the API from Vue with the generated SDK, using `@tauri-apps/plugin-http` as the fetch implementation. That avoids CSP/CORS issues with a configurable server URL.
 - The **access token** comes from the Rust command `auth_access_token()`. The refresh token never leaves Rust or the keychain.
 
 ### 7.2 Authentication & Authorization (Keycloak)
