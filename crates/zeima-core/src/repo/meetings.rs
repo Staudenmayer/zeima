@@ -178,6 +178,23 @@ fn trimmed(text: &Option<String>) -> Option<String> {
         .map(String::from)
 }
 
+/// The serialized form of `text` if it is an http(s) address without control characters.
+pub(super) fn valid_online_url(text: &str) -> Option<String> {
+    if text.chars().any(char::is_control) {
+        return None;
+    }
+    let url = url::Url::parse(text).ok()?;
+    (matches!(url.scheme(), "http" | "https") && url.host_str().is_some()).then(|| url.to_string())
+}
+
+/// Whether `rule` only holds characters a repeat rule is written with.
+fn is_plain_rule(rule: &str) -> bool {
+    !rule.is_empty()
+        && rule
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || "=;,:+-".contains(c))
+}
+
 impl MeetingInput {
     fn normalized(mut self, me: &str, default_tz: &str) -> Result<Self> {
         self.title = self.title.trim().to_string();
@@ -194,7 +211,7 @@ impl MeetingInput {
         self.room_id = trimmed(&self.room_id);
         self.online_url = trimmed(&self.online_url);
         if let Some(url) = &self.online_url {
-            if !url.starts_with("https://") && !url.starts_with("http://") {
+            if valid_online_url(url).is_none() {
                 return Err(Error::validation(
                     "onlineUrl",
                     "must be a web address (https://…)",
@@ -610,7 +627,10 @@ impl Core {
             t.replace('\\', "\\\\")
                 .replace(';', "\\;")
                 .replace(',', "\\,")
+                .replace("\r\n", "\n")
+                .replace('\r', "\n")
                 .replace('\n', "\\n")
+                .replace(char::is_control, "")
         };
         let mut lines = vec![
             "BEGIN:VCALENDAR".to_string(),
@@ -623,13 +643,13 @@ impl Core {
             format!("DTEND:{}", stamp(m.end_at)),
             format!("SUMMARY:{}", esc(&m.title)),
         ];
-        if let Some(rule) = &m.rrule {
+        if let Some(rule) = m.rrule.as_deref().filter(|r| is_plain_rule(r)) {
             lines.push(format!("RRULE:{rule}"));
         }
         if let Some(l) = &m.location {
             lines.push(format!("LOCATION:{}", esc(l)));
         }
-        if let Some(u) = &m.online_url {
+        if let Some(u) = m.online_url.as_deref().and_then(valid_online_url) {
             lines.push(format!("URL:{u}"));
         }
         if !m.note.is_empty() {

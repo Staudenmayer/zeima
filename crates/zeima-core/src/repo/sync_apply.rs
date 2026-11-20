@@ -743,6 +743,14 @@ impl Core {
                 if column == "id" || !cols.contains(&column) {
                     continue;
                 }
+                // A web address that does not parse is dropped, not stored.
+                if table == "meeting" && name == "onlineUrl" {
+                    if let Value::String(text) = &field.v {
+                        if super::meetings::valid_online_url(text).is_none() {
+                            continue;
+                        }
+                    }
+                }
                 // References to rows that have other ids on this device.
                 let reference = REFERENCES
                     .iter()
