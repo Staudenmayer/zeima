@@ -247,7 +247,10 @@ mod portable_tests {
         let bad = serde_json::json!({"timezone": "Not/AZone"});
         assert_eq!(with_portable(&mine, &bad), mine);
         let good = serde_json::json!({"timezone": "Asia/Tokyo"});
-        assert_eq!(with_portable(&mine, &good).timezone.as_deref(), Some("Asia/Tokyo"));
+        assert_eq!(
+            with_portable(&mine, &good).timezone.as_deref(),
+            Some("Asia/Tokyo")
+        );
         let none = AppSettings::default();
         assert_eq!(with_portable(&none, &bad), none);
     }

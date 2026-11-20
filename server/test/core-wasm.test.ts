@@ -12,7 +12,7 @@ describe.skipIf(!built)('@zeima/core-wasm', () => {
   const core = built ? (createRequire(import.meta.url)(PKG.pathname) as typeof import('../../packages/core-wasm/pkg/zeima_core_wasm.js')) : (null as never)
 
   it('lists the bundled country profiles', () => {
-    expect(JSON.parse(core.profiles()).map((p: { id: string }) => p.id)).toEqual(['AT', 'DE', 'CH'])
+    expect(JSON.parse(core.profiles()).map((p: { id: string }) => p.id)).toEqual(['AT', 'CH', 'DE'])
     expect(JSON.parse(core.suggestProfile('de-AT'))).toBe('AT')
   })
 

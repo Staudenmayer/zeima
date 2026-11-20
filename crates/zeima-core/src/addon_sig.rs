@@ -15,7 +15,7 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -264,12 +264,7 @@ mod tests {
         assert!(signed_by(1, "pub", true, "pub").continues(&installed));
         assert!(signed_by(1, "pub", false, "pub").continues(&installed));
         // (a) The key is not known: only the claimed id matches.
-        let unknown = check(
-            b"m",
-            b"w",
-            Some(r#"{"keyId":"pub","signature":"AAAA"}"#),
-            &[],
-        );
+        let unknown = check(b"m", b"w", Some(r#"{"keyId":"pub","signature":"AAAA"}"#), &[]);
         assert_eq!(unknown.status, SignatureStatus::UnknownKey);
         assert!(!unknown.continues(&installed));
         // (b) The id now belongs to a different, server-published key.

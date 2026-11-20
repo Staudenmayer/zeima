@@ -16,8 +16,8 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use ed25519_dalek::Signature;
 pub use ed25519_dalek::VerifyingKey;
-use ed25519_dalek::{Signature, Verifier};
 use serde::{Deserialize, Serialize};
 
 pub const TOKEN_TYPE: &str = "zeima-entitlement+jwt";

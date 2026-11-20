@@ -65,7 +65,7 @@ impl Core {
     pub async fn open(path: &Path, clock: Arc<dyn Clock>) -> Result<Self> {
         // The folder is the owner's alone (Unix), and so is the file with everything in it.
         if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-            crate::fsperm::private_dir(parent).map_err(|e| sqlx::Error::Io(e))?;
+            crate::fsperm::private_dir(parent).map_err(sqlx::Error::Io)?;
         }
         let options = SqliteConnectOptions::new()
             .filename(path)
