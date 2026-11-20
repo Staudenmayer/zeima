@@ -73,6 +73,19 @@ export async function deleteOrganization(db: Db, orgId: string) {
   })
 }
 
+/**
+ * Deletes one person's data in an organization's shared workspace: their entries, pauses and the sync state of
+ * both. Shared projects and tags, other members' rows and the person's personal workspace stay.
+ * Call it in the transaction that removes the membership.
+ */
+export async function purgeMemberOrgData(db: Pick<Db, 'execute'>, orgId: string, userId: string) {
+  const ws = sql`(select id from workspace where org_id = ${orgId})`
+  await db.execute(sql`delete from sync_row where workspace_id in ${ws} and table_name in ('time_entry', 'pause') and (fields -> 'userId' ->> 'v' = ${userId} or row_id in (select id from time_entry where workspace_id in ${ws} and user_id = ${userId} union select id from pause where workspace_id in ${ws} and user_id = ${userId}))`)
+  await db.execute(sql`delete from time_entry_tag where entry_id in (select id from time_entry where workspace_id in ${ws} and user_id = ${userId})`)
+  await db.execute(sql`delete from pause where workspace_id in ${ws} and user_id = ${userId}`)
+  await db.execute(sql`delete from time_entry where workspace_id in ${ws} and user_id = ${userId}`)
+}
+
 export async function createOrganization(
   db: Db,
   kc: KeycloakAdmin,

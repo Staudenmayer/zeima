@@ -151,3 +151,64 @@ async fn scoped_handles_share_settings_and_the_event_stream() {
     .unwrap();
     assert!(events.try_recv().is_ok());
 }
+
+#[tokio::test]
+async fn removing_an_org_workspace_deletes_its_data_and_leaves_the_personal_one() {
+    let (personal, org) = setup().await;
+    personal.create_project(project("Mine")).await.unwrap();
+    org.create_project(project("Shared")).await.unwrap();
+    let activity = org
+        .create_activity(ActivityInput {
+            name: "Work".into(),
+            color: "#111111".into(),
+            archived: false,
+        })
+        .await
+        .unwrap();
+    org.create_entry(EntryInput {
+        activity_id: Some(activity.id),
+        project_id: None,
+        start_at: T0,
+        end_at: Some(T0 + HOUR),
+        tz: Some("UTC".into()),
+        note: "org work".into(),
+        billable: None,
+        tag_ids: vec![],
+        cost_center_id: None,
+    })
+    .await
+    .unwrap();
+    let range = Range {
+        from: T0 - HOUR,
+        to: T0 + 2 * HOUR,
+    };
+
+    // The personal workspace is never removed this way.
+    assert!(!personal
+        .remove_org_workspace(&personal.ctx().workspace_id)
+        .await
+        .unwrap());
+    assert!(personal.remove_org_workspace(ORG_WS).await.unwrap());
+    assert!(!personal.remove_org_workspace(ORG_WS).await.unwrap());
+
+    let all = personal.workspaces().await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].kind, "personal");
+    let mine: Vec<_> = personal
+        .list_projects(false)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+    assert_eq!(mine, vec!["Mine"]);
+
+    // Joining again starts empty.
+    personal
+        .adopt_org_workspace(ORG_WS, ORG, "Acme", ME, "Ada")
+        .await
+        .unwrap();
+    let again = personal.scoped(ORG_WS, ME);
+    assert!(again.list_projects(false).await.unwrap().is_empty());
+    assert!(again.list_entries(range).await.unwrap().is_empty());
+}

@@ -20,7 +20,7 @@ import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { authorize } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
-import { audit, listMembers, type MemberRow, requireSeat, seatUsage } from './service.ts'
+import { audit, listMembers, type MemberRow, purgeMemberOrgData, requireSeat, seatUsage } from './service.ts'
 
 const OrgParams = Type.Object({ orgId: Type.String({ format: 'uuid' }) })
 const USER = 'urn:ietf:params:scim:schemas:core:2.0:User'
@@ -333,7 +333,10 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
           // The account is also somebody else's (another organization, or the person's own); switching it off
           // would lock them out of those too. Taking them out of this organization ends this organization's access.
           await kc.removeMember(orgId, m.id)
-          await db.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
+          await db.transaction(async (tx) => {
+            await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
+            await purgeMemberOrgData(tx, orgId, m.id)
+          })
           await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim', key, reason: 'deactivated, account belongs to other organizations' } })
           return 'removed' as const
         }
@@ -474,7 +477,10 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
         await changeable(orgId, m)
         const db = database()
         await keycloak().removeMember(orgId, m.id)
-        await db.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
+        await db.transaction(async (tx) => {
+          await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, m.id)))
+          await purgeMemberOrgData(tx, orgId, m.id)
+        })
         await audit(db, { orgId, actorId: null, action: 'member.remove', target: m.id, detail: { via: 'scim', key: request.scimKey } })
         return reply.code(204).send(null)
       })

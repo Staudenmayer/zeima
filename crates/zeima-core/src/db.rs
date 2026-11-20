@@ -285,6 +285,77 @@ impl Core {
         Ok(())
     }
 
+    /// Removes an organization's shared workspace from this device, with everything in it: entries, pauses,
+    /// projects, tags, every other per-workspace table, the change log and what is remembered of the server's
+    /// state for those rows. Used when the server no longer lists the workspace (the person left or was removed).
+    /// Refuses the personal workspace. Returns whether a workspace was removed. All or nothing.
+    pub async fn remove_org_workspace(&self, workspace_id: &str) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let kind: Option<String> = sqlx::query_scalar("SELECT kind FROM workspace WHERE id = ?")
+            .bind(workspace_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if kind.as_deref() != Some("org") {
+            return Ok(false);
+        }
+        // Rows refer to each other (pauses to entries, entries to projects); check only at the end.
+        sqlx::query("PRAGMA defer_foreign_keys = ON")
+            .execute(&mut *tx)
+            .await?;
+        let tables: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT m.name, EXISTS (SELECT 1 FROM pragma_table_info(m.name) WHERE name = 'id')
+             FROM sqlite_master m
+             WHERE m.type = 'table' AND m.name NOT IN ('workspace', 'change_log')
+               AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) WHERE name = 'workspace_id')",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM time_entry_tag WHERE entry_id IN (SELECT id FROM time_entry WHERE workspace_id = ?)",
+        )
+        .bind(workspace_id)
+        .execute(&mut *tx)
+        .await?;
+        for (table, has_id) in &tables {
+            if *has_id != 0 {
+                for state in ["sync_state", "sync_conflict"] {
+                    sqlx::query(sqlx::AssertSqlSafe(format!(
+                        "DELETE FROM {state} WHERE table_name = ?1 AND row_id IN (SELECT id FROM \"{table}\" WHERE workspace_id = ?2)"
+                    )))
+                    .bind(table)
+                    .bind(workspace_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "DELETE FROM sync_alias WHERE table_name = ?1 AND local_id IN (SELECT id FROM \"{table}\" WHERE workspace_id = ?2)"
+                )))
+                .bind(table)
+                .bind(workspace_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        for (table, _) in &tables {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM \"{table}\" WHERE workspace_id = ?"
+            )))
+            .bind(workspace_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        sqlx::query("DELETE FROM change_log WHERE workspace_id = ?")
+            .bind(workspace_id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM workspace WHERE id = ?")
+            .bind(workspace_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
     /// The workspaces on this device: the personal one and organizations'.
     pub async fn workspaces(&self) -> Result<Vec<WorkspaceInfo>> {
         let rows = sqlx::query(

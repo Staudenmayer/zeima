@@ -659,7 +659,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Removes a member from the organization (their account and their own data stay) */
+        /** Removes a member from the organization (their account and personal workspace stay; their data in this organization is deleted) */
         delete: {
             parameters: {
                 query?: never;

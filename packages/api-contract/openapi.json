@@ -1183,7 +1183,7 @@
         }
       },
       "delete": {
-        "summary": "Removes a member from the organization (their account and their own data stay)",
+        "summary": "Removes a member from the organization (their account and personal workspace stay; their data in this organization is deleted)",
         "tags": [
           "organizations"
         ],

@@ -360,6 +360,31 @@ async fn refresh_entitlement(app: &AppHandle, api: &str, token: &str) {
     }
 }
 
+/// Removes the organizations' workspaces on this device that the server no longer lists for this account,
+/// with their data. If the person was working in one, they are taken back to their personal workspace first.
+async fn drop_gone_workspaces(app: &AppHandle, listed: &[ServerWorkspace]) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let local = state.core.workspaces().await.map_err(|e| e.to_string())?;
+    let mut removed = false;
+    for w in local.iter().filter(|w| w.kind == "org") {
+        if listed.iter().any(|s| s.id == w.id) {
+            continue;
+        }
+        if state.data().ctx().workspace_id == w.id {
+            crate::workspaces::go_personal(app).await;
+        }
+        removed |= state
+            .core
+            .remove_org_workspace(&w.id)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    if removed {
+        crate::workspaces::workspace_changed(app).await;
+    }
+    Ok(())
+}
+
 /// The organizations' shared workspaces the server lists for this account,
 /// recorded on this device, each with a handle that acts in it as the
 /// account (whose id is the token's subject).
@@ -385,12 +410,12 @@ async fn adopt_shared_workspaces(
     core.set_meta(zeima_core::ACCOUNT_GROUPS_KEY, &groups)
         .await
         .map_err(|e| e.to_string())?;
+    let listed = serde_json::from_value::<Vec<ServerWorkspace>>(list)
+        .map_err(|e| format!("the server's answer: {e}"))?;
+    // Only after a good answer: organizations the person left, or was removed from, vanish with their data.
+    drop_gone_workspaces(app, &listed).await?;
     let mut shared = Vec::new();
-    for w in serde_json::from_value::<Vec<ServerWorkspace>>(list)
-        .map_err(|e| format!("the server's answer: {e}"))?
-        .into_iter()
-        .filter(|w| w.kind == "org")
-    {
+    for w in listed.into_iter().filter(|w| w.kind == "org") {
         let Some(org_id) = w.org_id.as_deref() else {
             continue;
         };

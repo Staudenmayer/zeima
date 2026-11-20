@@ -4,6 +4,7 @@ import { commands, type OrgPolicy, type PolicySettings } from '@/bindings'
 import { api, ok } from '@/lib/api'
 import { call } from '@/lib/ipc'
 import i18n from '@/plugins/i18n'
+import { useWorkspaceStore } from '@/stores/workspace'
 
 /** A built-in role's name (`admin`) or the id of a role the organization made. */
 export type OrgRole = string
@@ -316,7 +317,14 @@ export const useOrgStore = defineStore('org', () => {
   }
 
   async function removeMember(userId: string) {
+    const leaving = userId === myId.value
     await api.DELETE('/v1/orgs/{orgId}/members/{userId}', { params: { path: { orgId: orgId(), userId } } })
+    if (leaving) {
+      // The organization is gone from the person's list: a sync drops its workspace and data from this device,
+      // then the workspace selector and the organization list follow.
+      await call(commands.syncNow()).catch(() => {})
+      await useWorkspaceStore().load().catch(() => {})
+    }
     await load()
   }
 
