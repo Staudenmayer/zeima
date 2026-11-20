@@ -34,6 +34,8 @@ spec:
         app.kubernetes.io/name: {{ .Release.Name }}-keycloak
         {{- include "zeima.labels" . | nindent 8 }}
     spec:
+      # Nothing in the pod talks to the Kubernetes API.
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}

@@ -129,6 +129,20 @@ const LDAP_NAME = 'zeima-ldap'
 /** The Keycloak alias of an organization's identity provider; it is part of the address the provider redirects to. */
 export const ssoAlias = (orgId: string) => `sso-${orgId}`
 
+/**
+ * The settings of a parsed OIDC or SAML document that are kept: its addresses, issuer, entity ids and
+ * certificates. Everything else in the parser's answer is dropped, so a document cannot set other
+ * provider options (the ones that matter are set below).
+ */
+export const IMPORTED_SSO_KEYS: ReadonlySet<string> = new Set([
+  'issuer', 'authorizationUrl', 'tokenUrl', 'userInfoUrl', 'jwksUrl', 'logoutUrl', 'tokenIntrospectionUrl', 'metadataDescriptorUrl',
+  'singleSignOnServiceUrl', 'singleLogoutServiceUrl', 'artifactResolutionServiceUrl',
+  'entityId', 'idpEntityId', 'signingCertificate', 'encryptionPublicKey',
+])
+
+const pickImported = (imported: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.entries(imported).filter(([k]) => IMPORTED_SSO_KEYS.has(k)))
+
 export interface KcUser {
   id: string
   email: string | null
@@ -431,7 +445,7 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
     const alias = ssoAlias(orgId)
     const existing = await this.idp(alias)
     const config: Record<string, string> = {
-      ...imported,
+      ...pickImported(imported),
       syncMode: 'IMPORT',
       'zeima.sourceUrl': input.sourceUrl,
     }

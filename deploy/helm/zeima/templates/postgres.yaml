@@ -44,6 +44,8 @@ spec:
         app.kubernetes.io/name: {{ .Release.Name }}-postgres
         {{- include "zeima.labels" . | nindent 8 }}
     spec:
+      # Nothing in the pod talks to the Kubernetes API.
+      automountServiceAccountToken: false
       # The image's postgres user is 999; the volume is made writable for that group.
       securityContext:
         fsGroup: 999

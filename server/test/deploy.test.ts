@@ -79,6 +79,22 @@ describe.skipIf(!haveHelm)('the Helm chart', () => {
     expect(render(['exposeKeycloakAdmin=true']).split('\n---\n').find((d) => d.includes('kind: Ingress'))!).toMatch(/host: "id.zeima.example.com"[\s\S]*path: \//)
   })
 
+  it('excludes every non-public range from the egress to the internet, in both egress policies', () => {
+    const docs = render().split('\n---\n')
+    for (const name of ['zeima-api-egress', 'zeima-keycloak-egress']) {
+      const doc = docs.find((d) => d.includes(`name: ${name}`))!
+      for (const cidr of ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4', '240.0.0.0/4']) {
+        expect(doc, `${name}: ${cidr}`).toContain(`"${cidr}"`)
+      }
+    }
+  })
+
+  it('does not hand the Kubernetes API token to any pod', () => {
+    const pods = render().split('\n---\n').filter((d) => /kind: (Deployment|StatefulSet)\n/.test(d))
+    expect(pods.length).toBe(3)
+    for (const pod of pods) expect(pod).toContain('automountServiceAccountToken: false')
+  })
+
   it('keeps Keycloak\'s events off the public API port and limits who talks to whom', () => {
     const out = render()
     expect(out).toContain('name: INTERNAL_PORT')
