@@ -453,5 +453,8 @@ async fn merge_combines_entries_with_the_given_values() {
     assert!(merged.billable);
     assert!(core.get_entry(&b.id).await.is_err());
 
-    assert!(core.merge_entries(&[a.id.clone()], input).await.is_err());
+    assert!(core
+        .merge_entries(std::slice::from_ref(&a.id), input)
+        .await
+        .is_err());
 }

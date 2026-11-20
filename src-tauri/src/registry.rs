@@ -373,7 +373,7 @@ pub async fn addon_registry(
             blocked: addons.install_blocked(&e.id, &claimed),
         });
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(RegistryView {
         addons: out,
         error: None,
