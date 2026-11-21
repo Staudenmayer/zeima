@@ -63,7 +63,7 @@ organization:
   tables and routes without changing the old ones. A 2.0 app against an older
   server syncs its personal workspace as before; the organization pages show
   the server's "not found" error there.
-- **Security hardening** (docs/security.md): read the "2.0 (security release)" row of docs/upgrading.md before you update.
+- **Security hardening**: read the "2.0 (security release)" row of docs/upgrading.md before you update.
   New required setting `APP_DB_PASSWORD`; rebuild Keycloak; the sign-in host no longer shows Keycloak's admin console; email
   verification and single sign-on domain proof are on by default; the apps refuse a server whose sign-in service is on another site;
   addons ask for consent in a native window.

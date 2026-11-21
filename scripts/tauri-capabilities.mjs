@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Which window may call which of the app's commands (docs/security.md, ZE-14). A compromised page in a small window
+// Which window may call which of the app's commands. A compromised page in a small window
 // (quick switch, prompt) must not be able to install addons or call the organization API, so those windows get only
 // the commands their code can reach; the main window gets all of them.
 //

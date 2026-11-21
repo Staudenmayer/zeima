@@ -8,7 +8,7 @@ const dir = join(import.meta.dirname, '../../src-tauri/capabilities')
 const committed = (name: string) => JSON.parse(readFileSync(join(dir, name), 'utf8')) as { windows: string[]; permissions: string[] }
 const allow = (c: string) => `allow-${c.replace(/_/g, '-')}`
 
-describe('what each window may call (docs/security.md, ZE-14)', () => {
+describe('what each window may call', () => {
   const made = capabilities() as Record<string, { permissions: string[] }>
 
   it('is what scripts/tauri-capabilities.mjs makes: run it again when a command or an import changes', () => {
