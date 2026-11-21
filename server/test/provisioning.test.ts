@@ -300,6 +300,18 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       await db.db.delete(schema.workspace)
     })
 
+    it('drops a person\'s group memberships in the organization when SCIM removes them', async () => {
+      const person = id(69)
+      await db.db.insert(schema.kcUser).values({ id: person, email: 'p69@acme.example', displayName: 'P' }).onConflictDoNothing()
+      await db.db.insert(schema.kcOrgMember).values({ orgId: ORG, userId: person, role: 'member' })
+      const group = id(869)
+      await db.db.insert(schema.kcGroup).values({ id: group, orgId: ORG, path: '/scim-removal-group' })
+      await db.db.insert(schema.kcGroupMember).values({ groupId: group, userId: person })
+      expect((await scim('DELETE', `/Users/${person}`)).statusCode).toBe(204)
+      expect(await db.db.select().from(schema.kcGroupMember).where(eq(schema.kcGroupMember.userId, person))).toEqual([])
+      await db.db.delete(schema.kcGroup).where(eq(schema.kcGroup.id, group))
+    })
+
     it('is not put back by a check against Keycloak that read the list before SCIM removed them', async () => {
       const person = id(68)
       await db.db.insert(schema.kcUser).values({ id: person, email: 'p68@acme.example', displayName: 'P' }).onConflictDoNothing()

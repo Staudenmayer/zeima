@@ -11,7 +11,7 @@
 
 import { createHash, randomBytes } from 'node:crypto'
 import type { FastifyPluginAsyncTypebox, TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { Type } from 'typebox'
 import type { Config } from '../../config.ts'
@@ -330,6 +330,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
           await keycloak().removeMember(orgId, userId)
           await lockPushOrder(tx)
           await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), eq(schema.kcOrgMember.userId, userId)))
+          await tx.execute(sql`delete from kc_group_member where user_id = ${userId} and group_id in (select id from kc_group where org_id = ${orgId})`)
           await purgeMemberOrgData(tx, orgId, userId)
         })
 
