@@ -16,7 +16,8 @@ import { Quota } from '../../plugins/quota.ts'
 import { PRESENCE_STATES, type PresenceState } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { reconcileOrganization } from './reconcile.ts'
-import { forgetMembership, forgetOrganizationMemberships, forgetRoles, loadRoles, roleOf } from './roles.ts'
+import { forgetAccount } from '../../plugins/identity.ts'
+import { forgetMembership, forgetMemberships, forgetOrganizationMemberships, forgetRoles, loadRoles, roleOf } from './roles.ts'
 import { lockPushOrder } from '../../db/locks.ts'
 import { freeBusy } from '../../meetings/freebusy.ts'
 import { roomBookings } from '../../meetings/rooms.ts'
@@ -302,6 +303,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         }
         await kc.setEnabled(userId, active)
         await db.update(schema.kcUser).set({ active }).where(eq(schema.kcUser.id, userId))
+        forgetAccount(userId)
         await audit(db, { orgId, actorId: actor.user.id, action: active ? 'member.reactivate' : 'member.deactivate', target: userId })
       }
       return (await memberOf(db, orgId, userId))!
@@ -1163,7 +1165,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         throw new HttpProblem(502, 'keycloak_failed', 'Keycloak could not delete the role')
       }
       forgetRoles(orgId)
-      for (const userId of held) forgetMembership(userId)
+      forgetMemberships(orgId, held)
       await audit(db, { orgId, actorId: actor.user.id, action: 'role.delete', target: role.name })
       return reply.code(204).send(null)
     },

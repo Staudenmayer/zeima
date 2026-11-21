@@ -10,6 +10,7 @@ import fp from 'fastify-plugin'
 import { type Db, schema } from '../../db/index.ts'
 import { HttpProblem } from '../../plugins/errors.ts'
 import type { OrgMembership } from '../../plugins/auth.ts'
+import { announce, MAX_INV_USERS } from '../../plugins/invalidation.ts'
 import { type BuiltinRole, defaultPermissions, isBuiltinRole, ORG_ROLES, type Permissions, type RoleKey, type Scope, SCOPES } from '../../plugins/permissions.ts'
 
 export interface RoleView {
@@ -57,9 +58,15 @@ export async function roleOf(db: Db, orgId: string, key: RoleKey): Promise<RoleV
 const TTL_MS = 10_000
 const cache = new Map<string, { at: number; byKey: Map<RoleKey, Permissions> }>()
 
-/** Call after a role changed, so this process sees it at once (others within seconds). */
-export function forgetRoles(orgId: string) {
+/** Drops the entry in this process only (what a message from another replica does). */
+export function dropRoles(orgId: string) {
   cache.delete(orgId)
+}
+
+/** Call after a role changed, so this process sees it at once and the other replicas are told. */
+export function forgetRoles(orgId: string) {
+  dropRoles(orgId)
+  announce({ k: 'inv', what: 'roles', org: orgId })
 }
 
 /** What a role of an organization allows now. */
@@ -84,14 +91,56 @@ const memberships = new Map<string, { at: number; orgs: Map<string, Mirrored> }>
 /** People remembered at most; a bigger crowd than this is served from the database. */
 export const MEMBERSHIP_CACHE_MAX = 10_000
 
-/** Call after a person joined, left, or changed role or department, so this process sees it at once (others within seconds). */
-export function forgetMembership(userId: string) {
+export function dropMembership(userId: string) {
   memberships.delete(userId)
+}
+
+/** Drops what this process remembers of the people of an organization, of `users` (who may have just joined it) and, with `all`, of everybody. */
+export function dropOrganizationMemberships(orgId: string, users: readonly string[] = [], all = false) {
+  if (all) return memberships.clear()
+  for (const [userId, known] of memberships) if (known.orgs.has(orgId)) memberships.delete(userId)
+  for (const userId of users) memberships.delete(userId)
+}
+
+/** Empties both caches of this process (after the bus connection was lost and may have missed messages). */
+export function clearAuthCaches() {
+  memberships.clear()
+  cache.clear()
+}
+
+/** Call after a person joined, left, or changed role or department, so this process sees it at once and the other replicas are told. */
+export function forgetMembership(userId: string) {
+  dropMembership(userId)
+  announce({ k: 'inv', what: 'membership', user: userId })
+}
+
+/** More affected people than this are announced as one message for the organization instead of one each. */
+export const BULK_ANNOUNCE_USERS = 20
+
+/** Most messages (of `MAX_INV_USERS` people each) a bulk change may take; beyond that every replica empties its whole membership cache. */
+export const BULK_ANNOUNCE_MESSAGES = 5
+
+/**
+ * Like `forgetMembership` for several people of one organization: one message per person, or when it is many, messages
+ * for the organization that also name the people (the other replicas cannot find people who just joined by the
+ * organization alone), or one "empty everything" beyond that.
+ */
+export function forgetMemberships(orgId: string, userIds: Iterable<string>) {
+  const ids = [...new Set(userIds)]
+  if (ids.length <= BULK_ANNOUNCE_USERS) {
+    for (const id of ids) forgetMembership(id)
+    return
+  }
+  for (const id of ids) dropMembership(id)
+  dropOrganizationMemberships(orgId)
+  if (ids.length > BULK_ANNOUNCE_MESSAGES * MAX_INV_USERS) return announce({ k: 'inv', what: 'orgMemberships', org: orgId, all: true })
+  for (let i = 0; i < ids.length; i += MAX_INV_USERS) announce({ k: 'inv', what: 'orgMemberships', org: orgId, users: ids.slice(i, i + MAX_INV_USERS) })
 }
 
 /** Call after the departments or the members of a whole organization changed (a department renamed or deleted, the organization deleted). */
 export function forgetOrganizationMemberships(orgId: string) {
-  for (const [userId, known] of memberships) if (known.orgs.has(orgId)) memberships.delete(userId)
+  dropOrganizationMemberships(orgId)
+  announce({ k: 'inv', what: 'orgMemberships', org: orgId })
 }
 
 /** Stores an entry and keeps the map bounded: expired entries go first, then the oldest. */

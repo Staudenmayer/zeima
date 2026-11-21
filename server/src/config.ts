@@ -70,6 +70,27 @@ export const EnvSchema = Type.Object({
   SSO_CHALLENGE_SECRET: Type.Optional(Type.String({ minLength: 16 })),
   /** Hours between checks of the member and department mirror against Keycloak; 0 turns the check off. */
   RECONCILE_INTERVAL_HOURS: Type.Integer({ minimum: 0, maximum: 720, default: 24 }),
+  /** Milliseconds between a shutdown signal and closing connections: /readyz answers 503 meanwhile, and WebSockets are closed (1012) spread over it. */
+  SHUTDOWN_DRAIN_MS: Type.Integer({ minimum: 0, maximum: 300_000, default: 10_000 }),
+  /**
+   * How API replicas tell each other about pushes and stale caches: `pg` (PostgreSQL LISTEN/NOTIFY on one extra
+   * connection per replica) or `memory` (nobody to tell: one replica). Default: `pg`, except `memory` when NODE_ENV is `test`.
+   */
+  BUS: Type.Optional(Type.Union([Type.Literal('pg'), Type.Literal('memory')])),
+  /** Connection string for the bus's LISTEN connection when DATABASE_URL goes through a pooler that cannot LISTEN (transaction mode). Default: DATABASE_URL. */
+  BUS_DATABASE_URL: Type.Optional(Type.String({ minLength: 1 })),
+  /** Milliseconds between the bus's own pings (a ping that does not come back means the listening connection was lost silently); 0 turns it off. */
+  BUS_PING_INTERVAL_MS: Type.Integer({ minimum: 0, maximum: 3_600_000, default: 30_000 }),
+  /** Longest wait for a ping to come back. */
+  BUS_PING_TIMEOUT_MS: Type.Integer({ minimum: 10, maximum: 600_000, default: 5_000 }),
+  /** After a lost bus connection comes back, the devices are told to pull spread over a window of 0.5x to 1.5x this many ms (0: at once). */
+  BUS_RESYNC_SPREAD_MS: Type.Integer({ minimum: 0, maximum: 600_000, default: 10_000 }),
+  /** At most one such resync per this many ms. */
+  BUS_RESYNC_MIN_INTERVAL_MS: Type.Integer({ minimum: 0, maximum: 3_600_000, default: 30_000 }),
+  /** Most connections of the pool that connects as the database owner. */
+  DB_OWNER_POOL_MAX: Type.Integer({ minimum: 2, maximum: 500, default: 10 }),
+  /** Most connections of the pool of the restricted login (used when APP_DATABASE_PASSWORD is set). */
+  DB_TENANT_POOL_MAX: Type.Integer({ minimum: 1, maximum: 500, default: 10 }),
 
   /**
    * A folder with the addons this server offers: signed packages and an `index.json`
@@ -114,6 +135,12 @@ export interface Config {
   appDatabasePassword: string | null
   deploymentMode: Env['DEPLOYMENT_MODE']
   databaseUrl: string
+  bus: 'pg' | 'memory'
+  busDatabaseUrl: string
+  busPingIntervalMs: number
+  busPingTimeoutMs: number
+  busResyncSpreadMs: number
+  busResyncMinIntervalMs: number
   keycloak: {
     url: string
     realm: string
@@ -129,6 +156,9 @@ export interface Config {
   keycloakWebhookSecret: string | null
   sso: { allowPrivateUrls: boolean; verifyDomains: boolean; challengeSecret: string | null }
   reconcileIntervalHours: number
+  shutdownDrainMs: number
+  dbOwnerPoolMax: number
+  dbTenantPoolMax: number
   addonRegistryDir: string | null
   jurisdictionsDir: string | null
   allowedClients: string[]
@@ -239,6 +269,12 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     appDatabasePassword: env.APP_DATABASE_PASSWORD ?? null,
     deploymentMode: env.DEPLOYMENT_MODE,
     databaseUrl: env.DATABASE_URL,
+    bus: env.BUS ?? (env.NODE_ENV === 'test' ? 'memory' : 'pg'),
+    busDatabaseUrl: env.BUS_DATABASE_URL ?? env.DATABASE_URL,
+    busPingIntervalMs: env.BUS_PING_INTERVAL_MS,
+    busPingTimeoutMs: env.BUS_PING_TIMEOUT_MS,
+    busResyncSpreadMs: env.BUS_RESYNC_SPREAD_MS,
+    busResyncMinIntervalMs: env.BUS_RESYNC_MIN_INTERVAL_MS,
     keycloak: {
       url: keycloakUrl,
       realm: env.KEYCLOAK_REALM,
@@ -259,6 +295,9 @@ export function loadConfig(source: Record<string, string | undefined> = process.
     keycloakWebhookSecret: env.KEYCLOAK_WEBHOOK_SECRET ?? null,
     sso: { allowPrivateUrls: env.SSO_ALLOW_PRIVATE_URLS, verifyDomains: env.SSO_VERIFY_DOMAINS, challengeSecret: env.SSO_CHALLENGE_SECRET ?? null },
     reconcileIntervalHours: env.RECONCILE_INTERVAL_HOURS,
+    shutdownDrainMs: env.SHUTDOWN_DRAIN_MS,
+    dbOwnerPoolMax: env.DB_OWNER_POOL_MAX,
+    dbTenantPoolMax: env.DB_TENANT_POOL_MAX,
     addonRegistryDir: env.ADDON_REGISTRY_DIR ?? null,
     jurisdictionsDir: env.JURISDICTIONS_DIR ?? null,
     // The Swagger client is accepted only while the API docs are switched on.

@@ -179,7 +179,7 @@ Order is by dependency:
 What 2.0 deliberately does not include, and why:
 - **Calendar write-through of meetings** is not built. Meetings export as `.ics` for any calendar program.
 - **Keycloak event listener.** `deploy/keycloak/listener` (a Keycloak provider, `zeima-webhook`) tells the API about user, group, membership and organization changes (`POST /v1/internal/keycloak-events`); the Keycloak image of the compose files contains it and the realm switches it on. The nightly check and `POST /v1/orgs/:id/reconcile` still back it up.
-- **Several API instances.** Presence is held in one process; a second instance needs a shared channel (Postgres `LISTEN/NOTIFY` or Redis).
+- **Several API instances.** Partly done: replicas share a bus over Postgres `LISTEN/NOTIFY` (`server/src/plugins/bus.ts`): a push tells devices connected to other replicas, and cache invalidations (membership, roles, disabled accounts) reach them at once instead of after their timers. Presence is still held per process and moves onto the bus (or a table) in a later step; do not run more than one replica yet.
 - **Auto-pause per department** is a suggested idle time (the shortest wins when shorter than the person's own), not a forced setting.
 - **Windows and macOS** builds of all this are untested here (only Linux); signing, billing and cloud hosting need the operator's accounts (see `docs/setup-server.md`).
 

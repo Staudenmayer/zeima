@@ -26,6 +26,7 @@ import { meRoutes } from './modules/me/routes.ts'
 import { authPlugin } from './plugins/auth.ts'
 import { rolesPlugin } from './modules/orgs/roles.ts'
 import { realtimePlugin } from './plugins/realtime.ts'
+import { type Bus, busPlugin, MemoryBus, PgBus } from './plugins/bus.ts'
 import { identityPlugin } from './plugins/identity.ts'
 import { docsPlugin } from './plugins/docs.ts'
 import { errorsPlugin } from './plugins/errors.ts'
@@ -42,14 +43,18 @@ export interface AppOptions {
   keycloakAdmin?: KeycloakAdmin | null
   /** Register the modules of both deployment modes. For the API document only. */
   documentAll?: boolean
-  /** Readiness checks; default: Keycloak. */
+  /** Reported by /readyz but never failing it; default: Keycloak. */
   readiness?: Record<string, ReadinessCheck>
+  /** The check that gates /readyz when there is a database (tests make it fail); default: `select 1`. */
+  databaseCheck?: ReadinessCheck
   /** TXT lookups for the proof of an email domain (tests pass their own); default: the DNS. */
   dnsTxt?: (name: string) => Promise<string[][]>
   /** Host name lookups for the safety check of a provider's address (tests pass their own). */
   dnsResolver?: (host: string) => Promise<{ address: string }[]>
   /** Reads a single sign-on provider's metadata document; the real network unless a test gives its own. */
   ssoFetch?: (url: URL) => Promise<string>
+  /** The bus between replicas (tests pass their own); default: from `config.bus`, in-process without a database. */
+  bus?: Bus
 }
 
 export async function buildApp(config: Config, options: AppOptions = {}) {
@@ -82,6 +87,7 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
   // Before the routes: it collects them through onRoute.
   await app.register(docsPlugin, { config })
   await app.register(authPlugin, { config, keys: options.keys })
+  app.decorate('lifecycle', { draining: false })
   await app.register(identityPlugin)
   await app.register(realtimePlugin)
   if (config.metricsEnabled) await app.register(metricsPlugin)
@@ -90,13 +96,21 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
   app.decorate('licensing', new Licensing(config))
   app.decorate('keycloakAdmin', options.keycloakAdmin !== undefined ? options.keycloakAdmin : config.keycloak.admin ? new HttpKeycloakAdmin(config.keycloak.admin, fetch, app.log) : null)
   if (db) app.decorate('db', db)
+  const bus = options.bus ?? (config.bus === 'pg' && db ? new PgBus({ url: config.busDatabaseUrl, log: app.log, pingIntervalMs: config.busPingIntervalMs, pingTimeoutMs: config.busPingTimeoutMs }) : new MemoryBus())
+  await app.register(busPlugin, { bus, resyncSpreadMs: config.busResyncSpreadMs, resyncMinIntervalMs: config.busResyncMinIntervalMs })
   await app.register(rolesPlugin, { membershipTtlMs: config.env === 'test' ? 0 : undefined })
+  // Only the database gates readiness: Keycloak down must not take every replica out of the load balancer.
   await app.register(healthRoutes, {
     cacheMs: config.env === 'test' ? 0 : undefined,
-    checks: {
+    // Reported only: a replica without the bus still serves its own devices, and the cache timers bound the staleness.
+    info: {
       ...(options.readiness ?? { keycloak: keycloakCheck(config.keycloak.jwksUrl) }),
-      ...(db && { database: async () => void (await db.execute(sql`select 1`)) }),
+      ...(bus.kind === 'pg' && { bus: async () => {
+          if (bus.status() !== 'ok') throw new Error('the bus is not listening')
+        },
+      }),
     },
+    checks: db ? { database: options.databaseCheck ?? (async () => void (await db.execute(sql`select 1`))) } : {},
   })
   await app.register(discoveryRoutes, { config })
   await app.register(
@@ -123,6 +137,10 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
 }
 
 declare module 'fastify' {
+  interface FastifyInstance {
+    /** Set when shutdown begins; /readyz answers 503 from then on. */
+    lifecycle: { draining: boolean }
+  }
   interface FastifyContextConfig {
     /** Marks a route that is open on purpose, and says why (see the `onRoute` check in `buildApp`). */
     public?: string

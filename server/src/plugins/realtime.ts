@@ -18,6 +18,8 @@ import { PresenceBoard } from './presence.ts'
 import { eq } from 'drizzle-orm'
 
 export const TOKEN_EXPIRED = 4401
+/** Close code 1012: the server is restarting, reconnect. */
+export const SERVICE_RESTART = 1012
 /** Most devices one account keeps connected; the oldest gives way (a dead connection must not block a reconnect). */
 export const MAX_SOCKETS_PER_USER = 10
 
@@ -59,6 +61,16 @@ export class Hub {
     }
   }
 
+  /** Tells every connected device to pull (after a lost bus connection, when messages may have been missed). */
+  notifyAll() {
+    this.notify(this.clients.keys())
+  }
+
+  /** The people with a connected device now. */
+  connectedUsers(): string[] {
+    return [...this.clients.keys()]
+  }
+
   /** Whether one of the user's devices is connected. */
   has(userId: string) {
     return (this.clients.get(userId)?.size ?? 0) > 0
@@ -87,6 +99,7 @@ declare module 'fastify' {
     presence: PresenceBoard
     /** Tells the members of an organization that presence changed. */
     notifyPresence: (orgId: string) => Promise<void>
+    closeSocketsSpread: (windowMs: number) => Promise<void>
   }
 }
 
@@ -135,9 +148,26 @@ export const realtimePlugin = fp(
       },
     )
 
+    // Asks every device to reconnect (1012 "service restart"), each at a random moment within `windowMs`, so a
+    // restart of one replica does not send all its devices back at the same instant. Resolves when all are closed.
+    app.decorate('closeSocketsSpread', async (windowMs: number) => {
+      const timers: Promise<void>[] = []
+      for (const client of app.websocketServer.clients) {
+        timers.push(
+          new Promise<void>((resolve) => {
+            setTimeout(() => {
+              if (client.readyState === client.OPEN) client.close(SERVICE_RESTART, 'server restarting')
+              resolve()
+            }, Math.random() * Math.max(0, windowMs))
+          }),
+        )
+      }
+      await Promise.all(timers)
+    })
+
     app.addHook('onClose', async () => {
-      // Close sockets so shutdown does not wait for devices.
-      for (const client of app.websocketServer.clients) client.close(1001, 'server shutting down')
+      // Close what is left so shutdown does not wait for devices.
+      for (const client of app.websocketServer.clients) client.close(SERVICE_RESTART, 'server restarting')
     })
   },
   { name: 'realtime', dependencies: ['auth'] },

@@ -13,13 +13,17 @@ import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { Type } from 'typebox'
 import { callerOf, type Db, schema, withUser } from '../../db/index.ts'
-import { lockPushOrder } from '../../db/locks.ts'
+import { isLockTimeout, lockPushOrder } from '../../db/locks.ts'
+
+/** How long a push waits for the cluster-wide push lock. */
+const PUSH_LOCK_TIMEOUT_MS = 3_000
 import type { AuthUser } from '../../plugins/auth.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
 import { Quota } from '../../plugins/quota.ts'
 import { typesAcceptable } from '../../sync/schema.ts'
 import { ensureOrgWorkspace } from '../orgs/service.ts'
+import { publishChanges } from '../../plugins/bus.ts'
 import { checkOrgWrite, visibleToCaller } from './orgrules.ts'
 import { type Change, hlcWallMs, type Json, MAX_CLOCK_AHEAD_MS, merge, type Outcome, type RowState } from '../../sync/merge.ts'
 
@@ -261,7 +265,7 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
           deviceId: Uuid,
           changes: Type.Array(ChangeSchema, { maxItems: MAX_CHANGES }),
         }),
-        response: { 200: Type.Object({ results: Type.Array(OutcomeSchema) }), ...problems(401, 403, 404) },
+        response: { 200: Type.Object({ results: Type.Array(OutcomeSchema) }), ...problems(401, 403, 404, 503) },
       },
     },
     async (request) => {
@@ -279,8 +283,16 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
         if (!ws) throw new HttpProblem(404, 'not_found', 'no such workspace')
         // Pull pages by `seq`, which is taken when a row is written but only visible when its transaction commits. Pushes
         // therefore commit one at a time in the order of their numbers; otherwise a device could pass a number whose row
-        // is not visible yet and never receive it. (One API process; a push is short.)
-        await lockPushOrder(tx)
+        // is not visible yet and never receive it. The lock is a PostgreSQL advisory lock, so it holds across the whole
+        // cluster (every API replica), not just one process: seq numbers are taken inside the transaction and the lock
+        // is released only at commit, so no other push can take a higher number and commit before this one. A push is
+        // short; if the lock stays taken for 3 s something is wrong, and the device is told to retry instead of piling up.
+        try {
+          await lockPushOrder(tx, { timeoutMs: PUSH_LOCK_TIMEOUT_MS })
+        } catch (err) {
+          if (isLockTimeout(err)) throw new HttpProblem(503, 'busy', 'the server is busy; try again shortly', { 'retry-after': '2' })
+          throw err
+        }
         // Membership is read again under the lock: a person removed a moment ago must not write rows that stay behind.
         if (ws.kind === 'org' && ws.orgId) {
           const member = await tx.execute(sql`select 1 from kc_org_member where org_id = ${ws.orgId} and user_id = ${user.id}`)
@@ -346,6 +358,8 @@ export const syncRoutes: FastifyPluginAsyncTypebox = async (app) => {
             for (const m of members) users.add(m.id)
           }
           app.hub.notify(users, request.body.deviceId)
+          // The devices of these users that are connected to other replicas.
+          publishChanges({ publish: app.publishBus }, users, request.body.deviceId)
         }
         return { results }
       })

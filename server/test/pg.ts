@@ -12,7 +12,7 @@ export async function reachable() {
   return ok
 }
 
-export async function createTestDatabase(): Promise<{ db: Db; drop: () => Promise<void> }> {
+export async function createTestDatabase(): Promise<{ db: Db; url: string; drop: () => Promise<void> }> {
   const name = `zeima_test_${process.pid}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
   const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} })
   await admin.unsafe(`create database ${name}`)
@@ -23,6 +23,7 @@ export async function createTestDatabase(): Promise<{ db: Db; drop: () => Promis
   await migrateDb(conn.db)
   return {
     db: conn.db,
+    url: url.toString(),
     drop: async () => {
       await conn.client.end()
       await admin.unsafe(`drop database if exists ${name} with (force)`).catch(() => {})

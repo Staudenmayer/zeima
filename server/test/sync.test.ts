@@ -5,6 +5,7 @@ import postgres from 'postgres'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { App } from '../src/app.ts'
 import { connect, migrateDb } from '../src/db/index.ts'
+import { PUSH_ORDER_LOCK } from '../src/db/locks.ts'
 import { testApp, token } from './helpers.ts'
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL ?? 'postgres://zeima:zeima@localhost:5432/postgres'
@@ -185,4 +186,27 @@ describe.skipIf(!reachable)('sync API', () => {
     expect((await push(ADA, [change('not-a-uuid', hlc(1), {})])).statusCode).toBe(400)
     expect((await push(ADA, [change(P1, 'bad-clock', {})])).statusCode).toBe(400)
   })
+
+  it('answers 503 with Retry-After when the push lock stays taken, and recovers after', async () => {
+    const url = new URL(ADMIN_URL)
+    url.pathname = `/${NAME}`
+    const holder = postgres(url.toString(), { max: 1, onnotice: () => {} })
+    let release!: () => void
+    const held = new Promise<void>((resolve) => (release = resolve))
+    const holding = holder.begin(async (tx) => {
+      await tx`select pg_advisory_xact_lock(${PUSH_ORDER_LOCK})`
+      await held
+    })
+    try {
+      await new Promise((r) => setTimeout(r, 200))
+      const res = await push(ADA, [change(P1, hlc(900), { name: 'blocked' })])
+      expect(res.statusCode).toBe(503)
+      expect(res.headers['retry-after']).toBeDefined()
+    } finally {
+      release()
+      await holding
+      await holder.end()
+    }
+    expect((await push(ADA, [change(P1, hlc(901), { name: 'after' })])).statusCode).toBe(200)
+  }, 20_000)
 })

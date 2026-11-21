@@ -9,7 +9,8 @@ import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { ORG_ROLES, type RoleKey } from '../../plugins/permissions.ts'
 import { lockPushOrder } from '../../db/locks.ts'
-import { forgetMembership } from './roles.ts'
+import { forgetAccounts } from '../../plugins/identity.ts'
+import { forgetMemberships } from './roles.ts'
 import { purgeMemberOrgData, withOwnerLock } from './service.ts'
 
 export interface ReconcileResult {
@@ -62,14 +63,10 @@ async function reconcileOnce(db: Db, kc: KeycloakAdmin, orgId: string, opts: Rec
   // take, so a change made in between is not undone by a list read before it. The lock is held for those two steps only.
   const done = await withOwnerLock(db, orgId, async (tx) => {
     const [listed, roles, departments] = await Promise.all([kc.listMembers(orgId), kc.listRoleMembers(orgId), kc.listDepartments(orgId)])
-    const before = await tx
-      .select({ userId: schema.kcOrgMember.userId, active: schema.kcUser.active })
-      .from(schema.kcOrgMember)
-      .innerJoin(schema.kcUser, eq(schema.kcUser.id, schema.kcOrgMember.userId))
-      .where(eq(schema.kcOrgMember.orgId, orgId))
-    const memberCount = await tx.$count(schema.kcOrgMember, eq(schema.kcOrgMember.orgId, orgId))
-    const knownBefore = new Set(before.map((b) => b.userId))
-    const wasActive = new Set(before.filter((b) => b.active).map((b) => b.userId))
+    // The state this check replaces, read under the lock: this is what the announcements are compared with.
+    const snapshot = await readMirror(tx, orgId)
+    const memberCount = snapshot.before.length
+    const knownBefore = new Set(snapshot.before.map((b) => b.userId))
 
     // People who joined without an invitation (single sign-on, SCIM) may only take seats that are free.
     const rejected = await turnAwayBeyondSeats(tx, kc, orgId, listed.filter((u) => !knownBefore.has(u.id)), memberCount, limit)
@@ -78,7 +75,9 @@ async function reconcileOnce(db: Db, kc: KeycloakAdmin, orgId: string, opts: Rec
     const rows = users.map((u) => ({ user: u, role: roleOf(u.id, roles) ?? 'member' }))
 
     const ids = users.map((u) => u.id)
-    const gone = [...knownBefore].filter((id) => !ids.includes(id))
+    const idSet = new Set(ids)
+    const gone = [...knownBefore].filter((id) => !idSet.has(id))
+    let leaving = gone
     await tx.transaction(async (tx) => {
       // Pushes finish first or see the memberships gone (only taken when somebody leaves).
       if (gone.length > 0) await lockPushOrder(tx)
@@ -96,10 +95,13 @@ async function reconcileOnce(db: Db, kc: KeycloakAdmin, orgId: string, opts: Rec
           .values({ orgId, userId: user.id, role })
           .onConflictDoUpdate({ target: [schema.kcOrgMember.orgId, schema.kcOrgMember.userId], set: { role } })
       }
-      await tx
+      // Whoever is actually removed is purged and announced.
+      const removed = await tx
         .delete(schema.kcOrgMember)
         .where(and(eq(schema.kcOrgMember.orgId, orgId), ids.length ? notInArray(schema.kcOrgMember.userId, ids) : undefined))
-      for (const userId of gone) await purgeMemberOrgData(tx, orgId, userId)
+        .returning({ userId: schema.kcOrgMember.userId })
+      leaving = [...new Set([...leaving, ...removed.map((r) => r.userId)])]
+      for (const userId of leaving) await purgeMemberOrgData(tx, orgId, userId)
 
       // Departments: the same ids and paths as Keycloak, with their members.
       const groupIds = departments.map((d) => d.id)
@@ -110,17 +112,32 @@ async function reconcileOnce(db: Db, kc: KeycloakAdmin, orgId: string, opts: Rec
           .values({ id: d.id, orgId, path: d.path })
           .onConflictDoUpdate({ target: schema.kcGroup.id, set: { path: d.path } })
         await tx.delete(schema.kcGroupMember).where(eq(schema.kcGroupMember.groupId, d.id))
-        const members = d.memberIds.filter((m) => users.some((u) => u.id === m))
+        const members = d.memberIds.filter((m) => idSet.has(m))
         if (members.length) await tx.insert(schema.kcGroupMember).values(members.map((userId) => ({ groupId: d.id, userId })))
       }
     })
-    return { users, rejected, ids, gone, knownBefore, wasActive, departments }
+    return { users, rejected, idSet, leaving, snapshot, departments, rows }
   })
-  const { users, rejected, ids, gone, knownBefore, wasActive, departments } = done
-  for (const id of new Set([...ids, ...gone])) forgetMembership(id)
-  // A disabled account stops working now, not when its token runs out.
+  // Announced after the commit, and only what changed: new, removed, another role, other departments.
+  const { users, rejected, idSet, leaving, snapshot, departments, rows } = done
+  const knownNow = new Set(snapshot.before.map((b) => b.userId))
+  const wasActive = new Set(snapshot.before.filter((b) => b.active).map((b) => b.userId))
+  const roleBefore = new Map(snapshot.before.map((b) => [b.userId, b.role]))
+  const groupsBefore = snapshot.groups
+  const groupsAfter = new Map<string, string[]>()
+  for (const d of departments) for (const m of d.memberIds) if (idSet.has(m)) groupsAfter.set(m, [...(groupsAfter.get(m) ?? []), JSON.stringify(d.path)])
+  const sameGroups = (a: string[] = [], b: string[] = []) => a.length === b.length && [...a].sort().every((p, i) => p === [...b].sort()[i])
+  const changed = new Set(leaving)
+  for (const { user, role } of rows) {
+    if (!knownNow.has(user.id) || roleBefore.get(user.id) !== role || !sameGroups(groupsBefore.get(user.id), groupsAfter.get(user.id))) changed.add(user.id)
+  }
+  forgetMemberships(orgId, changed)
   let signedOut = 0
+  const accountsChanged: string[] = []
   for (const u of users) {
+    // Switched off or on since the mirror was last current: the replicas look at the account again.
+    if (knownNow.has(u.id) ? u.enabled !== wasActive.has(u.id) : !u.enabled) accountsChanged.push(u.id)
+    // A disabled account stops working now, not when its token runs out.
     if (!u.enabled && wasActive.has(u.id)) {
       await kc.logoutUser(u.id).then(
         () => void signedOut++,
@@ -128,15 +145,40 @@ async function reconcileOnce(db: Db, kc: KeycloakAdmin, orgId: string, opts: Rec
       )
     }
   }
+  forgetAccounts(accountsChanged) // a mass switch-off is one message, not one per person
   const now = new Set(users.map((u) => u.id))
   return {
     rejectedMembers: rejected.size,
     signedOut,
     members: users.length,
-    addedMembers: [...now].filter((id) => !knownBefore.has(id)).length,
-    removedMembers: [...knownBefore].filter((id) => !now.has(id)).length,
+    addedMembers: [...now].filter((id) => !knownNow.has(id)).length,
+    removedMembers: [...knownNow].filter((id) => !now.has(id)).length,
     groups: departments.length,
   }
+}
+
+interface Mirror {
+  before: { userId: string; active: boolean; role: RoleKey }[]
+  /** Departments (their paths as JSON) of each person of the organization. */
+  groups: Map<string, string[]>
+}
+
+/** What the mirror holds for an organization now: its members with account state and role, and their departments. */
+async function readMirror(db: Db, orgId: string): Promise<Mirror> {
+  const before = await db
+    .select({ userId: schema.kcOrgMember.userId, active: schema.kcUser.active, role: schema.kcOrgMember.role })
+    .from(schema.kcOrgMember)
+    .innerJoin(schema.kcUser, eq(schema.kcUser.id, schema.kcOrgMember.userId))
+    .where(eq(schema.kcOrgMember.orgId, orgId))
+  const groups = new Map<string, string[]>()
+  for (const g of await db
+    .select({ userId: schema.kcGroupMember.userId, path: schema.kcGroup.path })
+    .from(schema.kcGroupMember)
+    .innerJoin(schema.kcGroup, eq(schema.kcGroup.id, schema.kcGroupMember.groupId))
+    .where(eq(schema.kcGroup.orgId, orgId))) {
+    groups.set(g.userId, [...(groups.get(g.userId) ?? []), JSON.stringify(g.path)])
+  }
+  return { before, groups }
 }
 
 /**
