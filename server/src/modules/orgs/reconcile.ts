@@ -3,7 +3,7 @@
 // (SPEC §7.2). Runs at night, and when Keycloak says something changed
 // (`POST /v1/internal/keycloak-events`), for one organization at a time.
 
-import { and, eq, isNull, notInArray } from 'drizzle-orm'
+import { and, eq, inArray, isNull, notInArray } from 'drizzle-orm'
 import type { Db } from '../../db/index.ts'
 import { schema } from '../../db/index.ts'
 import type { KeycloakAdmin } from '../../keycloak/admin.ts'
@@ -77,7 +77,7 @@ async function reconcileOnce(db: Db, kc: KeycloakAdmin, orgId: string, opts: Rec
     const ids = users.map((u) => u.id)
     const idSet = new Set(ids)
     const gone = [...knownBefore].filter((id) => !idSet.has(id))
-    let leaving = gone
+    const leaving = gone
     await tx.transaction(async (tx) => {
       // Pushes finish first or see the memberships gone (only taken when somebody leaves).
       if (gone.length > 0) await lockPushOrder(tx)
@@ -95,12 +95,10 @@ async function reconcileOnce(db: Db, kc: KeycloakAdmin, orgId: string, opts: Rec
           .values({ orgId, userId: user.id, role })
           .onConflictDoUpdate({ target: [schema.kcOrgMember.orgId, schema.kcOrgMember.userId], set: { role } })
       }
-      // Whoever is actually removed is purged and announced.
-      const removed = await tx
-        .delete(schema.kcOrgMember)
-        .where(and(eq(schema.kcOrgMember.orgId, orgId), ids.length ? notInArray(schema.kcOrgMember.userId, ids) : undefined))
-        .returning({ userId: schema.kcOrgMember.userId })
-      leaving = [...new Set([...leaving, ...removed.map((r) => r.userId)])]
+      // Only the leavers of the snapshot (which the push lock above was taken for) are removed, purged and announced.
+      // Someone who joined after the Keycloak read (an invitation accepted, a SCIM create: neither takes the owner lock)
+      // is not in the snapshot and is left for the next check, which their own Keycloak event triggers.
+      if (gone.length > 0) await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, orgId), inArray(schema.kcOrgMember.userId, gone)))
       for (const userId of leaving) await purgeMemberOrgData(tx, orgId, userId)
 
       // Departments: the same ids and paths as Keycloak, with their members.
