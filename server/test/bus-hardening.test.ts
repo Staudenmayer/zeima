@@ -381,35 +381,35 @@ describe.skipIf(!(await reachable()))('bus hardening', () => {
     const backendPids = async (bus: PgBus) =>
       ((await database.db.execute(sql`select pid from pg_stat_activity where application_name = ${bus.applicationName}`)) as unknown as { pid: number }[]).map((r) => r.pid)
 
-    it('a notify that fails or stalls while the listener is healthy: status error, but no replacement and no resync', { timeout: 20_000 }, async () => {
+    it('a notify that fails or stalls while the listener is healthy: status error, but no replacement and no resync', { timeout: 60_000 }, async () => {
       let mode: 'ok' | 'reject' | 'stall' = 'ok'
       const db = database.db
       const lines: string[] = []
       const bus = new PgBus({
         url: database.url,
         log: { ...silent, warn: ((_o: unknown, m: string) => void lines.push(m)) as never },
-        pingIntervalMs: 100,
-        pingTimeoutMs: 500,
+        pingIntervalMs: 150,
+        pingTimeoutMs: 2_000, // far above a healthy echo even when many test files load the machine
         notify: (channel, payload) =>
           mode === 'reject' ? Promise.reject(new Error('database down')) : mode === 'stall' ? new Promise<void>(() => {}) : db.execute(sql`select pg_notify(${channel}, ${payload})`).then(() => {}),
       })
       let resyncs = 0
       bus.onResync(() => void resyncs++)
       await bus.start()
-      expect(await until(() => bus.status() === 'ok')).toBe(true)
+      expect(await until(() => bus.status() === 'ok', 10_000)).toBe(true)
       const pids = await backendPids(bus)
       expect(pids.length).toBe(1)
 
       for (const broken of ['reject', 'stall'] as const) {
         mode = broken
-        expect(await until(() => bus.status() === 'error')).toBe(true)
+        expect(await until(() => bus.status() === 'error', 10_000)).toBe(true)
         await sleep(1_500) // several ping cycles
         expect(bus.status()).toBe('error')
         expect(bus.listenerReplacements).toBe(0)
         expect(resyncs).toBe(0)
         expect(await backendPids(bus)).toEqual(pids)
         mode = 'ok'
-        expect(await until(() => bus.status() === 'ok')).toBe(true)
+        expect(await until(() => bus.status() === 'ok', 10_000)).toBe(true)
       }
       // Logged, but coalesced: a few lines for 20 failed pings, not one each.
       expect(lines.filter((l) => /could not notify/.test(l)).length).toBeLessThanOrEqual(8)

@@ -1207,8 +1207,8 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const state = (reported === 'tracking' ? 'online' : reported) as PresenceState | 'offline'
       const changed =
         state === 'offline'
-          ? app.presence.remove(actor.user.id, orgId).length > 0
-          : app.presence.set(orgId, actor.user.id, state, projectId ?? null, Date.now())
+          ? await app.presence.clear(orgId, actor.user.id)
+          : await app.presence.report(orgId, actor.user.id, state, projectId ?? null, Date.now())
       if (changed) await app.notifyPresence(orgId)
       return reply.code(204).send(null)
     },
@@ -1228,7 +1228,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request) => {
       const { orgId } = request.params
       const actor = actorIn({ user: request.user! }, orgId)
-      const present = app.presence.list(orgId, Date.now(), (userId) => app.hub.has(userId))
+      const present = await app.presence.list(orgId, Date.now())
       // A person whose policy hides presence is seen only by themselves.
       const workspace = await orgWorkspaceId(database(), orgId)
       const policies = workspace ? await loadPolicies(database(), workspace) : []

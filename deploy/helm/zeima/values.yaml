@@ -10,7 +10,7 @@ api:
     repository: zeima-api
     tag: ""            # defaults to the chart's appVersion
     pullPolicy: IfNotPresent
-  # The API keeps live connections (presence, sync notifications) in memory: run one copy.
+  # Presence and the replica bus are shared through PostgreSQL (M0-M2), but the chart still runs one copy until M5 (reconcile leader, shared quotas, rollout): do not raise this yet.
   replicas: 1
   resources:
     requests: { cpu: 100m, memory: 256Mi }

@@ -14,7 +14,6 @@ import { Type } from 'typebox'
 import type { WebSocket } from 'ws'
 import { schema } from '../db/index.ts'
 import { SECURITY } from './auth.ts'
-import { PresenceBoard } from './presence.ts'
 import { eq } from 'drizzle-orm'
 
 export const TOKEN_EXPIRED = 4401
@@ -31,6 +30,16 @@ interface Client {
 /** Who is connected, by user. */
 export class Hub {
   private readonly clients = new Map<string, Set<Client>>()
+  /** Called after a person's set of sockets changed (opened, closed). Must not throw or wait: presence records it in the background. */
+  onChange: ((userId: string) => void) | null = null
+
+  private changed(userId: string) {
+    try {
+      this.onChange?.(userId)
+    } catch {
+      // a failing observer never touches the socket
+    }
+  }
 
   add(userId: string, client: Client) {
     let set = this.clients.get(userId)
@@ -44,9 +53,11 @@ export class Hub {
       oldest.socket.close(4429, 'too many connections')
     }
     set.add(client)
+    this.changed(userId)
     return () => {
-      set.delete(client)
+      const had = set.delete(client)
       if (set.size === 0 && this.clients.get(userId) === set) this.clients.delete(userId)
+      if (had) this.changed(userId)
     }
   }
 
@@ -73,7 +84,12 @@ export class Hub {
 
   /** Whether one of the user's devices is connected. */
   has(userId: string) {
-    return (this.clients.get(userId)?.size ?? 0) > 0
+    return this.count(userId) > 0
+  }
+
+  /** How many devices of the user are connected here. */
+  count(userId: string) {
+    return this.clients.get(userId)?.size ?? 0
   }
 
   /** Tells the users' devices that presence in an organization changed. */
@@ -96,8 +112,9 @@ export class Hub {
 declare module 'fastify' {
   interface FastifyInstance {
     hub: Hub
-    presence: PresenceBoard
-    /** Tells the members of an organization that presence changed. */
+    /** Tells this replica's connected members of an organization that presence changed (what a bus hint from another replica does). */
+    notifyPresenceLocal: (orgId: string) => Promise<void>
+    /** Tells the members of an organization, on every replica, that presence changed. */
     notifyPresence: (orgId: string) => Promise<void>
     closeSocketsSpread: (windowMs: number) => Promise<void>
   }
@@ -108,12 +125,28 @@ export const realtimePlugin = fp(
     await app.register(websocket, { options: { maxPayload: 1024 } })
     const hub = new Hub()
     app.decorate('hub', hub)
-    const presence = new PresenceBoard()
-    app.decorate('presence', presence)
+    // Only organizations asked about at the same moment share one lookup; a flood of hints for one organization is one query at a time.
+    const asking = new Map<string, boolean>()
+    app.decorate('notifyPresenceLocal', async (orgId: string) => {
+      if (!app.db || hub.size === 0) return
+      if (asking.has(orgId)) {
+        asking.set(orgId, true) // once more when the lookup in progress is done
+        return
+      }
+      asking.set(orgId, false)
+      try {
+        do {
+          asking.set(orgId, false)
+          const members = await app.db.select({ id: schema.kcOrgMember.userId }).from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, orgId))
+          hub.notifyPresence(members.map((m) => m.id), orgId)
+        } while (asking.get(orgId))
+      } finally {
+        asking.delete(orgId)
+      }
+    })
     app.decorate('notifyPresence', async (orgId: string) => {
-      if (!app.db) return
-      const members = await app.db.select({ id: schema.kcOrgMember.userId }).from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, orgId))
-      hub.notifyPresence(members.map((m) => m.id), orgId)
+      app.publishBus?.({ k: 'presence', org: orgId }) // after the change is committed; the others only look again
+      await app.notifyPresenceLocal(orgId)
     })
 
     app.get(
@@ -138,11 +171,7 @@ export const realtimePlugin = fp(
         )
         socket.on('close', () => {
           clearTimeout(timer)
-          remove()
-          // The last device is gone: the person is no longer present.
-          if (!hub.has(user.id)) {
-            for (const orgId of presence.remove(user.id)) void app.notifyPresence(orgId).catch(() => {})
-          }
+          remove() // the hub tells presence, which forgets the person when no replica holds a device of theirs any more
         })
         socket.send(JSON.stringify({ type: 'ready' }))
       },

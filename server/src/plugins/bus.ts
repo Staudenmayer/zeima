@@ -24,7 +24,8 @@ export const MAX_PAYLOAD_BYTES = 7_000
 export const MAX_USERS_PER_MESSAGE = 150
 
 /** `ping` is the bus checking its own listening connection (see `PgBus`); it has no other effect. */
-export type BusMessage = { k: 'changes'; users: string[]; dev: string | null } | Invalidation | { k: 'ping' }
+/** `presence`: presence in an organization changed; a hint to tell the connected members to look again. */
+export type BusMessage = { k: 'changes'; users: string[]; dev: string | null } | Invalidation | { k: 'presence'; org: string } | { k: 'ping' }
 
 export interface Bus {
   readonly kind: 'memory' | 'pg'
@@ -83,6 +84,7 @@ export function decode(raw: string): { src: string; message: BusMessage } | null
     }
     return null
   }
+  if (m.k === 'presence' && isId(m.org)) return { src, message: { k: 'presence', org: m.org } }
   if (m.k === 'ping') return { src, message: { k: 'ping' } }
   if (m.k === 'acct' && m.all === true) return { src, message: { k: 'acct', all: true } }
   if (m.k === 'acct' && isId(m.user)) return { src, message: { k: 'acct', user: m.user } }
@@ -561,6 +563,9 @@ export const busPlugin = fp(
             else if (message.what === 'roles') dropRoles(message.org)
             else dropOrganizationMemberships(message.org, message.users, message.all)
             break
+          case 'presence':
+            void app.notifyPresenceLocal(message.org).catch(() => {})
+            break
           case 'acct':
             if ('all' in message) clearAccountCaches()
             else dropAccount(message.user)
@@ -580,7 +585,7 @@ export const busPlugin = fp(
           }, wait)
           trailing.unref()
         }
-        // TODO(M2): resynchronize presence here.
+        // Presence resynchronizes itself: see presencePlugin (it listens to onResync too).
       }),
     ]
     await bus.start()

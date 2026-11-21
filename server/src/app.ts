@@ -26,6 +26,7 @@ import { meRoutes } from './modules/me/routes.ts'
 import { authPlugin } from './plugins/auth.ts'
 import { rolesPlugin } from './modules/orgs/roles.ts'
 import { realtimePlugin } from './plugins/realtime.ts'
+import { presencePlugin, type PresenceTiming } from './plugins/presence.ts'
 import { type Bus, busPlugin, MemoryBus, PgBus } from './plugins/bus.ts'
 import { identityPlugin } from './plugins/identity.ts'
 import { docsPlugin } from './plugins/docs.ts'
@@ -55,6 +56,8 @@ export interface AppOptions {
   ssoFetch?: (url: URL) => Promise<string>
   /** The bus between replicas (tests pass their own); default: from `config.bus`, in-process without a database. */
   bus?: Bus
+  /** Timing of the presence heartbeat and sweep (tests make them short). */
+  presenceTiming?: Partial<PresenceTiming>
 }
 
 export async function buildApp(config: Config, options: AppOptions = {}) {
@@ -98,6 +101,7 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
   if (db) app.decorate('db', db)
   const bus = options.bus ?? (config.bus === 'pg' && db ? new PgBus({ url: config.busDatabaseUrl, log: app.log, pingIntervalMs: config.busPingIntervalMs, pingTimeoutMs: config.busPingTimeoutMs }) : new MemoryBus())
   await app.register(busPlugin, { bus, resyncSpreadMs: config.busResyncSpreadMs, resyncMinIntervalMs: config.busResyncMinIntervalMs })
+  await app.register(presencePlugin, { timing: { resyncSpreadMs: config.busResyncSpreadMs, ...options.presenceTiming } })
   await app.register(rolesPlugin, { membershipTtlMs: config.env === 'test' ? 0 : undefined })
   // Only the database gates readiness: Keycloak down must not take every replica out of the load balancer.
   await app.register(healthRoutes, {
