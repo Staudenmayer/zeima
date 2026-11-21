@@ -147,7 +147,10 @@ export const IMPORTED_SSO_KEYS: ReadonlySet<string> = new Set<string>([
   'issuer', 'entityId', 'idpEntityId', 'signingCertificate', 'encryptionPublicKey', 'postBindingLogout',
 ])
 
-/** Settings a document may only turn on: 'true' is kept, anything else is dropped, so it cannot lower security. */
+/**
+ * Settings a document may only turn on: 'true' is kept, anything else is dropped, so it cannot lower security.
+ * This holds within a single imported document only; a re-import replaces the stored configuration.
+ */
 const RATCHET_SSO_KEYS: readonly string[] = ['wantAuthnRequestsSigned']
 
 const pickImported = (imported: Record<string, string>): Record<string, string> =>

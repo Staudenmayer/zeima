@@ -106,9 +106,6 @@ pub(crate) fn is_global(ip: std::net::IpAddr) -> bool {
     }
 }
 
-/// Capacity of ureq's `ResolvedSocketAddrs`.
-const MAX_PINNED_ADDRS: usize = 16;
-
 /// Name lookup; injected so tests need no DNS.
 type Lookup = Arc<dyn Fn(&str, u16) -> std::io::Result<Vec<std::net::SocketAddr>> + Send + Sync>;
 
@@ -161,10 +158,12 @@ impl ureq::unversioned::resolver::Resolver for PublicResolver {
         if addrs.is_empty() || addrs.iter().any(|a| !(self.allowed)(a.ip())) {
             return Err(refuse("the token endpoint is not on the public internet".into()));
         }
-        // ureq's list holds 16 entries and its `push` does not check the capacity, so more than that must not be pushed.
+        // The list has a fixed capacity and its `push` panics when full, so stop at what it reports it can hold.
         let mut out = self.empty();
-        for a in addrs.into_iter().take(MAX_PINNED_ADDRS) {
-            out.push(a);
+        for a in addrs {
+            if out.try_push(a).is_err() {
+                break;
+            }
         }
         Ok(out)
     }
