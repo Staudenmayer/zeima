@@ -61,3 +61,12 @@ export async function syncMirror(db: Db, sub: string, groups: readonly string[])
     }
   }
 }
+
+/**
+ * One API replica against a shared test database with the PostgreSQL bus on. `development` rather than `test`, so the
+ * per-person membership cache is on as in production. Several of these in one test make a multi-replica deployment.
+ */
+export async function replica(database: { db: Db; url: string }, options: AppOptions = {}, env: Record<string, string> = {}) {
+  const cfg = loadConfig({ NODE_ENV: 'development', LOG_LEVEL: 'silent', METRICS_ENABLED: 'false', BUS: 'pg', DATABASE_URL: database.url, RATE_LIMIT_PER_MINUTE: '100000', BUS_RESYNC_SPREAD_MS: '0', BUS_RESYNC_MIN_INTERVAL_MS: '0', ...env })
+  return buildApp(cfg, { logger: false, keys, readiness: {}, db: database.db, ...options })
+}

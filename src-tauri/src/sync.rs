@@ -902,18 +902,40 @@ pub fn spawn_listener(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut pause = Duration::from_secs(5);
         loop {
-            match listen_once(&app).await {
-                // Connected for a while and then closed normally: try again soon.
-                Ok(()) => pause = Duration::from_secs(5),
-                Err(_) => pause = (pause * 2).min(Duration::from_secs(120)),
-            }
+            // How long to wait before the next try. Random, so that many devices
+            // cut off at once (a server restart) do not all come back together.
+            let delay = match listen_once(&app).await {
+                // Closed normally (the server asked us to go): back soon, after 0-3 s.
+                Ok(()) => {
+                    pause = Duration::from_secs(5);
+                    jitter(RECONNECT_SPREAD)
+                }
+                // Failed: full jitter, a random time up to the growing pause.
+                Err(_) => {
+                    pause = (pause * 2).min(Duration::from_secs(120));
+                    jitter(pause)
+                }
+            };
             // A sign-in ends the wait: no minutes of silence after logging in.
             tokio::select! {
-                () = tokio::time::sleep(pause) => {}
+                () = tokio::time::sleep(delay) => {}
                 () = LISTENER_WAKE.notified() => pause = Duration::from_secs(5),
             }
         }
     });
+}
+
+/// The spread of the first reconnect after the server closed the connection.
+const RECONNECT_SPREAD: Duration = Duration::from_secs(3);
+
+/// A random duration from zero up to and including `max`.
+fn jitter(max: Duration) -> Duration {
+    let mut buf = [0u8; 8];
+    if getrandom::fill(&mut buf).is_err() {
+        return max;
+    }
+    let millis = max.as_millis() as u64;
+    Duration::from_millis(u64::from_le_bytes(buf) % (millis + 1))
 }
 
 /// The longest the app waits for the last sync before it quits.
@@ -999,6 +1021,14 @@ pub fn spawn_push_watcher(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jitter_stays_within_its_bound() {
+        assert_eq!(jitter(Duration::ZERO), Duration::ZERO);
+        for _ in 0..200 {
+            assert!(jitter(Duration::from_secs(3)) <= Duration::from_secs(3));
+        }
+    }
 
     #[test]
     fn errors_are_sorted_into_what_the_user_can_do_about_them() {

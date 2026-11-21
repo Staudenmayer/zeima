@@ -9,14 +9,47 @@ import { eq } from 'drizzle-orm'
 import { schema } from '../db/index.ts'
 import { HttpProblem } from './errors.ts'
 import { acceptInvitations } from '../modules/orgs/service.ts'
+import { announce } from './invalidation.ts'
 
 const REFRESH_MS = 5 * 60_000
 /** How long an account's "disabled" state is remembered: a disabled account is shut out within this time. */
 const ACTIVE_MS = 15_000
 
+type ActiveCache = Map<string, { active: boolean; at: number }>
+/** The account caches of the apps in this process (one in production). */
+const caches = new Set<ActiveCache>()
+
+/** Drops what is remembered about an account in this process only (what a message from another replica does). */
+export function dropAccount(userId: string) {
+  for (const c of caches) c.delete(userId)
+}
+
+export function clearAccountCaches() {
+  for (const c of caches) c.clear()
+}
+
+/** Call after an account was switched on or off, so this process looks again at once and the other replicas are told. */
+export function forgetAccount(userId: string) {
+  dropAccount(userId)
+  announce({ k: 'acct', user: userId })
+}
+
+/** More accounts than this switched at once are announced as one "empty every account cache" message. */
+export const BULK_ACCOUNT_ANNOUNCE = 20
+
+/** `forgetAccount` for many: one message each up to the limit, one for all beyond it (a mass switch-off cannot fill the bus). */
+export function forgetAccounts(userIds: Iterable<string>) {
+  const ids = [...new Set(userIds)]
+  if (ids.length <= BULK_ACCOUNT_ANNOUNCE) return ids.forEach(forgetAccount)
+  clearAccountCaches()
+  announce({ k: 'acct', all: true })
+}
+
 export const identityPlugin = fp(async (app: FastifyInstance) => {
   const seen = new Map<string, number>()
-  const checked = new Map<string, { active: boolean; at: number }>()
+  const checked: ActiveCache = new Map()
+  caches.add(checked)
+  app.addHook('onClose', async () => void caches.delete(checked))
 
   app.addHook('preHandler', async (request) => {
     const user = request.user

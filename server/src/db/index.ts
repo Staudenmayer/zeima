@@ -25,11 +25,16 @@ const tenantPools = new WeakMap<object, Db>()
  * security lets them, and cannot step out of it (a session that merely `SET ROLE`s down from the owner can always
  * `RESET ROLE` up again, and the owner is a superuser in the usual setups).
  */
-export function connect(url: string, options: postgres.Options<Record<string, postgres.PostgresType>> = {}, tenantUrl?: string) {
-  const client = postgres(url, { max: 10, ...options })
+export function connect(
+  url: string,
+  options: postgres.Options<Record<string, postgres.PostgresType>> = {},
+  tenantUrl?: string,
+  pools: { ownerMax?: number; tenantMax?: number } = {},
+) {
+  const client = postgres(url, { max: pools.ownerMax ?? 10, ...options })
   const db = drizzle(client, { schema }) as Db
   if (!tenantUrl) return { client, db, tenantClient: null }
-  const tenantClient = postgres(tenantUrl, { max: 10, ...options })
+  const tenantClient = postgres(tenantUrl, { max: pools.tenantMax ?? 10, ...options })
   tenantPools.set(db, drizzle(tenantClient, { schema }) as Db)
   return { client, db, tenantClient }
 }

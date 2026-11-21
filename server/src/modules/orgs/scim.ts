@@ -21,6 +21,7 @@ import type { KeycloakAdmin } from '../../keycloak/admin.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { authorize } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
+import { forgetAccount } from '../../plugins/identity.ts'
 import { forgetMembership } from './roles.ts'
 import { audit, listMembers, type MemberRow, purgeMemberOrgData, requireSeat, seatUsage, withOwnerLock } from './service.ts'
 
@@ -369,6 +370,7 @@ export const scimRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = async (
           await kc.setEnabled(m.id, changes.active)
           if (!changes.active) await kc.logoutUser(m.id).catch(() => {})
           await db.update(schema.kcUser).set({ active: changes.active }).where(eq(schema.kcUser.id, m.id))
+          forgetAccount(m.id)
           await audit(db, { orgId, actorId: null, action: changes.active ? 'member.reactivate' : 'member.deactivate', target: m.id, detail: { via: 'scim', key } })
         }
         return 'changed'

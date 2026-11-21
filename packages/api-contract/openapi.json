@@ -106,7 +106,7 @@
     },
     "/readyz": {
       "get": {
-        "summary": "Readiness: the dependencies (Keycloak, the database) are reachable",
+        "summary": "Readiness: the database is reachable and the process is not shutting down (Keycloak is reported, not required)",
         "tags": [
           "health"
         ],
@@ -156,6 +156,28 @@
                           }
                         ]
                       }
+                    },
+                    "info": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "ok"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "error"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "draining": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -207,6 +229,28 @@
                           }
                         ]
                       }
+                    },
+                    "info": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "ok"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "error"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "draining": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -6838,6 +6882,16 @@
             }
           },
           "404": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "Problem details (RFC 9457)",
             "content": {
               "application/problem+json": {

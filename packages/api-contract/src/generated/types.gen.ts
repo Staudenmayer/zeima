@@ -62,6 +62,10 @@ export type GetReadyzErrors = {
         checks: {
             [key: string]: 'ok' | 'error';
         };
+        info?: {
+            [key: string]: 'ok' | 'error';
+        };
+        draining?: boolean;
     };
 };
 
@@ -76,6 +80,10 @@ export type GetReadyzResponses = {
         checks: {
             [key: string]: 'ok' | 'error';
         };
+        info?: {
+            [key: string]: 'ok' | 'error';
+        };
+        draining?: boolean;
     };
 };
 
@@ -2814,6 +2822,10 @@ export type PostV1SyncPushErrors = {
      * Problem details (RFC 9457)
      */
     404: Problem;
+    /**
+     * Problem details (RFC 9457)
+     */
+    503: Problem;
 };
 
 export type PostV1SyncPushError = PostV1SyncPushErrors[keyof PostV1SyncPushErrors];

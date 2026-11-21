@@ -24,7 +24,7 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 export const getHealthz = <ThrowOnError extends boolean = true>(options?: Options<GetHealthzData, ThrowOnError>): RequestResult<GetHealthzResponses, unknown, ThrowOnError> => (options?.client ?? client).get<GetHealthzResponses, unknown, ThrowOnError>({ url: '/healthz', ...options });
 
 /**
- * Readiness: the dependencies (Keycloak, the database) are reachable
+ * Readiness: the database is reachable and the process is not shutting down (Keycloak is reported, not required)
  */
 export const getReadyz = <ThrowOnError extends boolean = true>(options?: Options<GetReadyzData, ThrowOnError>): RequestResult<GetReadyzResponses, GetReadyzErrors, ThrowOnError> => (options?.client ?? client).get<GetReadyzResponses, GetReadyzErrors, ThrowOnError>({ url: '/readyz', ...options });
 

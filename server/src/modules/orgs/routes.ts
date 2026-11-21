@@ -16,7 +16,8 @@ import { Quota } from '../../plugins/quota.ts'
 import { PRESENCE_STATES, type PresenceState } from '../../plugins/presence.ts'
 import { departmentsOf, effective, loadPolicies, orgWorkspaceId } from '../sync/policy.ts'
 import { reconcileOrganization } from './reconcile.ts'
-import { forgetMembership, forgetOrganizationMemberships, forgetRoles, loadRoles, roleOf } from './roles.ts'
+import { forgetAccount } from '../../plugins/identity.ts'
+import { forgetMembership, forgetMemberships, forgetOrganizationMemberships, forgetRoles, loadRoles, roleOf } from './roles.ts'
 import { lockPushOrder } from '../../db/locks.ts'
 import { freeBusy } from '../../meetings/freebusy.ts'
 import { roomBookings } from '../../meetings/rooms.ts'
@@ -302,6 +303,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         }
         await kc.setEnabled(userId, active)
         await db.update(schema.kcUser).set({ active }).where(eq(schema.kcUser.id, userId))
+        forgetAccount(userId)
         await audit(db, { orgId, actorId: actor.user.id, action: active ? 'member.reactivate' : 'member.deactivate', target: userId })
       }
       return (await memberOf(db, orgId, userId))!
@@ -1163,7 +1165,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
         throw new HttpProblem(502, 'keycloak_failed', 'Keycloak could not delete the role')
       }
       forgetRoles(orgId)
-      for (const userId of held) forgetMembership(userId)
+      forgetMemberships(orgId, held)
       await audit(db, { orgId, actorId: actor.user.id, action: 'role.delete', target: role.name })
       return reply.code(204).send(null)
     },
@@ -1205,8 +1207,8 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
       const state = (reported === 'tracking' ? 'online' : reported) as PresenceState | 'offline'
       const changed =
         state === 'offline'
-          ? app.presence.remove(actor.user.id, orgId).length > 0
-          : app.presence.set(orgId, actor.user.id, state, projectId ?? null, Date.now())
+          ? await app.presence.clear(orgId, actor.user.id)
+          : await app.presence.report(orgId, actor.user.id, state, projectId ?? null, Date.now())
       if (changed) await app.notifyPresence(orgId)
       return reply.code(204).send(null)
     },
@@ -1226,7 +1228,7 @@ export const orgRoutes: FastifyPluginAsyncTypebox = async (app) => {
     async (request) => {
       const { orgId } = request.params
       const actor = actorIn({ user: request.user! }, orgId)
-      const present = app.presence.list(orgId, Date.now(), (userId) => app.hub.has(userId))
+      const present = await app.presence.list(orgId, Date.now())
       // A person whose policy hides presence is seen only by themselves.
       const workspace = await orgWorkspaceId(database(), orgId)
       const policies = workspace ? await loadPolicies(database(), workspace) : []

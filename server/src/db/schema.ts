@@ -24,6 +24,7 @@ import {
   pgTable,
   primaryKey,
   text,
+  timestamp,
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
@@ -128,6 +129,45 @@ export const orgJob = pgTable(
   },
   (t) => [uniqueIndex('org_job_name').on(t.orgId, sql`lower(${t.name})`)],
 )
+
+/**
+ * Who is present in an organization (SPEC 5.10). UNLOGGED (created that way in drizzle/0017): the rows are worth
+ * nothing after a crash, devices report again within a minute. Only the owner role reaches it (no grant to
+ * `zeima_app`): the API checks that the caller is a member of the organization before it reads or writes.
+ */
+export const presence = pgTable(
+  'presence',
+  {
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => kcUser.id, { onDelete: 'cascade' }),
+    state: text('state').notNull(),
+    projectId: uuid('project_id'),
+    since: ms('since').notNull(),
+    seen: ms('seen').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.userId] }), index('presence_user').on(t.userId)],
+)
+
+/** How many sockets a person has open on a replica (UNLOGGED, owner only). */
+export const wsConn = pgTable(
+  'ws_conn',
+  {
+    replicaId: text('replica_id').notNull(),
+    userId: uuid('user_id').notNull(),
+    n: integer('n').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.replicaId, t.userId] }), index('ws_conn_user').on(t.userId)],
+)
+
+/** The API replicas that are alive: each one refreshes its row every few seconds (UNLOGGED, owner only). */
+export const replica = pgTable('replica', {
+  id: text('id').primaryKey(),
+  heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }).notNull().defaultNow(),
+})
 
 export const kcOrgMember = pgTable(
   'kc_org_member',
