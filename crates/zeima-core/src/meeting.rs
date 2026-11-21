@@ -39,6 +39,10 @@ fn weekday_of(code: &str) -> Option<Weekday> {
     })
 }
 
+/// Largest INTERVAL a rule may name; larger ones are not a rule (keeps date
+/// arithmetic in range).
+const MAX_INTERVAL: i64 = 1000;
+
 fn parse(rule: &str) -> Option<Rule> {
     let mut r = Rule {
         freq: Freq::Daily,
@@ -60,7 +64,12 @@ fn parse(rule: &str) -> Option<Rule> {
                 };
                 have = true;
             }
-            "INTERVAL" => r.interval = v.parse::<i64>().ok()?.max(1),
+            "INTERVAL" => {
+                r.interval = v.parse::<i64>().ok()?.max(1);
+                if r.interval > MAX_INTERVAL {
+                    return None;
+                }
+            }
             "COUNT" => r.count = Some(v.parse().ok()?),
             "UNTIL" => r.until = Some(NaiveDate::parse_from_str(v.get(..8)?, "%Y%m%d").ok()?),
             "BYDAY" => {
@@ -131,12 +140,17 @@ pub fn occurrences(
     let mut out = Vec::new();
     let mut produced = 0u32;
     // The dates of period `p`, in order.
-    let dates = |p: i64| -> Vec<NaiveDate> {
+    let dates = |p: i64| -> Option<Vec<NaiveDate>> {
         match rule.freq {
-            Freq::Daily => vec![d0 + Duration::days(p * rule.interval)],
+            Freq::Daily => {
+                Some(vec![d0.checked_add_signed(Duration::try_days(
+                    p.checked_mul(rule.interval)?,
+                )?)?])
+            }
             Freq::Weekly => {
-                let monday = d0 - Duration::days(i64::from(d0.weekday().num_days_from_monday()))
-                    + Duration::weeks(p * rule.interval);
+                let monday = d0
+                    .checked_sub_signed(Duration::days(i64::from(d0.weekday().num_days_from_monday())))?
+                    .checked_add_signed(Duration::try_weeks(p.checked_mul(rule.interval)?)?)?;
                 let mut days: Vec<Weekday> = if rule.by_day.is_empty() {
                     vec![d0.weekday()]
                 } else {
@@ -145,23 +159,31 @@ pub fn occurrences(
                 days.sort_by_key(|d| d.num_days_from_monday());
                 days.dedup();
                 days.into_iter()
-                    .map(|d| monday + Duration::days(i64::from(d.num_days_from_monday())))
+                    .map(|d| monday.checked_add_signed(Duration::days(i64::from(d.num_days_from_monday()))))
                     .collect()
             }
             Freq::Monthly => {
-                let index = i64::from(d0.year()) * 12 + i64::from(d0.month0()) + p * rule.interval;
-                NaiveDate::from_ymd_opt(
-                    index.div_euclid(12) as i32,
-                    index.rem_euclid(12) as u32 + 1,
-                    d0.day(),
+                let index = i64::from(d0.year())
+                    .checked_mul(12)?
+                    .checked_add(i64::from(d0.month0()))?
+                    .checked_add(p.checked_mul(rule.interval)?)?;
+                // A month without that day has no meeting.
+                Some(
+                    NaiveDate::from_ymd_opt(
+                        i32::try_from(index.div_euclid(12)).ok()?,
+                        index.rem_euclid(12) as u32 + 1,
+                        d0.day(),
+                    )
+                    .into_iter()
+                    .collect(),
                 )
-                .into_iter()
-                .collect()
             }
         }
     };
     'periods: for p in 0..5000 {
-        for date in dates(p) {
+        // Past the range of dates: no later period is in range either.
+        let Some(period) = dates(p) else { break };
+        for date in period {
             if date < d0 {
                 continue;
             }

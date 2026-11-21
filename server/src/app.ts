@@ -88,7 +88,7 @@ export async function buildApp(config: Config, options: AppOptions = {}) {
 
   const { db } = options
   app.decorate('licensing', new Licensing(config))
-  app.decorate('keycloakAdmin', options.keycloakAdmin !== undefined ? options.keycloakAdmin : config.keycloak.admin ? new HttpKeycloakAdmin(config.keycloak.admin) : null)
+  app.decorate('keycloakAdmin', options.keycloakAdmin !== undefined ? options.keycloakAdmin : config.keycloak.admin ? new HttpKeycloakAdmin(config.keycloak.admin, fetch, app.log) : null)
   if (db) app.decorate('db', db)
   await app.register(rolesPlugin, { membershipTtlMs: config.env === 'test' ? 0 : undefined })
   await app.register(healthRoutes, {

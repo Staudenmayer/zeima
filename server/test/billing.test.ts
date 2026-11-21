@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { buildApp } from '../src/app.ts'
 import { schema } from '../src/db/index.ts'
 import { ConfigError, loadConfig } from '../src/config.ts'
+import { writeSubscription } from '../src/modules/billing/routes.ts'
 import { checkoutToken, checkoutUrl, parseEvent, signatureValid, uuidFor } from '../src/modules/billing/lemonsqueezy.ts'
 import { keys, syncMirror, token } from './helpers.ts'
 import { createTestDatabase, reachable } from './pg.ts'
@@ -209,6 +210,27 @@ describe.skipIf(!(await reachable()))('billing routes', () => {
     const expired = await webhook(app, event('subscription_expired', { status: 'expired', ends_at: iso(Date.now() - 1000), updated_at: iso(Date.now() + 1000) }))
     expect(expired.json().status).toBe('applied')
     expect((await app.inject({ url: '/v1/entitlement', headers: await authed() })).json().plan).toBe('free')
+    await app.close()
+  })
+
+  it('does not let an older event overwrite a newer stored one, even when the earlier check passed', async () => {
+    const app = await cloud()
+    const parse = (name: string, attributes: Record<string, unknown>) => {
+      const r = parseEvent(event(name, attributes, undefined, '9777'), PLANS, Date.now(), SECRET)
+      if (!r.ok) throw new Error(r.reason)
+      return r.update
+    }
+    const newer = parse('subscription_updated', { updated_at: iso(Date.now() - 1000) })
+    const older = parse('subscription_updated', { status: 'expired', ends_at: iso(Date.now() - 1000), updated_at: iso(Date.now() - 60_000) })
+    expect((await webhook(app, event('subscription_updated', { updated_at: iso(newer.updatedAt) }, undefined, '9777'))).json().status).toBe('applied')
+    const stored = () => db.db.select().from(schema.entitlement).where(eq(schema.entitlement.id, newer.id))
+    const before = await stored()
+
+    // The write step after a pre-check that passed before the newer event landed.
+    expect(await db.db.transaction((tx) => writeSubscription(tx, older))).toBe(false)
+    expect(await stored()).toEqual(before)
+    // A replay of the stored event (equal timestamp) still applies.
+    expect(await db.db.transaction((tx) => writeSubscription(tx, newer))).toBe(true)
     await app.close()
   })
 

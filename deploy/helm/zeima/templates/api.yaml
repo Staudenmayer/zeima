@@ -32,6 +32,8 @@ spec:
         # A changed list of profiles restarts the API.
         checksum/jurisdictions: {{ .Values.jurisdictions.files | toYaml | sha256sum }}
     spec:
+      # Nothing in the pod talks to the Kubernetes API.
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}

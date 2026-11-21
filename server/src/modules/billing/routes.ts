@@ -8,13 +8,37 @@
 //   POST /v1/billing/webhook    Lemon Squeezy → entitlements (signed, no bearer token)
 
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
-import { and, desc, eq, or } from 'drizzle-orm'
+import { and, desc, eq, lte, or, sql } from 'drizzle-orm'
 import { Type } from 'typebox'
 import type { Config } from '../../config.ts'
-import { callerOf, schema, withUser } from '../../db/index.ts'
+import { callerOf, schema, withUser, type Db } from '../../db/index.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
-import { checkoutUrl, parseEvent, signatureValid } from './lemonsqueezy.ts'
+import { checkoutUrl, parseEvent, signatureValid, type Update } from './lemonsqueezy.ts'
+
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
+
+/**
+ * Stores a subscription event unless the row already holds a newer one. The
+ * ordering check is part of the upsert, so it holds even when deliveries
+ * interleave; equal timestamps still apply (a replay is idempotent).
+ */
+export async function writeSubscription(tx: Tx, update: Update): Promise<boolean> {
+  const values = {
+    userId: update.userId,
+    orgId: update.orgId,
+    plan: update.plan,
+    validUntil: update.validUntil,
+    billing: update.billing,
+    updatedAt: update.updatedAt,
+  }
+  const written = await tx
+    .insert(schema.entitlement)
+    .values({ id: update.id, ...values })
+    .onConflictDoUpdate({ target: schema.entitlement.id, set: values, setWhere: lte(schema.entitlement.updatedAt, sql`excluded.updated_at`) })
+    .returning({ id: schema.entitlement.id })
+  return written.length > 0
+}
 
 const Plan = Type.Object({ key: Type.String(), plan: Type.String() })
 
@@ -161,18 +185,8 @@ export const billingRoutes: FastifyPluginAsyncTypebox<{ config: Config }> = asyn
               .where(and(eq(schema.kcOrgMember.orgId, update.orgId), eq(schema.kcOrgMember.userId, update.buyerId), eq(schema.kcOrgMember.role, 'owner')))
             if (!owner) return { status: 'ignored' as const, reason: 'the buyer does not own the organization' }
           }
-          const values = {
-            userId: update.userId,
-            orgId: update.orgId,
-            plan: update.plan,
-            validUntil: update.validUntil,
-            billing: update.billing,
-            updatedAt: update.updatedAt,
-          }
-          await tx
-            .insert(schema.entitlement)
-            .values({ id: update.id, ...values })
-            .onConflictDoUpdate({ target: schema.entitlement.id, set: values })
+          // Atomic with the ordering check: a concurrent delivery may have stored a newer state since the read above.
+          if (!(await writeSubscription(tx, update))) return { status: 'ignored' as const, reason: 'older than what is stored' }
           return { status: 'applied' as const }
         })
       },

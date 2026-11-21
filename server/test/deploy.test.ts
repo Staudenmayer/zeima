@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { EnvSchema } from '../src/config.ts'
@@ -77,6 +78,22 @@ describe.skipIf(!haveHelm)('the Helm chart', () => {
     // The API host: nothing for the internal port (3001), which the ingress never routes to.
     expect(ingress).not.toContain('3001')
     expect(render(['exposeKeycloakAdmin=true']).split('\n---\n').find((d) => d.includes('kind: Ingress'))!).toMatch(/host: "id.zeima.example.com"[\s\S]*path: \//)
+  })
+
+  it('excludes every non-public range from the egress to the internet, in both egress policies', () => {
+    const docs = render().split('\n---\n')
+    for (const name of ['zeima-api-egress', 'zeima-keycloak-egress']) {
+      const doc = docs.find((d) => d.includes(`name: ${name}`))!
+      for (const cidr of ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.168.0.0/16', '198.18.0.0/15', '224.0.0.0/4', '240.0.0.0/4']) {
+        expect(doc, `${name}: ${cidr}`).toContain(`"${cidr}"`)
+      }
+    }
+  })
+
+  it('does not hand the Kubernetes API token to any pod', () => {
+    const pods = render().split('\n---\n').filter((d) => /kind: (Deployment|StatefulSet)\n/.test(d))
+    expect(pods.length).toBe(3)
+    for (const pod of pods) expect(pod).toContain('automountServiceAccountToken: false')
   })
 
   it('keeps Keycloak\'s events off the public API port and limits who talks to whom', () => {
@@ -168,3 +185,33 @@ describe('the compose file and the proxy', () => {
   })
 })
 
+
+// The init script runs as the database superuser: the password must reach SQL only through psql's own
+// quoting (CWE-89), never through the shell. A stand-in `psql` records what it is given.
+describe('the Postgres init script', () => {
+  const password = `p'w"; DROP DATABASE zeima; --$HOME`
+  const run = (script: string) => {
+    const dir = mkdtempSync(join(tmpdir(), 'pginit-'))
+    writeFileSync(join(dir, 'psql'), '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$DIR/args"\ncat > "$DIR/sql"\n')
+    chmodSync(join(dir, 'psql'), 0o755)
+    writeFileSync(join(dir, 'init.sh'), script)
+    execFileSync('sh', [join(dir, 'init.sh')], { env: { PATH: `${dir}:${process.env.PATH}`, DIR: dir, POSTGRES_USER: 'zeima', KEYCLOAK_DB_PASSWORD: password } })
+    return { args: readFileSync(join(dir, 'args'), 'utf8').split('\n'), sql: readFileSync(join(dir, 'sql'), 'utf8') }
+  }
+  const check = ({ args, sql }: { args: string[]; sql: string }) => {
+    expect(args).toContain(`pw=${password}`)
+    expect(sql).toContain(":'pw'")
+    expect(sql).not.toContain('DROP DATABASE')
+    expect(sql).not.toContain(password)
+  }
+
+  it('passes the password as a psql variable', () => {
+    check(run(readFileSync(join(root, 'deploy/postgres-init.sh'), 'utf8')))
+  })
+
+  it.skipIf(!haveHelm)('does the same in the Helm chart', () => {
+    const out = execFileSync('helm', ['template', 'zeima', chart, '--set', 'publicUrl=https://zeima.example.com', '--set', 'idUrl=https://id.zeima.example.com', '--set', 'smtp.host=mail.example.com', '--set', 'keycloak.registrationAllowed=true'], { encoding: 'utf8' })
+    const block = out.match(/10-keycloak\.sh: \|\n((?: {4}.*\n)+)/)![1]!
+    check(run(block.replace(/^ {4}/gm, '')))
+  })
+})

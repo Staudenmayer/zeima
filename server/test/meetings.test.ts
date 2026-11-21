@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { isValidRule, occurrences } from '../src/meetings/occurrences.ts'
+import type { Db } from '../src/db/index.ts'
+import { freeBusy } from '../src/meetings/freebusy.ts'
+import { isValidRule, meetingShapeProblem, occurrences } from '../src/meetings/occurrences.ts'
 import { anyOverlap } from '../src/meetings/rooms.ts'
 
 interface Case {
@@ -43,5 +45,30 @@ describe('anyOverlap', () => {
       [[], list(0, 1, 1, 3)],
     ]
     for (const [a, b] of cases) expect(anyOverlap(a, b)).toBe(naive(a, b))
+  })
+})
+
+describe('oversized repeat interval', () => {
+  const huge = 'FREQ=DAILY;INTERVAL=1000000000'
+  it('is rejected when a meeting is checked', () => {
+    expect(meetingShapeProblem(Date.now() + 86_400_000, Date.now() + 90_000_000, 'UTC', huge)).toBe('rule')
+    expect(meetingShapeProblem(Date.now() + 86_400_000, Date.now() + 90_000_000, 'UTC', 'FREQ=DAILY;INTERVAL=1000')).toBeNull()
+    expect(isValidRule('FREQ=WEEKLY;INTERVAL=1001')).toBe(false)
+  })
+
+  it('does not break free/busy for a stored row that has one', async () => {
+    const start = Date.now() + 86_400_000
+    const field = (v: unknown) => ({ v, h: '' })
+    const rows = [
+      {
+        table: 'meeting',
+        rowId: 'm1',
+        deleted: null,
+        fields: { userId: field('u1'), startAt: field(start), endAt: field(start + 3_600_000), tz: field('UTC'), rrule: field(huge) },
+      },
+    ]
+    const db = { select: () => ({ from: () => ({ where: async () => rows }) }) } as unknown as Db
+    const busy = await freeBusy(db, 'w1', ['u1'], start - 86_400_000, start + 30 * 86_400_000, 'UTC')
+    expect(busy.u1).toEqual([{ from: start, to: start + 3_600_000, kind: 'meeting' }])
   })
 })

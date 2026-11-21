@@ -35,26 +35,42 @@ pub type PostForm = Arc<dyn Fn(&str, &[(String, String)]) -> Result<(u16, String
 
 /// `PostForm` over HTTPS with ureq.
 pub fn http_post_form() -> PostForm {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    let agent: ureq::Agent = base_config().build().into();
+    post_with_agent(agent)
+}
+
+fn base_config() -> ureq::config::ConfigBuilder<ureq::typestate::AgentScope> {
+    ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(HTTP_TIMEOUT))
         // A token endpoint answers; it never needs to send the code or the refresh token somewhere else.
         .max_redirects(0)
-        .build()
-        .into();
+}
+
+fn post_with_agent(agent: ureq::Agent) -> PostForm {
     Arc::new(move |url, form| {
         let mut response = agent
             .post(url)
             .header("Accept", "application/json")
             .send_form(form.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| match &e {
+                ureq::Error::Io(io) => match io.get_ref().and_then(|i| i.downcast_ref::<Refused>()) {
+                    Some(refused) => refused.0.clone(),
+                    None => e.to_string(),
+                },
+                _ => e.to_string(),
+            })?;
         let status = response.status().as_u16();
         let body = response.body_mut().read_to_string().map_err(|e| e.to_string())?;
         Ok((status, body))
     })
 }
 
-/// Whether an address is on the public internet (not loopback, private, link-local, CGNAT, documentation, multicast ...).
+/// Keep in step with `zeima_public` in vendor/extism/src/pdk.rs (the same rules; that function is private to the
+/// vendored crate, so no test can compare the two directly).
+///
+/// Whether an address is on the public internet: global unicast only, without loopback, private, link-local, CGNAT,
+/// documentation, benchmarking, multicast, reserved, 6to4, Teredo, NAT64 and IPv4-mapped/compatible forms of those.
 pub(crate) fn is_global(ip: std::net::IpAddr) -> bool {
     use std::net::IpAddr;
     match ip {
@@ -66,46 +82,119 @@ pub(crate) fn is_global(ip: std::net::IpAddr) -> bool {
                 || v4.is_link_local()
                 || v4.is_broadcast()
                 || v4.is_multicast()
-                || v4.is_documentation()
                 || o[0] == 0
-                || (o[0] == 100 && (o[1] & 0xc0) == 64)
-                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
-                || (o[0] == 198 && (o[1] & 0xfe) == 18)
-                || o[0] >= 240)
+                || o[0] >= 240
+                || (o[0] == 100 && (64..=127).contains(&o[1]))
+                || (o[0] == 192 && o[1] == 0 && (o[2] == 0 || o[2] == 2))
+                || (o[0] == 192 && o[1] == 88 && o[2] == 99)
+                || (o[0] == 198 && (o[1] == 18 || o[1] == 19))
+                || (o[0] == 198 && o[1] == 51 && o[2] == 100)
+                || (o[0] == 203 && o[1] == 0 && o[2] == 113))
         }
         IpAddr::V6(v6) => {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return is_global(IpAddr::V4(v4));
             }
             let s = v6.segments();
-            !(v6.is_unspecified()
-                || v6.is_loopback()
-                || v6.is_multicast()
-                || (s[0] & 0xfe00) == 0xfc00
-                || (s[0] & 0xffc0) == 0xfe80
-                || (s[0] == 0x2001 && s[1] == 0x0db8)
-                || (s[0] == 0x0064 && s[1] == 0xff9b)
-                || s[0] == 0x2002)
+            // Global unicast (2000::/3) only, minus 6to4, the IETF special blocks (2001::/23, which holds Teredo) and
+            // documentation (2001:db8::/32, 3fff::/20). This also rejects ::/96 (IPv4-compatible), ::1 and NAT64.
+            (s[0] & 0xe000) == 0x2000
+                && s[0] != 0x2002
+                && !(s[0] == 0x2001 && (s[1] < 0x0200 || s[1] == 0x0db8))
+                && !(s[0] == 0x3fff && s[1] & 0xf000 == 0)
         }
     }
 }
 
-/// `http_post_form` for add-ons: the host must resolve to public addresses only. (Checked just before the request;
-/// the account sign-in, which may be a private server of the person's own, uses the plain one.)
+/// Name lookup; injected so tests need no DNS.
+type Lookup = Arc<dyn Fn(&str, u16) -> std::io::Result<Vec<std::net::SocketAddr>> + Send + Sync>;
+
+/// A refusal made while resolving; carried through ureq's I/O error so the caller sees the plain message.
+#[derive(Debug)]
+struct Refused(String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+fn refuse(message: String) -> ureq::Error {
+    ureq::Error::Io(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        Refused(message),
+    ))
+}
+
+/// Resolves the host once and hands ureq only the addresses that were checked, so the connection goes to exactly
+/// what passed (a second, independent lookup could answer differently).
+struct PublicResolver {
+    lookup: Lookup,
+    allowed: fn(std::net::IpAddr) -> bool,
+}
+
+impl std::fmt::Debug for PublicResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PublicResolver")
+    }
+}
+
+impl ureq::unversioned::resolver::Resolver for PublicResolver {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        _config: &ureq::config::Config,
+        _timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        let host = uri
+            .host()
+            .ok_or_else(|| refuse("the token endpoint has no host".into()))?;
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        let port = uri.port_u16().unwrap_or(443);
+        let addrs = (self.lookup)(host, port)
+            .map_err(|e| refuse(format!("cannot resolve the token endpoint: {e}")))?;
+        if addrs.is_empty() || addrs.iter().any(|a| !(self.allowed)(a.ip())) {
+            return Err(refuse("the token endpoint is not on the public internet".into()));
+        }
+        // The list has a fixed capacity and its `push` panics when full, so stop at what it reports it can hold.
+        let mut out = self.empty();
+        for a in addrs {
+            if out.try_push(a).is_err() {
+                break;
+            }
+        }
+        Ok(out)
+    }
+}
+
+fn system_lookup() -> Lookup {
+    Arc::new(|host, port| Ok(std::net::ToSocketAddrs::to_socket_addrs(&(host, port))?.collect()))
+}
+
+/// `http_post_form` for add-ons: the host must resolve to public addresses only, and the connection is made to
+/// those same addresses. (The account sign-in, which may be a private server of the person's own, uses the plain one.)
 pub fn http_post_form_public() -> PostForm {
-    let inner = http_post_form();
+    post_form_public_with(system_lookup(), is_global)
+}
+
+fn post_form_public_with(lookup: Lookup, allowed: fn(std::net::IpAddr) -> bool) -> PostForm {
+    // No proxy: one named in the environment would resolve the target itself and skip the check.
+    let config = base_config().proxy(None).build();
+    let agent = ureq::Agent::with_parts(
+        config,
+        ureq::unversioned::transport::DefaultConnector::default(),
+        PublicResolver { lookup, allowed },
+    );
+    let inner = post_with_agent(agent);
     Arc::new(move |url, form| {
         let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
         if parsed.scheme() != "https" {
             return Err("the token endpoint must be https".into());
         }
-        let host = parsed.host_str().ok_or("the token endpoint has no host")?;
-        let port = parsed.port_or_known_default().unwrap_or(443);
-        let addrs: Vec<_> = std::net::ToSocketAddrs::to_socket_addrs(&(host, port))
-            .map_err(|e| format!("cannot resolve the token endpoint: {e}"))?
-            .collect();
-        if addrs.is_empty() || addrs.iter().any(|a| !is_global(a.ip())) {
-            return Err("the token endpoint is not on the public internet".into());
+        if parsed.host_str().is_none() {
+            return Err("the token endpoint has no host".into());
         }
         inner(url, form)
     })
@@ -471,6 +560,118 @@ pub fn access_token(
 
 #[cfg(test)]
 mod tests {
+    use std::net::{SocketAddr, TcpListener};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn address_classifier_rejects_special_ranges() {
+        for bad in [
+            "0.1.2.3",
+            "192.0.0.9",
+            "192.0.2.1",
+            "192.88.99.1",
+            "198.18.0.1",
+            "198.19.255.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "239.1.1.1",
+            "240.0.0.1",
+            "255.255.255.255",
+            "100.127.0.1",
+            "::",
+            "::2",
+            "::127.0.0.1",
+            "::ffff:127.0.0.1",
+            "::ffff:0.0.0.0",
+            "2001::1",
+            "2001:1ff::1",
+            "2001:db8::1",
+            "3fff::1",
+            "3fff:fff::1",
+            "2002::1",
+            "ff02::1",
+            "5f00::1",
+        ] {
+            assert!(!is_global(bad.parse().unwrap()), "{bad}");
+        }
+        for good in [
+            "198.20.0.1",
+            "100.128.0.1",
+            "2001:200::1",
+            "3fff:1000::1",
+            "::ffff:8.8.8.8",
+        ] {
+            assert!(is_global(good.parse().unwrap()), "{good}");
+        }
+    }
+
+    /// Stands in for "public" in the tests below; the real classifier would not accept loopback. Both listeners are on
+    /// 127.0.0.1 (other 127.x aliases do not exist on every OS) and differ by port.
+    fn test_allowed(ip: std::net::IpAddr) -> bool {
+        ip.is_loopback()
+    }
+
+    fn accepted(l: &TcpListener) -> bool {
+        l.set_nonblocking(true).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        l.accept().is_ok()
+    }
+
+    /// The first lookup answers an allowed address, any later one an internal address. The POST must go to the
+    /// address that was checked and never to the later answer.
+    #[test]
+    fn token_post_connects_only_to_the_checked_address() {
+        let checked = TcpListener::bind("127.0.0.1:0").unwrap();
+        let internal = TcpListener::bind("127.0.0.1:0").unwrap();
+        let checked_addr = checked.local_addr().unwrap();
+        let internal_addr = internal.local_addr().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let lookup: Lookup = Arc::new(move |_, _| {
+            let addr: SocketAddr = if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                checked_addr
+            } else {
+                internal_addr
+            };
+            Ok(vec![addr])
+        });
+        let post = post_form_public_with(lookup, test_allowed);
+        let url = format!("https://token.example.test:{}/token", checked_addr.port());
+        let _ = post(&url, &[("code".into(), "secret-code".into())]);
+        assert!(accepted(&checked), "the checked address was not used");
+        assert!(
+            !accepted(&internal),
+            "connected to the address of a second lookup"
+        );
+    }
+
+    /// A host with more addresses than ureq's list holds must not panic (the app aborts on panic).
+    #[test]
+    fn token_post_survives_more_addresses_than_the_list_holds() {
+        let checked = TcpListener::bind("127.0.0.1:0").unwrap();
+        let first = checked.local_addr().unwrap();
+        let mut addrs = vec![first];
+        addrs.extend(
+            (1..=20u16).map(|i| SocketAddr::from(([127, 0, 0, 1], first.port().wrapping_add(i).max(1024)))),
+        );
+        let post = post_form_public_with(Arc::new(move |_, _| Ok(addrs.clone())), test_allowed);
+        let url = format!("https://token.example.test:{}/token", first.port());
+        let _ = post(&url, &[]);
+        assert!(accepted(&checked), "the first address was not used");
+    }
+
+    #[test]
+    fn token_post_refuses_internal_answers_without_connecting() {
+        let internal = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = internal.local_addr().unwrap();
+        let post = post_form_public_with(Arc::new(move |_, _| Ok(vec![addr])), is_global);
+        let err = post(&format!("https://token.example.test:{}/", addr.port()), &[]).unwrap_err();
+        assert_eq!(err, "the token endpoint is not on the public internet");
+        assert!(!accepted(&internal));
+        let err = post("http://token.example.test/", &[]).unwrap_err();
+        assert_eq!(err, "the token endpoint must be https");
+    }
     #[test]
     fn only_public_addresses_are_global() {
         for bad in [

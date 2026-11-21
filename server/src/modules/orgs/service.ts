@@ -220,7 +220,18 @@ export async function acceptInvitations(db: Db, kc: KeycloakAdmin, user: { id: s
     .select()
     .from(schema.orgInvitation)
     .where(and(eq(schema.orgInvitation.email, email), isNull(schema.orgInvitation.acceptedAt), gt(schema.orgInvitation.createdAt, Date.now() - INVITATION_TTL_MS)))
+    .orderBy(desc(schema.orgInvitation.createdAt))
+  const handled = new Set<string>()
   for (const invitation of pending) {
+    // Someone who is already in keeps the role they have; an invitation never changes it. Newest first, one per organization.
+    const [existing] = handled.has(invitation.orgId)
+      ? [true]
+      : await db.select({ role: schema.kcOrgMember.role }).from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, invitation.orgId), eq(schema.kcOrgMember.userId, user.id)))
+    if (existing) {
+      await db.update(schema.orgInvitation).set({ acceptedAt: Date.now() }).where(eq(schema.orgInvitation.id, invitation.id))
+      continue
+    }
+    handled.add(invitation.orgId)
     // The inviter must still be there, and still be allowed to give this role; otherwise the person joins as a member.
     const [inviter] = invitation.invitedBy
       ? await db.select({ role: schema.kcOrgMember.role }).from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, invitation.orgId), eq(schema.kcOrgMember.userId, invitation.invitedBy)))

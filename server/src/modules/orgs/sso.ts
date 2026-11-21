@@ -13,7 +13,7 @@ import { isIP } from 'node:net'
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { Type } from 'typebox'
 import type { Config } from '../../config.ts'
-import { ssoAlias, type KeycloakAdmin, type SsoInput } from '../../keycloak/admin.ts'
+import { SSO_ADDRESS_KEYS, ssoAlias, type KeycloakAdmin, type SsoInput } from '../../keycloak/admin.ts'
 import { SECURITY } from '../../plugins/auth.ts'
 import { authorize } from '../../plugins/authz.ts'
 import { HttpProblem, problems } from '../../plugins/errors.ts'
@@ -206,16 +206,13 @@ export async function fetchMetadata(url: URL, allowPrivate: boolean, resolver: R
   })
 }
 
-/** The settings of an imported provider that name an address; every one must be public too. */
-const ADDRESS_KEYS = ['authorizationUrl', 'tokenUrl', 'userInfoUrl', 'jwksUrl', 'logoutUrl', 'tokenIntrospectionUrl', 'singleSignOnServiceUrl', 'singleLogoutServiceUrl', 'artifactResolutionServiceUrl', 'metadataDescriptorUrl']
-
 /**
  * Keycloak contacts these addresses at every sign-in, with the organization's client secret in the token
  * request: a provider whose metadata names an internal address must not be set up.
  */
 export async function checkImportedAddresses(config: Record<string, string>, allowPrivate: boolean, resolver: Resolver = systemResolver): Promise<void> {
   if (allowPrivate) return
-  for (const key of ADDRESS_KEYS) {
+  for (const key of SSO_ADDRESS_KEYS) {
     const value = config[key]
     if (!value) continue
     try {

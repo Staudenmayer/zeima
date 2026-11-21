@@ -7,6 +7,7 @@
 //   /orgs/<orgId>/roles/<role>         one group per role; a user is in one
 //   /orgs/<orgId>/groups/<…>           departments
 
+import type { FastifyBaseLogger } from 'fastify'
 import type { Config } from '../config.ts'
 import { ORG_ROLES, type RoleKey } from '../plugins/permissions.ts'
 import { HttpProblem } from '../plugins/errors.ts'
@@ -129,6 +130,34 @@ const LDAP_NAME = 'zeima-ldap'
 /** The Keycloak alias of an organization's identity provider; it is part of the address the provider redirects to. */
 export const ssoAlias = (orgId: string) => `sso-${orgId}`
 
+/** The imported settings that name an address; the provider is contacted at each, so each must be public. */
+export const SSO_ADDRESS_KEYS = [
+  'authorizationUrl', 'tokenUrl', 'userInfoUrl', 'jwksUrl', 'logoutUrl', 'tokenIntrospectionUrl', 'metadataDescriptorUrl',
+  'singleSignOnServiceUrl', 'singleLogoutServiceUrl', 'artifactResolutionServiceUrl',
+] as const
+
+/**
+ * The settings of a parsed OIDC or SAML document that are kept: its addresses, issuer, entity ids and
+ * certificates, and the SAML logout binding. Everything else in the parser's answer is dropped, so a
+ * document cannot set other provider options (the ones that matter are set below). The address keys come
+ * from the one list above, so what is kept and what is checked cannot drift apart.
+ */
+export const IMPORTED_SSO_KEYS: ReadonlySet<string> = new Set<string>([
+  ...SSO_ADDRESS_KEYS,
+  'issuer', 'entityId', 'idpEntityId', 'signingCertificate', 'encryptionPublicKey', 'postBindingLogout',
+])
+
+/**
+ * Settings a document may only turn on: 'true' is kept, anything else is dropped, so it cannot lower security.
+ * This holds within a single imported document only; a re-import replaces the stored configuration.
+ */
+const RATCHET_SSO_KEYS: readonly string[] = ['wantAuthnRequestsSigned']
+
+const pickImported = (imported: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(imported).filter(([k, v]) => IMPORTED_SSO_KEYS.has(k) || (RATCHET_SSO_KEYS.includes(k) && v === 'true')),
+  )
+
 export interface KcUser {
   id: string
   email: string | null
@@ -165,9 +194,18 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
   private readonly admin: NonNullable<Config['keycloak']['admin']>
   private readonly fetchImpl: typeof fetch
 
-  constructor(admin: NonNullable<Config['keycloak']['admin']>, fetchImpl: typeof fetch = fetch) {
+  private readonly log: Pick<FastifyBaseLogger, 'warn'>
+
+  constructor(admin: NonNullable<Config['keycloak']['admin']>, fetchImpl: typeof fetch = fetch, log: Pick<FastifyBaseLogger, 'warn'> = console) {
     this.admin = admin
     this.fetchImpl = fetchImpl
+    this.log = log
+  }
+
+  /** The upstream detail (host, port, Keycloak's own text) goes to the log, never into a response. */
+  private unreachable(err: unknown): HttpProblem {
+    this.log.warn({ err }, 'cannot reach Keycloak')
+    return new HttpProblem(502, 'keycloak_unreachable', 'cannot reach the identity provider')
   }
 
   private async accessToken(): Promise<string> {
@@ -183,7 +221,7 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
       }),
       signal: AbortSignal.timeout(10_000),
     }).catch((err: unknown) => {
-      throw new HttpProblem(502, 'keycloak_unreachable', `cannot reach Keycloak: ${(err as Error).message}`)
+      throw this.unreachable(err)
     })
     if (!res.ok) throw new HttpProblem(502, 'keycloak_auth_failed', `Keycloak refused the API's admin client (${res.status})`)
     const body = (await res.json()) as { access_token: string; expires_in: number }
@@ -206,16 +244,17 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
     }
     const res = await this.fetchImpl(`${this.admin.apiUrl}${path}`, { method, headers, body, signal: AbortSignal.timeout(15_000) }).catch(
       (err: unknown) => {
-        throw new HttpProblem(502, 'keycloak_unreachable', `cannot reach Keycloak: ${(err as Error).message}`)
+        throw this.unreachable(err)
       },
     )
     if (res.ok) return res
     const detail = await res.text().catch(() => '')
     if (res.status === 403) throw new HttpProblem(502, 'keycloak_forbidden', `Keycloak refused the API's service account for ${method} ${path}: it lacks a role (docs/keycloak.md, "Service account roles")`)
     if (res.status === 404) throw new HttpProblem(404, 'not_found', 'not found in Keycloak')
-    if (res.status === 409) throw new HttpProblem(409, 'conflict', keycloakMessage(detail) || 'already exists')
-    if (res.status === 400) throw new HttpProblem(400, 'bad_request', keycloakMessage(detail) || 'Keycloak rejected the request')
-    throw new HttpProblem(502, 'keycloak_error', `Keycloak answered ${res.status} for ${method} ${path}: ${keycloakMessage(detail) || 'no details'}`)
+    this.log.warn({ method, path, status: res.status, detail: keycloakMessage(detail) }, 'Keycloak refused a request')
+    if (res.status === 409) throw new HttpProblem(409, 'conflict', 'already exists')
+    if (res.status === 400) throw new HttpProblem(400, 'bad_request', 'the identity provider rejected the request')
+    throw new HttpProblem(502, 'keycloak_error', `the identity provider answered ${res.status}`)
   }
 
   /** The id from a `201 Location: …/<id>` response. */
@@ -431,7 +470,7 @@ export class HttpKeycloakAdmin implements KeycloakAdmin {
     const alias = ssoAlias(orgId)
     const existing = await this.idp(alias)
     const config: Record<string, string> = {
-      ...imported,
+      ...pickImported(imported),
       syncMode: 'IMPORT',
       'zeima.sourceUrl': input.sourceUrl,
     }

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
 import { schema } from '../src/db/index.ts'
-import { ensureOrgWorkspace } from '../src/modules/orgs/service.ts'
+import { ensureOrgWorkspace, withOwnerLock } from '../src/modules/orgs/service.ts'
 import { reconcileOrganization } from '../src/modules/orgs/reconcile.ts'
 import { changesOf, emailFromFilter, hashToken } from '../src/modules/orgs/scim.ts'
 import { checkFilter, checkLdapUrl } from '../src/modules/directory/routes.ts'
@@ -102,6 +102,69 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       expect(result.rejectedMembers).toBe(0)
       expect((await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, ORG))).length).toBe(7)
     })
+  })
+
+  describe('a change made while the organization is being compared with Keycloak', () => {
+    it('is not undone by the older list', async () => {
+      const org = id(950)
+      const u = (n: number) => ({ id: id(n), email: `${n}@race.example`, name: `u${n}`, enabled: true })
+      await db.db.insert(schema.organization).values({ id: org, name: 'Race', createdAt: 1 })
+      for (const n of [20, 21]) {
+        await db.db.insert(schema.kcUser).values({ id: id(n), email: `${n}@race.example`, displayName: `u${n}` }).onConflictDoNothing()
+        await db.db.insert(schema.kcOrgMember).values({ orgId: org, userId: id(n), role: n === 20 ? 'owner' : 'member' })
+      }
+      const racing = new FakeKeycloak()
+      racing.members = [u(20), u(21)]
+      racing.roles = { owner: [id(20)], admin: [], manager: [], member: [id(21)] }
+      // The removal lands while the list is being read: it takes the organization lock like the removal route.
+      const list = racing.listMembers.bind(racing)
+      let removal: Promise<void> | undefined
+      racing.listMembers = async (orgId: string) => {
+        const stale = await list(orgId)
+        removal ??= withOwnerLock(db.db, org, async (tx) => {
+          racing.members = racing.members.filter((m) => m.id !== id(21))
+          await tx.delete(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, org), eq(schema.kcOrgMember.userId, id(21))))
+        })
+        // Done at once if nothing holds the lock; otherwise it waits for the comparison to finish.
+        await Promise.race([removal, new Promise((resolve) => setTimeout(resolve, 300))])
+        return stale
+      }
+      await reconcileOrganization(db.db, racing, org)
+      await removal
+      const members = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, org))
+      expect(members.map((m) => m.userId)).toEqual([id(20)])
+    })
+  })
+
+  describe('many checks of one organization at once', () => {
+    it('finish, however small the connection pool is, and share their reads of Keycloak', async () => {
+      const org = id(951)
+      await db.db.insert(schema.organization).values({ id: org, name: 'Burst', createdAt: 1 })
+      await db.db.insert(schema.kcUser).values({ id: id(30), email: '30@burst.example', displayName: 'u30' }).onConflictDoNothing()
+      await db.db.insert(schema.kcOrgMember).values({ orgId: org, userId: id(30), role: 'owner' })
+      const burst = new FakeKeycloak()
+      burst.members = [{ id: id(30), email: '30@burst.example', name: 'u30', enabled: true }, { id: id(31), email: '31@burst.example', name: 'u31', enabled: true }]
+      burst.roles = { owner: [id(30)], admin: [], manager: [], member: [id(31)] }
+      let reads = 0
+      const list = burst.listMembers.bind(burst)
+      burst.listMembers = async (orgId: string) => {
+        reads++
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        return list(orgId)
+      }
+      // Like the licensing lookup, the seat limit needs a connection of its own from the same pool.
+      const seatLimit = async () => {
+        await db.db.select({ id: schema.organization.id }).from(schema.organization).limit(1)
+        return 5
+      }
+      const all = Promise.all(Array.from({ length: 14 }, () => reconcileOrganization(db.db, burst, org, { seatLimit })))
+      const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('the checks did not finish')), 15_000))
+      const results = await Promise.race([all, timeout])
+      expect(results.every((r) => r.members === 2)).toBe(true)
+      expect(reads).toBeLessThan(14)
+      const members = await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.orgId, org))
+      expect(members.map((m) => m.userId).sort()).toEqual([id(30), id(31)])
+    }, 30_000)
   })
 
   describe('a disabled account', () => {
@@ -235,6 +298,53 @@ describe.skipIf(!(await reachable()))('provisioning', () => {
       expect((await rowsOf(personalWs)).entries).toEqual([person])
       for (const t of [schema.pause, schema.timeEntry, schema.syncRow]) await db.db.delete(t)
       await db.db.delete(schema.workspace)
+    })
+
+    it('drops a person\'s group memberships in the organization when SCIM removes them', async () => {
+      const person = id(69)
+      await db.db.insert(schema.kcUser).values({ id: person, email: 'p69@acme.example', displayName: 'P' }).onConflictDoNothing()
+      await db.db.insert(schema.kcOrgMember).values({ orgId: ORG, userId: person, role: 'member' })
+      const group = id(869)
+      await db.db.insert(schema.kcGroup).values({ id: group, orgId: ORG, path: '/scim-removal-group' })
+      await db.db.insert(schema.kcGroupMember).values({ groupId: group, userId: person })
+      expect((await scim('DELETE', `/Users/${person}`)).statusCode).toBe(204)
+      expect(await db.db.select().from(schema.kcGroupMember).where(eq(schema.kcGroupMember.userId, person))).toEqual([])
+      await db.db.delete(schema.kcGroup).where(eq(schema.kcGroup.id, group))
+    })
+
+    it('is not put back by a check against Keycloak that read the list before SCIM removed them', async () => {
+      const person = id(68)
+      await db.db.insert(schema.kcUser).values({ id: person, email: 'p68@acme.example', displayName: 'P' }).onConflictDoNothing()
+      await db.db.insert(schema.kcOrgMember).values({ orgId: ORG, userId: person, role: 'member' })
+      const saved = { members: kc.members, roles: kc.roles, listMembers: kc.listMembers }
+      const rows = await db.db
+        .select({ id: schema.kcUser.id, email: schema.kcUser.email, name: schema.kcUser.displayName, role: schema.kcOrgMember.role })
+        .from(schema.kcOrgMember)
+        .innerJoin(schema.kcUser, eq(schema.kcUser.id, schema.kcOrgMember.userId))
+        .where(eq(schema.kcOrgMember.orgId, ORG))
+      kc.members = rows.map((r) => ({ id: r.id, email: r.email, name: r.name ?? '', enabled: true }))
+      kc.roles = { owner: [], admin: [], manager: [], member: [] }
+      for (const r of rows) {
+        const key = r.role as keyof typeof kc.roles
+        kc.roles[key] = [...(kc.roles[key] ?? []), r.id]
+      }
+      // SCIM removes the person while the list (which still has them) is being read.
+      let removal: Promise<{ statusCode: number }> | undefined
+      kc.listMembers = async () => {
+        const stale = [...kc.members]
+        removal ??= scim('DELETE', `/Users/${person}`)
+        // Answered at once if nothing holds the organization lock; otherwise it waits for the comparison to finish.
+        await Promise.race([removal, new Promise((resolve) => setTimeout(resolve, 300))])
+        return stale
+      }
+      try {
+        await reconcileOrganization(db.db, kc, ORG)
+        expect((await removal)?.statusCode).toBe(204)
+      } finally {
+        Object.assign(kc, saved)
+      }
+      const members = await db.db.select().from(schema.kcOrgMember).where(and(eq(schema.kcOrgMember.orgId, ORG), eq(schema.kcOrgMember.userId, person)))
+      expect(members).toEqual([])
     })
 
     /** What stays in the organization's workspace when a person goes: their rows other than entries and pauses. */

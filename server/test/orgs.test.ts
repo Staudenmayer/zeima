@@ -1,9 +1,9 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { buildApp } from '../src/app.ts'
 import { loadConfig } from '../src/config.ts'
 import { schema } from '../src/db/index.ts'
-import { ensureOrgWorkspace } from '../src/modules/orgs/service.ts'
+import { acceptInvitations, ensureOrgWorkspace } from '../src/modules/orgs/service.ts'
 import { sign } from '../src/modules/internal/routes.ts'
 import { FakeKeycloak } from './fake-keycloak.ts'
 import { keys, syncMirror, token } from './helpers.ts'
@@ -433,6 +433,40 @@ describe.skipIf(!(await reachable()))('organizations', () => {
       expect(inv!.acceptedAt).not.toBeNull()
       const log = await db.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'member.join'))
       expect(log).toHaveLength(1)
+    })
+
+    it('keeps the role of someone who is already a member', async () => {
+      await reset()
+      await as(OWNER, 'owner')
+      await db.db.insert(schema.orgInvitation).values({ orgId: ORG, email: 'olga@example.com', role: 'member', invitedBy: ADMIN, createdAt: Date.now() })
+      kc.calls = []
+      await acceptInvitations(db.db, kc, { id: OWNER, email: 'olga@example.com', emailVerified: true })
+      expect(kc.calls).toEqual([])
+      expect(await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.userId, OWNER))).toMatchObject([{ role: 'owner' }])
+      const [inv] = await db.db.select().from(schema.orgInvitation)
+      expect(inv!.acceptedAt).not.toBeNull()
+    })
+
+    it('applies only the newest of several invitations to the same organization', async () => {
+      await reset()
+      const NEW = id(62)
+      await db.db.insert(schema.kcUser).values({ id: NEW, email: 'twice@example.com' }).onConflictDoNothing()
+      // The unique index allows one pending invitation per address; lift it to build the duplicate state.
+      await db.db.execute(sql`DROP INDEX org_invitation_pending`)
+      try {
+        const now = Date.now()
+        await db.db.insert(schema.orgInvitation).values([
+          { orgId: ORG, email: 'twice@example.com', role: 'member', invitedBy: OWNER, createdAt: now - 2000 },
+          { orgId: ORG, email: 'twice@example.com', role: 'manager', invitedBy: OWNER, createdAt: now - 1000 },
+        ])
+        kc.calls = []
+        await acceptInvitations(db.db, kc, { id: NEW, email: 'twice@example.com', emailVerified: true })
+        expect(kc.calls).toEqual([`addMember ${ORG} ${NEW}`, `setRole ${ORG} ${NEW} manager`])
+        expect(await db.db.select().from(schema.kcOrgMember).where(eq(schema.kcOrgMember.userId, NEW))).toMatchObject([{ role: 'manager' }])
+      } finally {
+        await db.db.delete(schema.orgInvitation)
+        await db.db.execute(sql`CREATE UNIQUE INDEX org_invitation_pending ON org_invitation (org_id, email) WHERE accepted_at IS NULL`)
+      }
     })
   })
 
